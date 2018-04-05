@@ -1,0 +1,1 @@
+/Users/adna/Desktop/PPIS/up-signal/tmp/broccoli_merge_trees-input_base_path-9XwxA8PE.tmp/0/modules/ember-data/model.js

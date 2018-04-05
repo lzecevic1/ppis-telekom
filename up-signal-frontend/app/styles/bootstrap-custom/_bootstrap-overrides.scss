@@ -1,0 +1,12 @@
+.navbar {
+  margin-bottom: 0px !important;
+}
+
+.navbar-default {
+    background-color: white !important;
+}
+
+.navbar-default .navbar-nav > li > a {
+  color: $nav-text-color;
+  font-weight: 500;
+}

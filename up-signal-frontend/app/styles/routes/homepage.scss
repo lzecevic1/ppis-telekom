@@ -1,0 +1,35 @@
+#wrapper, img{
+  width:100%;
+  height: 100%;
+}
+
+.home-row-one{
+  background-color: $dark-blue-color;
+  height:450px;
+  color: $gray-text-color;
+  text-align: center;
+  padding: 50px;
+
+}
+
+.home-row-two {
+  background-color: $middle-blue-color;
+  height:450px;
+  color:$gray-text-color;
+  text-align: center;
+  padding: 50px;
+}
+
+.home-row-image{
+  height: 50px;
+  width: auto;
+  opacity: 0.8;
+}
+
+.home-row-three {
+  background-color: $light-blue-color;
+  height:450px;
+  color:$gray-text-color;
+  text-align: center;
+  padding: 50px;
+}
