@@ -1,13 +1,12 @@
-package model;
+package ba.unsa.etf.ppis.telekom.models;
 
-import javax.persistence.Entity;
-import javax.persistence.GeneratedValue;
-import javax.persistence.GenerationType;
-import javax.persistence.Id;
+import javax.persistence.*;
 import java.math.BigDecimal;
+import java.util.Collection;
 
 @Entity
 public class Package {
+
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
@@ -15,6 +14,14 @@ public class Package {
     private String name;
     private String description;
     private BigDecimal price;
+
+    @ManyToMany(cascade = CascadeType.ALL)
+    @JoinTable(
+            name = "package_service",
+            joinColumns = @JoinColumn(name = "package_id"),
+            inverseJoinColumns = @JoinColumn(name = "service_id")
+    )
+    private Collection<Service> services;
 
     public Package() {
     }
@@ -55,6 +62,14 @@ public class Package {
 
     public void setPrice(BigDecimal price) {
         this.price = price;
+    }
+
+    public Collection<Service> getServices() {
+        return services;
+    }
+
+    public void setServices(Collection<Service> services) {
+        this.services = services;
     }
 
     @Override

@@ -1,9 +1,7 @@
-package model;
+package ba.unsa.etf.ppis.telekom.models;
 
-import javax.persistence.Entity;
-import javax.persistence.GeneratedValue;
-import javax.persistence.GenerationType;
-import javax.persistence.Id;
+import javax.persistence.*;
+import java.util.Collection;
 
 @Entity
 public class Role {
@@ -13,8 +11,10 @@ public class Role {
 
     private String name;
 
-    public Role() {
-    }
+    @OneToMany(mappedBy = "role")
+    private Collection<User> users;
+
+    public Role() { }
 
     public Role(String name) {
         this.name = name;
@@ -34,6 +34,14 @@ public class Role {
 
     public void setName(String name) {
         this.name = name;
+    }
+
+    public Collection<User> getUsers() {
+        return users;
+    }
+
+    public void setUsers(Collection<User> users) {
+        this.users = users;
     }
 
     @Override
