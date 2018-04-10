@@ -45,6 +45,16 @@ define('up-signal/tests/app.lint-test', [], function () {
     assert.ok(true, 'routes/login.js should pass ESLint\n\n');
   });
 
+  QUnit.test('routes/new-service.js', function (assert) {
+    assert.expect(1);
+    assert.ok(true, 'routes/new-service.js should pass ESLint\n\n');
+  });
+
+  QUnit.test('routes/new-supplier.js', function (assert) {
+    assert.expect(1);
+    assert.ok(true, 'routes/new-supplier.js should pass ESLint\n\n');
+  });
+
   QUnit.test('routes/packages.js', function (assert) {
     assert.expect(1);
     assert.ok(true, 'routes/packages.js should pass ESLint\n\n');
@@ -224,6 +234,16 @@ define('up-signal/tests/tests.lint-test', [], function () {
     assert.ok(true, 'unit/routes/login-test.js should pass ESLint\n\n');
   });
 
+  QUnit.test('unit/routes/new-service-test.js', function (assert) {
+    assert.expect(1);
+    assert.ok(true, 'unit/routes/new-service-test.js should pass ESLint\n\n');
+  });
+
+  QUnit.test('unit/routes/new-supplier-test.js', function (assert) {
+    assert.expect(1);
+    assert.ok(true, 'unit/routes/new-supplier-test.js should pass ESLint\n\n');
+  });
+
   QUnit.test('unit/routes/packages-test.js', function (assert) {
     assert.expect(1);
     assert.ok(true, 'unit/routes/packages-test.js should pass ESLint\n\n');
@@ -278,6 +298,32 @@ define('up-signal/tests/unit/routes/login-test', ['ember-qunit'], function (_emb
   'use strict';
 
   (0, _emberQunit.moduleFor)('route:login', 'Unit | Route | login', {
+    // Specify the other units that are required for this test.
+    // needs: ['controller:foo']
+  });
+
+  (0, _emberQunit.test)('it exists', function (assert) {
+    var route = this.subject();
+    assert.ok(route);
+  });
+});
+define('up-signal/tests/unit/routes/new-service-test', ['ember-qunit'], function (_emberQunit) {
+  'use strict';
+
+  (0, _emberQunit.moduleFor)('route:new-service', 'Unit | Route | new service', {
+    // Specify the other units that are required for this test.
+    // needs: ['controller:foo']
+  });
+
+  (0, _emberQunit.test)('it exists', function (assert) {
+    var route = this.subject();
+    assert.ok(route);
+  });
+});
+define('up-signal/tests/unit/routes/new-supplier-test', ['ember-qunit'], function (_emberQunit) {
+  'use strict';
+
+  (0, _emberQunit.moduleFor)('route:new-supplier', 'Unit | Route | new supplier', {
     // Specify the other units that are required for this test.
     // needs: ['controller:foo']
   });

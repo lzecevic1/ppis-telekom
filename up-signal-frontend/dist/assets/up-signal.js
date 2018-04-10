@@ -275,8 +275,10 @@ define('up-signal/router', ['exports', 'up-signal/config/environment'], function
     this.route('homepage');
     this.route('login');
     this.route('about-us');
-    this.route('services');
+    this.route('services', function () {});
     this.route('packages');
+    this.route('new-service');
+    this.route('new-supplier');
   });
 
   exports.default = Router;
@@ -298,6 +300,22 @@ define('up-signal/routes/homepage', ['exports'], function (exports) {
   exports.default = Ember.Route.extend({});
 });
 define('up-signal/routes/login', ['exports'], function (exports) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = Ember.Route.extend({});
+});
+define('up-signal/routes/new-service', ['exports'], function (exports) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = Ember.Route.extend({});
+});
+define('up-signal/routes/new-supplier', ['exports'], function (exports) {
   'use strict';
 
   Object.defineProperty(exports, "__esModule", {
@@ -374,6 +392,22 @@ define("up-signal/templates/login", ["exports"], function (exports) {
   });
   exports.default = Ember.HTMLBars.template({ "id": "Og+Ibcl4", "block": "{\"statements\":[[0,\" \"],[11,\"div\",[]],[15,\"id\",\"fullBg\"],[13],[14],[0,\"\\n\\n\"],[11,\"div\",[]],[15,\"class\",\"container\"],[13],[0,\"\\n  \"],[11,\"form\",[]],[15,\"class\",\"form-signin\"],[13],[0,\"\\n      \"],[11,\"input\",[]],[15,\"type\",\"text\"],[15,\"class\",\"form-control\"],[15,\"name\",\"username\"],[15,\"placeholder\",\"korisničko ime\"],[15,\"required\",\"\"],[15,\"autofocus\",\"\"],[13],[14],[0,\"\\n      \"],[11,\"input\",[]],[15,\"type\",\"password\"],[15,\"class\",\"form-control\"],[15,\"name\",\"password\"],[15,\"placeholder\",\"šifra\"],[15,\"required\",\"\"],[13],[14],[0,\"\\n      \"],[11,\"button\",[]],[15,\"class\",\"btn btn-lg btn-primary btn-block\"],[15,\"type\",\"submit\"],[13],[0,\"PRIJAVA\"],[14],[0,\"\\n      \"],[11,\"br\",[]],[13],[14],[11,\"p\",[]],[15,\"class\",\"text-center sign-up\"],[13],[11,\"strong\",[]],[13],[0,\"Registrujte\"],[14],[0,\" se za novi korisnički račun\"],[14],[0,\"\\n    \"],[14],[0,\"\\n\"],[14]],\"locals\":[],\"named\":[],\"yields\":[],\"hasPartials\":false}", "meta": { "moduleName": "up-signal/templates/login.hbs" } });
 });
+define("up-signal/templates/new-service", ["exports"], function (exports) {
+  "use strict";
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = Ember.HTMLBars.template({ "id": "DbeCqyXk", "block": "{\"statements\":[[11,\"div\",[]],[15,\"class\",\"container new-service-body\"],[13],[0,\"\\n \"],[11,\"div\",[]],[15,\"class\",\"panel panel-default\"],[13],[0,\"\\n   \"],[11,\"div\",[]],[15,\"class\",\"panel-body\"],[13],[0,\"\\n    \"],[11,\"h4\",[]],[13],[0,\"Unesite podatke o novoj uslugi:\"],[14],[0,\"\\n    \"],[14],[0,\"\\n    \"],[11,\"div\",[]],[15,\"class\",\"panel-body register-form__footer\"],[13],[0,\"\\n    \"],[11,\"form\",[]],[13],[0,\"\\n  \"],[11,\"div\",[]],[15,\"class\",\"form-group\"],[13],[0,\"\\n    \"],[11,\"label\",[]],[15,\"for\",\"exampleFormControlInput1\"],[13],[0,\"Naziv usluge:\"],[14],[0,\"\\n    \"],[11,\"input\",[]],[15,\"class\",\"form-control\"],[13],[14],[0,\"\\n  \"],[14],[0,\"\\n    \"],[11,\"div\",[]],[15,\"class\",\"form-group\"],[13],[0,\"\\n    \"],[11,\"label\",[]],[15,\"for\",\"exampleFormControlInput1\"],[13],[0,\"Cijena usluge:\"],[14],[0,\"\\n    \"],[11,\"input\",[]],[15,\"class\",\"form-control\"],[13],[14],[0,\"\\n  \"],[14],[0,\"\\n\\n  \"],[11,\"div\",[]],[15,\"class\",\"form-group\"],[13],[0,\"\\n    \"],[11,\"label\",[]],[15,\"for\",\"exampleFormControlSelect1\"],[13],[0,\"Tip usluge:\"],[14],[0,\"\\n    \"],[11,\"select\",[]],[15,\"class\",\"form-control\"],[15,\"id\",\"exampleFormControlSelect1\"],[13],[0,\"\\n      \"],[11,\"option\",[]],[13],[0,\"Tip 1\"],[14],[0,\"\\n      \"],[11,\"option\",[]],[13],[0,\"Tip 2\"],[14],[0,\"\\n      \"],[11,\"option\",[]],[13],[0,\"Tip 3\"],[14],[0,\"\\n      \"],[11,\"option\",[]],[13],[0,\"Tip 4\"],[14],[0,\"\\n      \"],[11,\"option\",[]],[13],[0,\"Tip 5\"],[14],[0,\"\\n    \"],[14],[0,\"\\n  \"],[14],[0,\"\\n  \"],[11,\"div\",[]],[15,\"class\",\"form-group\"],[13],[0,\"\\n    \"],[11,\"label\",[]],[15,\"for\",\"exampleFormControlTextarea1\"],[13],[0,\"Opis usluge\"],[14],[0,\"\\n    \"],[11,\"textarea\",[]],[15,\"class\",\"form-control\"],[15,\"id\",\"exampleFormControlTextarea1\"],[15,\"rows\",\"3\"],[13],[14],[0,\"\\n  \"],[14],[0,\"\\n  \"],[11,\"button\",[]],[15,\"class\",\"btn btn-lg btn-primary col-md-2\"],[15,\"type\",\"submit\"],[13],[0,\"UNOS\"],[14],[0,\"\\n\"],[14],[0,\"\\n\"],[14],[0,\"\\n\"],[14],[0,\"\\n\"],[14]],\"locals\":[],\"named\":[],\"yields\":[],\"hasPartials\":false}", "meta": { "moduleName": "up-signal/templates/new-service.hbs" } });
+});
+define("up-signal/templates/new-supplier", ["exports"], function (exports) {
+  "use strict";
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = Ember.HTMLBars.template({ "id": "iJtoJxsL", "block": "{\"statements\":[[11,\"div\",[]],[15,\"class\",\"container new-service-body\"],[13],[0,\"\\n \"],[11,\"div\",[]],[15,\"class\",\"panel panel-default\"],[13],[0,\"\\n   \"],[11,\"div\",[]],[15,\"class\",\"panel-body\"],[13],[0,\"\\n    \"],[11,\"h4\",[]],[13],[0,\"Unesite podatke o novom dobavljaču:\"],[14],[0,\"\\n    \"],[14],[0,\"\\n    \"],[11,\"div\",[]],[15,\"class\",\"panel-body register-form__footer\"],[13],[0,\"\\n    \"],[11,\"form\",[]],[13],[0,\"\\n  \"],[11,\"div\",[]],[15,\"class\",\"form-group\"],[13],[0,\"\\n    \"],[11,\"label\",[]],[15,\"for\",\"exampleFormControlInput1\"],[13],[0,\"Naziv dobavljača:\"],[14],[0,\"\\n    \"],[11,\"input\",[]],[15,\"class\",\"form-control\"],[13],[14],[0,\"\\n  \"],[14],[0,\"\\n    \"],[11,\"div\",[]],[15,\"class\",\"form-group\"],[13],[0,\"\\n    \"],[11,\"label\",[]],[15,\"for\",\"exampleFormControlInput1\"],[13],[0,\"Adresa dobavljača:\"],[14],[0,\"\\n    \"],[11,\"input\",[]],[15,\"class\",\"form-control\"],[13],[14],[0,\"\\n  \"],[14],[0,\"\\n\\n  \"],[11,\"div\",[]],[15,\"class\",\"form-group\"],[13],[0,\"\\n    \"],[11,\"label\",[]],[15,\"for\",\"exampleFormControlSelect1\"],[13],[0,\"Kategorija:\"],[14],[0,\"\\n    \"],[11,\"select\",[]],[15,\"class\",\"form-control\"],[15,\"id\",\"exampleFormControlSelect1\"],[13],[0,\"\\n      \"],[11,\"option\",[]],[13],[0,\"Kategorija 1\"],[14],[0,\"\\n      \"],[11,\"option\",[]],[13],[0,\"Kategorija 2\"],[14],[0,\"\\n      \"],[11,\"option\",[]],[13],[0,\"Kategorija 3\"],[14],[0,\"\\n      \"],[11,\"option\",[]],[13],[0,\"Kategorija 4\"],[14],[0,\"\\n      \"],[11,\"option\",[]],[13],[0,\"Kategorija 5\"],[14],[0,\"\\n    \"],[14],[0,\"\\n  \"],[14],[0,\"\\n  \"],[11,\"div\",[]],[15,\"class\",\"form-group\"],[13],[0,\"\\n    \"],[11,\"label\",[]],[15,\"for\",\"exampleFormControlTextarea1\"],[13],[0,\"Dodatne informacije\"],[14],[0,\"\\n    \"],[11,\"textarea\",[]],[15,\"class\",\"form-control\"],[15,\"id\",\"exampleFormControlTextarea1\"],[15,\"rows\",\"3\"],[13],[14],[0,\"\\n  \"],[14],[0,\"\\n  \"],[11,\"button\",[]],[15,\"class\",\"btn btn-lg btn-primary col-md-2\"],[15,\"type\",\"submit\"],[13],[0,\"UNOS\"],[14],[0,\"\\n\"],[14],[0,\"\\n\"],[14],[0,\"\\n\"],[14],[0,\"\\n\"],[14]],\"locals\":[],\"named\":[],\"yields\":[],\"hasPartials\":false}", "meta": { "moduleName": "up-signal/templates/new-supplier.hbs" } });
+});
 define("up-signal/templates/packages", ["exports"], function (exports) {
   "use strict";
 
@@ -388,7 +422,7 @@ define("up-signal/templates/services", ["exports"], function (exports) {
   Object.defineProperty(exports, "__esModule", {
     value: true
   });
-  exports.default = Ember.HTMLBars.template({ "id": "3ok85IZu", "block": "{\"statements\":[[1,[26,[\"outlet\"]],false],[0,\"\\n\"]],\"locals\":[],\"named\":[],\"yields\":[],\"hasPartials\":false}", "meta": { "moduleName": "up-signal/templates/services.hbs" } });
+  exports.default = Ember.HTMLBars.template({ "id": "/N0Os12S", "block": "{\"statements\":[[11,\"div\",[]],[15,\"class\",\"body-grey\"],[13],[0,\"\\n  \"],[11,\"div\",[]],[15,\"class\",\"services-head\"],[13],[0,\"\\n    \"],[11,\"p\",[]],[13],[0,\"Usluge:\"],[14],[0,\"\\n  \"],[14],[0,\"\\n  \"],[11,\"div\",[]],[15,\"class\",\"service-row-one col-md-4\"],[13],[0,\"\\n    \"],[11,\"h4\",[]],[13],[0,\" USLUGA 1 \"],[14],[0,\"\\n    \"],[11,\"img\",[]],[15,\"class\",\"service-row-image\"],[15,\"src\",\"/assets/images/usluga.png\"],[13],[14],[11,\"br\",[]],[13],[14],[0,\"\\n    \"],[11,\"p\",[]],[13],[0,\"15/2 MB/S\"],[11,\"br\",[]],[13],[14],[0,\"1GB MAILBOX PROSTORA\"],[11,\"br\",[]],[13],[14],[0,\" 1200MB WEB HOSTING\"],[14],[0,\"\\n  \"],[14],[0,\"\\n  \"],[11,\"div\",[]],[15,\"class\",\"service-row-two col-md-4\"],[13],[0,\"\\n    \"],[11,\"h4\",[]],[13],[0,\" USLUGA 2 \"],[14],[0,\"\\n    \"],[11,\"img\",[]],[15,\"class\",\"service-row-image\"],[15,\"src\",\"/assets/images/usluga.png\"],[13],[14],[11,\"br\",[]],[13],[14],[0,\"\\n    \"],[11,\"p\",[]],[13],[0,\"18/2 MB/S\"],[11,\"br\",[]],[13],[14],[0,\"1GB MAILBOX PROSTORA\"],[11,\"br\",[]],[13],[14],[0,\" 1200MB WEB HOSTING\"],[14],[0,\"\\n  \"],[14],[0,\"\\n     \"],[11,\"div\",[]],[15,\"class\",\"service-row-three col-md-4\"],[13],[0,\"\\n    \"],[11,\"h4\",[]],[13],[0,\" USLUGA 3 \"],[14],[0,\"\\n    \"],[11,\"img\",[]],[15,\"class\",\"service-row-image\"],[15,\"src\",\"/assets/images/usluga.png\"],[13],[14],[11,\"br\",[]],[13],[14],[0,\"\\n    \"],[11,\"p\",[]],[13],[0,\"20/2 MB/S\"],[11,\"br\",[]],[13],[14],[0,\"2GB MAILBOX PROSTORA\"],[11,\"br\",[]],[13],[14],[0,\" 1200MB WEB HOSTING\"],[14],[0,\"\\n  \"],[14],[0,\"\\n  \"],[11,\"div\",[]],[15,\"class\",\"services-head col-md-12\"],[13],[0,\"\\n    \"],[11,\"p\",[]],[13],[0,\"Dobavljači:\"],[14],[0,\"\\n  \"],[14],[0,\"\\n  \"],[11,\"div\",[]],[15,\"class\",\"supplier-row-one col-md-4\"],[13],[0,\"\\n    \"],[11,\"img\",[]],[15,\"class\",\"service-row-image\"],[15,\"src\",\"/assets/images/supplier.png\"],[13],[14],[11,\"br\",[]],[13],[14],[0,\"\\n    \"],[11,\"h4\",[]],[13],[0,\" LOGOSOFT \"],[14],[0,\"\\n  \"],[14],[0,\"\\n  \"],[11,\"div\",[]],[15,\"class\",\"supplier-row-two col-md-4\"],[13],[0,\"\\n    \"],[11,\"img\",[]],[15,\"class\",\"service-row-image\"],[15,\"src\",\"/assets/images/supplier.png\"],[13],[14],[11,\"br\",[]],[13],[14],[0,\"\\n    \"],[11,\"h4\",[]],[13],[0,\" UNIVERZALNO \"],[14],[0,\"\\n      \"],[14],[0,\"\\n     \"],[11,\"div\",[]],[15,\"class\",\"supplier-row-three col-md-4\"],[13],[0,\"\\n      \"],[11,\"img\",[]],[15,\"class\",\"service-row-image\"],[15,\"src\",\"/assets/images/supplier.png\"],[13],[14],[11,\"br\",[]],[13],[14],[0,\"\\n    \"],[11,\"h4\",[]],[13],[0,\" TELEMACH \"],[14],[0,\"\\n  \"],[14],[0,\"\\n\\n  \"],[11,\"div\",[]],[15,\"class\",\"col-md-12 button-services\"],[13],[0,\"\\n    \"],[6,[\"link-to\"],[\"new-service\"],null,{\"statements\":[[11,\"button\",[]],[15,\"class\",\"btn btn-lg btn-primary col-md-5\"],[13],[0,\"NOVA USLUGA\"],[14]],\"locals\":[]},null],[0,\"\\n    \"],[6,[\"link-to\"],[\"new-supplier\"],null,{\"statements\":[[11,\"button\",[]],[15,\"class\",\"btn btn-lg btn-primary col-md-5 pull-right\"],[13],[0,\"NOVI DOBAVLJAČ\"],[14]],\"locals\":[]},null],[0,\"\\n  \"],[14],[0,\"\\n\"],[14]],\"locals\":[],\"named\":[],\"yields\":[],\"hasPartials\":false}", "meta": { "moduleName": "up-signal/templates/services.hbs" } });
 });
 
 
@@ -412,6 +446,6 @@ catch(err) {
 });
 
 if (!runningTests) {
-  require("up-signal/app")["default"].create({"name":"up-signal","version":"0.0.0+8b326ebe"});
+  require("up-signal/app")["default"].create({"name":"up-signal","version":"0.0.0+4730b531"});
 }
 //# sourceMappingURL=up-signal.map

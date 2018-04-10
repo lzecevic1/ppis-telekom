@@ -1,0 +1,85 @@
+.body-grey {
+  background-color:$gray-background-color;
+}
+
+.services-head {
+  height: 100px;
+  background-color:$gray-background-color;
+  font-size: 25px;
+  color: $dark-blue-color;
+  text-align: center;
+  text-transform: uppercase;
+  padding-top: 50px;
+}
+
+.service-row-one{
+  background-color: $dark-blue-color;
+  height:300px;
+  color: $gray-text-color;
+  text-align: center;
+  padding: 50px;
+  padding-top: 20px;
+
+}
+
+.service-row-two {
+  background-color: $middle-blue-color;
+  height:300px;
+  color:$gray-text-color;
+  text-align: center;
+  padding: 50px;
+  padding-top: 20px;
+}
+
+.service-row-image{
+  height: 150px;
+  width: auto;
+  opacity: 0.8;
+}
+
+.service-row-three {
+  background-color: $light-blue-color;
+  height:300px;
+  color:$gray-text-color;
+  text-align: center;
+  padding: 50px;
+  padding-top: 20px;
+
+}
+
+.button-services {
+  height: 80px;
+  background-color:$gray-background-color;
+  padding-top: 20px;
+
+}
+
+
+.supplier-row-one{
+  background-color: #FAFAFA;
+  height:300px;
+  color: $dark-blue-color;
+  text-align: center;
+  padding: 50px;
+
+}
+
+.supplier-row-two {
+  background-color: #F2F2F2;
+  height:300px;
+  color:$dark-blue-color;
+  text-align: center;
+  padding: 50px;
+}
+
+.supplier-row-three {
+  background-color: #D8D8D8;
+  height:300px;
+  color:$dark-blue-color;
+  text-align: center;
+  padding: 50px;
+}
+
+.new-service-body {
+  margin-top: 50px;
+}

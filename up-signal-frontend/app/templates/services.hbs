@@ -1,1 +1,40 @@
-{{outlet}}
+<div class="body-grey">
+  <div class="services-head">
+    <p>Usluge:</p>
+  </div>
+  <div class="service-row-one col-md-4">
+    <h4> USLUGA 1 </h4>
+    <img class='service-row-image' src="/assets/images/usluga.png"><br>
+    <p>15/2 MB/S<br>1GB MAILBOX PROSTORA<br> 1200MB WEB HOSTING</p>
+  </div>
+  <div class="service-row-two col-md-4">
+    <h4> USLUGA 2 </h4>
+    <img class='service-row-image' src="/assets/images/usluga.png"><br>
+    <p>18/2 MB/S<br>1GB MAILBOX PROSTORA<br> 1200MB WEB HOSTING</p>
+  </div>
+     <div class="service-row-three col-md-4">
+    <h4> USLUGA 3 </h4>
+    <img class='service-row-image' src="/assets/images/usluga.png"><br>
+    <p>20/2 MB/S<br>2GB MAILBOX PROSTORA<br> 1200MB WEB HOSTING</p>
+  </div>
+  <div class="services-head col-md-12">
+    <p>Dobavljači:</p>
+  </div>
+  <div class="supplier-row-one col-md-4">
+    <img class='service-row-image' src="/assets/images/supplier.png"><br>
+    <h4> LOGOSOFT </h4>
+  </div>
+  <div class="supplier-row-two col-md-4">
+    <img class='service-row-image' src="/assets/images/supplier.png"><br>
+    <h4> UNIVERZALNO </h4>
+      </div>
+     <div class="supplier-row-three col-md-4">
+      <img class='service-row-image' src="/assets/images/supplier.png"><br>
+    <h4> TELEMACH </h4>
+  </div>
+
+  <div class="col-md-12 button-services">
+    {{#link-to 'new-service'}}<button class="btn btn-lg btn-primary col-md-5">NOVA USLUGA</button>{{/link-to}}
+    {{#link-to 'new-supplier'}}<button class="btn btn-lg btn-primary col-md-5 pull-right">NOVI DOBAVLJAČ</button>{{/link-to}}
+  </div>
+</div>
