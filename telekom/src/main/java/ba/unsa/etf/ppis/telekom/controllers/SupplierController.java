@@ -5,8 +5,8 @@ import ba.unsa.etf.ppis.telekom.services.SupplierService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 
-@RequestMapping("/supplier")
-public class SupplierController {
+@RestController
+public class SupplierController extends BaseController<Supplier, SupplierService>  {
     @Autowired
     private SupplierService supplierService;
 

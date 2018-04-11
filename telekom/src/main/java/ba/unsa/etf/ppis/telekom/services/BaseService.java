@@ -31,6 +31,8 @@ public abstract class BaseService<M, R extends JpaRepository<M, Long>> {
         repository.delete(m);
     }
 
+    public void deleteById(Long id) { repository.deleteById(id) ;}
+
     public void deleteAll() {
         repository.deleteAll();
     }

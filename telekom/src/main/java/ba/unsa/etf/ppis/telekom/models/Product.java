@@ -25,6 +25,7 @@ public class Product {
     @JoinColumn(name = "service_id")
     private Service service;
 
+    @JsonIgnore
     @ManyToMany(
             mappedBy = "products"
     )

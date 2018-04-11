@@ -1,5 +1,7 @@
 package ba.unsa.etf.ppis.telekom.models;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
+
 import javax.persistence.*;
 import java.math.BigDecimal;
 import java.util.Collection;
@@ -22,6 +24,7 @@ public class Service {
     private Integer numCancelledContracts;
     private Integer numActiveContracts;
 
+    @JsonIgnore
     @ManyToMany(
             mappedBy = "services",
             targetEntity = Package.class
