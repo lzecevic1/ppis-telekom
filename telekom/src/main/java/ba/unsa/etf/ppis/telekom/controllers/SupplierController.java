@@ -12,7 +12,7 @@ public class SupplierController {
 
     @PostMapping("/new")
     public void createSupplier(@RequestBody Supplier supplier) {
-        supplierService.createSupplier(supplier);
+        supplierService.saveSupplier(supplier);
     }
 
     @RequestMapping(value = "/remove/{id}", method = RequestMethod.DELETE)
@@ -21,5 +21,28 @@ public class SupplierController {
         if(supplier != null) {
             supplierService.delete(supplier);
         }
+    }
+
+    @RequestMapping(value = "/update", method = RequestMethod.POST)
+    public void updateSupplier(@RequestBody Supplier supplier) {
+        Supplier supplierForUpdate = supplierService.findById(supplier.getId());
+        if(supplierForUpdate != null) {
+            updateSupplier(supplier, supplierForUpdate);
+            supplierService.saveSupplier(supplierForUpdate);
+        }
+    }
+
+    @GetMapping(value = "/find/{id}")
+    public Supplier getSupplierById(@PathVariable("id") Long id) {
+        return supplierService.findById(id);
+    }
+
+    private void updateSupplier(@RequestBody Supplier supplier, Supplier supplierForUpdate) {
+        supplierForUpdate.setAddress(supplier.getAddress());
+        supplierForUpdate.setCategory(supplier.getCategory());
+        supplierForUpdate.setContracts(supplier.getContracts());
+        supplierForUpdate.setName(supplier.getName());
+        supplierForUpdate.setRatings(supplier.getRatings());
+        supplierForUpdate.setStatus(supplier.getStatus());
     }
 }

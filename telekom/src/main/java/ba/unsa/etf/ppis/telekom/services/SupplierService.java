@@ -6,7 +6,7 @@ import ba.unsa.etf.ppis.telekom.repositories.SupplierRepository;
 import java.util.Optional;
 
 public class SupplierService extends BaseService<Supplier, SupplierRepository> {
-    public void createSupplier(Supplier supplier) {
+    public void saveSupplier(Supplier supplier) {
         repository.save(supplier);
     }
 
