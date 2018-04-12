@@ -1,5 +1,7 @@
 package ba.unsa.etf.ppis.telekom.models;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
+
 import javax.persistence.*;
 import java.util.Collection;
 import java.util.Set;
@@ -23,6 +25,7 @@ public class Supplier {
     @OneToMany(mappedBy = "supplier")
     private Collection<Rating> ratings;
 
+    @JsonIgnore
     @OneToMany(mappedBy = "supplier")
     private Collection<Contract> contracts;
 
@@ -34,10 +37,6 @@ public class Supplier {
 
     public void setId(Long id) {
         this.id = id;
-    }
-
-    public void setRatings(Set<Rating> ratings) {
-        this.ratings = ratings;
     }
 
     public String getName() {

@@ -1,40 +1,23 @@
 package ba.unsa.etf.ppis.telekom.controllers;
 
+import ba.unsa.etf.ppis.telekom.models.Rating;
 import ba.unsa.etf.ppis.telekom.models.Supplier;
 import ba.unsa.etf.ppis.telekom.services.SupplierService;
-import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+
+import javax.validation.Valid;
+import java.util.Optional;
 
 @RestController
 public class SupplierController extends BaseController<Supplier, SupplierService>  {
-    @Autowired
-    private SupplierService supplierService;
 
-    @PostMapping("/new")
-    public void createSupplier(@RequestBody Supplier supplier) {
-        supplierService.saveSupplier(supplier);
-    }
-
-    @RequestMapping(value = "/remove/{id}", method = RequestMethod.DELETE)
-    public void deleteSupplier(@PathVariable("id") Long id) {
-        Supplier supplier = supplierService.findById(id);
-        if(supplier != null) {
-            supplierService.delete(supplier);
+    public void update(@RequestBody Supplier supplier) {
+        Optional<Supplier> supplierForUpdate = service.getById(supplier.getId());
+        if(supplierForUpdate.isPresent()) {
+            updateSupplier(supplier, supplierForUpdate.get());
+            service.save(supplierForUpdate.get());
         }
-    }
-
-    @RequestMapping(value = "/update", method = RequestMethod.POST)
-    public void updateSupplier(@RequestBody Supplier supplier) {
-        Supplier supplierForUpdate = supplierService.findById(supplier.getId());
-        if(supplierForUpdate != null) {
-            updateSupplier(supplier, supplierForUpdate);
-            supplierService.saveSupplier(supplierForUpdate);
-        }
-    }
-
-    @GetMapping(value = "/find/{id}")
-    public Supplier getSupplierById(@PathVariable("id") Long id) {
-        return supplierService.findById(id);
     }
 
     private void updateSupplier(@RequestBody Supplier supplier, Supplier supplierForUpdate) {
@@ -44,5 +27,10 @@ public class SupplierController extends BaseController<Supplier, SupplierService
         supplierForUpdate.setName(supplier.getName());
         supplierForUpdate.setRatings(supplier.getRatings());
         supplierForUpdate.setStatus(supplier.getStatus());
+    }
+
+    public ResponseEntity addRating(@PathVariable Long id, @RequestBody @Valid Rating rating) {
+        service.addRatingForSupplier(rating, id);
+        return ResponseEntity.ok().build();
     }
 }

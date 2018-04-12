@@ -3,6 +3,7 @@ package ba.unsa.etf.ppis.telekom.models;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 
 import javax.persistence.*;
+import javax.validation.constraints.NotNull;
 import java.util.Date;
 
 @Entity
@@ -13,10 +14,12 @@ public class Rating {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
+    @NotNull
     private RatingType ratingType;
+    @NotNull
     private Float rating;
     private String description;
-    private Date ratingTimestamp;
+    private Date ratingTimestamp = new Date();
 
     @JsonIgnore
     @ManyToOne
@@ -25,10 +28,9 @@ public class Rating {
 
     public Rating() { }
 
-    public Rating(RatingType ratingType, String description, Date ratingTimestamp, Supplier supplier) {
+    public Rating(RatingType ratingType, String description, Supplier supplier) {
         this.ratingType = ratingType;
         this.description = description;
-        this.ratingTimestamp = ratingTimestamp;
         this.supplier = supplier;
     }
 

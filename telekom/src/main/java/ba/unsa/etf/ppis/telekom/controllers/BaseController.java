@@ -37,7 +37,14 @@ public abstract class BaseController<M, S extends BaseService<M, ? >> {
 
     @Transactional
     public ResponseEntity delete(@PathVariable("id") Long id) {
-        service.deleteById(id);
+        if (!service.exists(id)) {
+            return ResponseEntity.notFound().build();
+        }
+        try {
+            service.deleteById(id);
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().build();
+        }
         return ResponseEntity.ok().build();
     }
 
