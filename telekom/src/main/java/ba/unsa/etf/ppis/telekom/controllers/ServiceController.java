@@ -16,25 +16,31 @@ import java.util.Optional;
 @RestController
 public class ServiceController extends BaseController<Service, ServiceForTelekomService> {
 
-    public Collection<Service> getAll() {
+    public Collection<Service> all() {
         return service.getAll();
     }
 
-    public Optional<Service> getServiceById(@PathVariable("id") Long id) {
-        return service.getById(id);
+    public ResponseEntity get(@PathVariable("id") Long id) {
+        Optional<Service> s = service.getById(id);
+        if (!s.isPresent())
+            return ResponseEntity.notFound().build();
+        else
+            return ResponseEntity.ok(s);
     }
 
-    public ResponseEntity createService(@RequestBody @Valid ServiceDTO serviceDTO) {
+    public ResponseEntity create(@RequestBody @Valid ServiceDTO serviceDTO) {
         Service createdService = service.createService(serviceDTO);
+        if (createdService == null)
+            return ResponseEntity.badRequest().build();
         return ResponseEntity.ok(createdService);
     }
 
-    public ResponseEntity updateService(@PathVariable("id") Long id, @RequestBody @Valid ServiceUpdateDTO serviceUpdateDTO) {
+    public ResponseEntity update(@PathVariable("id") Long id, @RequestBody @Valid ServiceUpdateDTO serviceUpdateDTO) {
         service.updateService(id, serviceUpdateDTO);
         return ResponseEntity.ok().build();
     }
 
-    public ResponseEntity deleteService(@PathVariable("id") Long id) {
+    public ResponseEntity delete(@PathVariable("id") Long id) {
         service.deleteById(id);
         return ResponseEntity.ok().build();
     }
