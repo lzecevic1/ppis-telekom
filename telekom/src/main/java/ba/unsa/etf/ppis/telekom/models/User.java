@@ -5,12 +5,15 @@ import javax.persistence.*;
 @Entity
 public class User {
 
+
+
     public enum Gender{MALE, FEMALE, OTHER}
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
     private String username;
+    private String password;
     private String email;
     private String phoneNumber;
     private Gender gender;
@@ -21,8 +24,9 @@ public class User {
 
     public User() { }
 
-    public User(String username, String email, String phoneNumber, Gender gender, Role role) {
+    public User(String username, String password, String email, String phoneNumber, Gender gender, Role role) {
         this.username = username;
+        this.password = password;
         this.email = email;
         this.phoneNumber = phoneNumber;
         this.gender = gender;
@@ -80,6 +84,10 @@ public class User {
     public void setGender(Gender gender) {
         this.gender = gender;
     }
+
+    public String getPassword() { return password; }
+
+    public void setPassword(String password) { this.password = password; }
 
     @Override
     public String toString() {
