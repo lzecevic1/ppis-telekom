@@ -27,18 +27,18 @@ public class TelekomService {
 
     @JsonIgnore
     @ManyToMany(
-            mappedBy = "services",
+            mappedBy = "telekomServices",
             targetEntity = Package.class
     )
     private Collection<Package> packages;
 
-    @OneToMany(mappedBy = "service")
+    @OneToMany(mappedBy = "telekomService")
     private Collection<Product> products;
 
-    @OneToMany(mappedBy = "service")
+    @OneToMany(mappedBy = "telekomService")
     private Collection<ServiceUnavailablityPeriod> unavailablityPeriods;
 
-    @OneToMany(mappedBy = "service")
+    @OneToMany(mappedBy = "telekomService")
     private Collection<News> news;
 
     public TelekomService() { }
