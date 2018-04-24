@@ -21,7 +21,7 @@ public class Package {
             joinColumns = @JoinColumn(name = "package_id"),
             inverseJoinColumns = @JoinColumn(name = "service_id")
     )
-    private Collection<Service> services;
+    private Collection<TelekomService> telekomServices;
 
     public Package() {
     }
@@ -64,12 +64,12 @@ public class Package {
         this.price = price;
     }
 
-    public Collection<Service> getServices() {
-        return services;
+    public Collection<TelekomService> getTelekomServices() {
+        return telekomServices;
     }
 
-    public void setServices(Collection<Service> services) {
-        this.services = services;
+    public void setTelekomServices(Collection<TelekomService> telekomServices) {
+        this.telekomServices = telekomServices;
     }
 
     @Override

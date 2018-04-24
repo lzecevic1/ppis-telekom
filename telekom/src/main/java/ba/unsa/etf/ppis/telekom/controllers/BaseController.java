@@ -10,6 +10,7 @@ import org.springframework.web.bind.annotation.*;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Optional;
 
 public abstract class BaseController<M, S extends BaseService<M, ? >> {
     protected S service;
@@ -20,8 +21,11 @@ public abstract class BaseController<M, S extends BaseService<M, ? >> {
     }
 
     @ResponseBody
-    public Collection<M> all() {
-        return service.all();
+    public ResponseEntity<Object> all() {
+        Collection<M> modelInstances = service.all();
+        if (modelInstances.isEmpty())
+            return ResponseEntity.notFound().build();
+        return ResponseEntity.ok(modelInstances);
     }
 
     @Transactional
@@ -32,7 +36,10 @@ public abstract class BaseController<M, S extends BaseService<M, ? >> {
     }
 
     public ResponseEntity get(@PathVariable("id") Long id) {
-        return ResponseEntity.ok(service.getById(id));
+        Optional<M> modelInstance = service.getById(id);
+        if (!modelInstance.isPresent())
+            return ResponseEntity.notFound().build();
+        return ResponseEntity.ok(modelInstance);
     }
 
     @Transactional
