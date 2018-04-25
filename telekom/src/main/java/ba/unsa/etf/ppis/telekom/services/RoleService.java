@@ -6,4 +6,8 @@ import org.springframework.stereotype.Service;
 
 @Service
 public class RoleService extends BaseService<Role, RoleRepository> {
+    public Role find(String name) {
+        return repository.findByName(name);
+    }
+
 }
