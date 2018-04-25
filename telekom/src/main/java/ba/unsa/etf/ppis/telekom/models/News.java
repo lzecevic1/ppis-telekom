@@ -17,16 +17,16 @@ public class News {
 
     @ManyToOne
     @JoinColumn(name = "service_id")
-    private Service service;
+    private TelekomService telekomService;
 
     public News() { }
 
-    public News(String contentText, String imageUrl, String title, Timestamp publishedTimestamp, Service service) {
+    public News(String contentText, String imageUrl, String title, Timestamp publishedTimestamp, TelekomService telekomService) {
         this.contentText = contentText;
         this.imageUrl = imageUrl;
         this.title = title;
         this.publishedTimestamp = publishedTimestamp;
-        this.service = service;
+        this.telekomService = telekomService;
     }
 
     public Long getId() {
@@ -69,12 +69,12 @@ public class News {
         this.publishedTimestamp = publishedTimestamp;
     }
 
-    public Service getService() {
-        return service;
+    public TelekomService getTelekomService() {
+        return telekomService;
     }
 
-    public void setService(Service service) {
-        this.service = service;
+    public void setTelekomService(TelekomService telekomService) {
+        this.telekomService = telekomService;
     }
 
 }

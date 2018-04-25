@@ -23,8 +23,9 @@ public class Product {
     @JsonIgnore
     @ManyToOne
     @JoinColumn(name = "service_id")
-    private Service service;
+    private TelekomService telekomService;
 
+    @JsonIgnore
     @ManyToMany(
             mappedBy = "products"
     )
@@ -32,11 +33,11 @@ public class Product {
 
     public Product() { }
 
-    public Product(String name, BigDecimal price, ProductCategory category, Service service, Collection<Contract> contracts) {
+    public Product(String name, BigDecimal price, ProductCategory category, TelekomService telekomService, Collection<Contract> contracts) {
         this.name = name;
         this.price = price;
         this.category = category;
-        this.service = service;
+        this.telekomService = telekomService;
         this.contracts = contracts;
     }
 
@@ -72,12 +73,12 @@ public class Product {
         this.category = category;
     }
 
-    public Service getService() {
-        return service;
+    public TelekomService getTelekomService() {
+        return telekomService;
     }
 
-    public void setService(Service service) {
-        this.service = service;
+    public void setTelekomService(TelekomService telekomService) {
+        this.telekomService = telekomService;
     }
 
     public Collection<Contract> getContracts() {

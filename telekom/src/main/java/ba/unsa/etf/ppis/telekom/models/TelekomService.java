@@ -1,11 +1,14 @@
 package ba.unsa.etf.ppis.telekom.models;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
+
 import javax.persistence.*;
 import java.math.BigDecimal;
 import java.util.Collection;
 
 @Entity
-public class Service {
+@Table(name = "service")
+public class TelekomService {
 
     public enum ServicePriority{MISSION_CRITICAL, BUSSINESS_CRITICAL, BUSSINESS_OPERATIONAL, ADMINISTRATIVE_SERVICES}
 
@@ -22,25 +25,26 @@ public class Service {
     private Integer numCancelledContracts;
     private Integer numActiveContracts;
 
+    @JsonIgnore
     @ManyToMany(
-            mappedBy = "services",
+            mappedBy = "telekomServices",
             targetEntity = Package.class
     )
     private Collection<Package> packages;
 
-    @OneToMany(mappedBy = "service")
+    @OneToMany(mappedBy = "telekomService")
     private Collection<Product> products;
 
-    @OneToMany(mappedBy = "service")
+    @OneToMany(mappedBy = "telekomService")
     private Collection<ServiceUnavailablityPeriod> unavailablityPeriods;
 
-    @OneToMany(mappedBy = "service")
+    @OneToMany(mappedBy = "telekomService")
     private Collection<News> news;
 
-    public Service() { }
+    public TelekomService() { }
 
-    public Service(String serviceId, String type, String description, BigDecimal price, ServicePriority priority,
-                   String responsiblePerson, Integer numRenewedContracts, Integer numCancelledContracts, Integer numActiveContracts) {
+    public TelekomService(String serviceId, String type, String description, BigDecimal price, ServicePriority priority,
+                          String responsiblePerson, Integer numRenewedContracts, Integer numCancelledContracts, Integer numActiveContracts) {
         this.serviceId = serviceId;
         this.type = type;
         this.description = description;
@@ -166,7 +170,7 @@ public class Service {
 
     @Override
     public String toString() {
-        return "Service{" +
+        return "TelekomService{" +
                 "id=" + id +
                 ", serviceId='" + serviceId + '\'' +
                 ", type='" + type + '\'' +

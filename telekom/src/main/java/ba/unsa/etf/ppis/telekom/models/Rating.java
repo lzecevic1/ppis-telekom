@@ -1,5 +1,7 @@
 package ba.unsa.etf.ppis.telekom.models;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
+
 import javax.persistence.*;
 import java.util.Date;
 
@@ -16,6 +18,7 @@ public class Rating {
     private String description;
     private Date ratingTimestamp;
 
+    @JsonIgnore
     @ManyToOne
     @JoinColumn(name = "supplier_id")
     private Supplier supplier;

@@ -17,17 +17,17 @@ public class ServiceUnavailablityPeriod {
 
     @ManyToOne
     @JoinColumn(name = "service_id")
-    private Service service;
+    private TelekomService telekomService;
 
     public ServiceUnavailablityPeriod() { }
 
     public ServiceUnavailablityPeriod(DayOfWeek startDay, DayOfWeek endDay, Integer startHour, Integer endHour,
-                                      Service service) {
+                                      TelekomService telekomService) {
         this.startDay = startDay;
         this.endDay = endDay;
         this.startHour = startHour;
         this.endHour = endHour;
-        this.service = service;
+        this.telekomService = telekomService;
     }
 
     public Long getId() {
@@ -70,12 +70,12 @@ public class ServiceUnavailablityPeriod {
         this.endHour = endHour;
     }
 
-    public Service getService() {
-        return service;
+    public TelekomService getTelekomService() {
+        return telekomService;
     }
 
-    public void setService(Service service) {
-        this.service = service;
+    public void setTelekomService(TelekomService telekomService) {
+        this.telekomService = telekomService;
     }
 
 }

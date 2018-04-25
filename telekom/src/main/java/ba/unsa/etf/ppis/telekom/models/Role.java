@@ -1,5 +1,7 @@
 package ba.unsa.etf.ppis.telekom.models;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
+
 import javax.persistence.*;
 import java.util.Collection;
 
@@ -11,6 +13,7 @@ public class Role {
 
     private String name;
 
+    @JsonIgnore
     @OneToMany(mappedBy = "role")
     private Collection<User> users;
 
