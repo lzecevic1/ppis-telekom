@@ -2,8 +2,10 @@ package ba.unsa.etf.ppis.telekom;
 
 import ba.unsa.etf.ppis.telekom.filters.JWTAuthenticationFilter;
 import ba.unsa.etf.ppis.telekom.filters.JWTLoginFilter;
+import ba.unsa.etf.ppis.telekom.services.CustomUserDetailsService;
 import ba.unsa.etf.ppis.telekom.services.UserService;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
 import org.springframework.security.config.annotation.authentication.builders.AuthenticationManagerBuilder;
@@ -12,7 +14,13 @@ import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.builders.WebSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.annotation.web.configuration.WebSecurityConfigurerAdapter;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
+import org.springframework.security.crypto.password.DelegatingPasswordEncoder;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
+
+import java.util.HashMap;
+import java.util.Map;
 
 @Configuration
 @EnableWebSecurity
@@ -20,11 +28,17 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
 public class WebSecurityConfig extends WebSecurityConfigurerAdapter {
 
     private final String ROLE_ADMIN = "ADMIN";
-    private final String ROLE_SERVICE_USER = "SERVICE";
+    private final String ROLE_SERVICE_USER = "SERVICER";
     private final String ROLE_SUPPLIER_USER = "SUPPLIER";
 
     @Autowired
-    private UserService userService;
+    private CustomUserDetailsService customUserDetailsService;
+/*
+    @Autowired
+    public BCryptPasswordEncoder bCryptPasswordEncoder() {
+        return new BCryptPasswordEncoder();
+    }
+*/
 
     protected void configure(HttpSecurity http) throws Exception {
         http.csrf().disable().authorizeRequests()
@@ -32,7 +46,7 @@ public class WebSecurityConfig extends WebSecurityConfigurerAdapter {
                 .antMatchers("/").permitAll()
                 .anyRequest().authenticated()
                 .and()
-                .addFilterBefore(new JWTLoginFilter("/lgoin", authenticationManager()), UsernamePasswordAuthenticationFilter.class)
+                .addFilterBefore(new JWTLoginFilter("/login", authenticationManager()), UsernamePasswordAuthenticationFilter.class)
                 .addFilterBefore(new JWTAuthenticationFilter(), UsernamePasswordAuthenticationFilter.class);
     }
 
@@ -44,6 +58,6 @@ public class WebSecurityConfig extends WebSecurityConfigurerAdapter {
 
     @Override
     protected void configure(AuthenticationManagerBuilder auth) throws Exception {
-        auth.userDetailsService(userService);
+        auth.userDetailsService(customUserDetailsService);
     }
 }

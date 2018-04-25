@@ -10,6 +10,9 @@ import org.springframework.security.core.Authentication;
 import org.springframework.security.core.AuthenticationException;
 import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
+import org.springframework.security.crypto.password.DelegatingPasswordEncoder;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.authentication.AbstractAuthenticationProcessingFilter;
 import org.springframework.security.web.util.matcher.AntPathRequestMatcher;
 import org.springframework.web.context.WebApplicationContext;
@@ -21,10 +24,10 @@ import javax.servlet.ServletException;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 import java.io.IOException;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.logging.Logger;
 
 public class JWTLoginFilter extends AbstractAuthenticationProcessingFilter {
@@ -45,7 +48,22 @@ public class JWTLoginFilter extends AbstractAuthenticationProcessingFilter {
         ServletContext servletContext = req.getServletContext();
         WebApplicationContext webApplicationContext = WebApplicationContextUtils.getWebApplicationContext(servletContext);
         userRepository = webApplicationContext.getBean(UserRepository.class);
-        AccountCredentials creds;
+        AccountCredentials creds = new ObjectMapper().readValue(req.getInputStream(), AccountCredentials.class);
+        User user = userRepository.findByUsername(creds.getUsername());
+
+        if (user != null) {
+            Map encoders = new HashMap<>();
+            encoders.put("bcrypt", new BCryptPasswordEncoder());
+            PasswordEncoder passwordEncoder = new DelegatingPasswordEncoder("bcrypt", encoders);
+            //Logger.getLogger(this.getClass().getName()).info( s+"\n"+user.getPassword()+"\n"+creds.getPassword()+"\n");
+            if (passwordEncoder.matches(creds.getPassword(), user.getHashedPassword()))
+                creds.setPassword(user.getPassword());
+            else {
+                creds.setPassword("");
+                Logger.getLogger(this.getClass().getName()).info("INVALID PASSWORD\n");
+            }
+        }
+        /*
         if (!req.getMethod().equals("POST")) {
             creds = new AccountCredentials();
             creds.setUsername("");
@@ -53,6 +71,7 @@ public class JWTLoginFilter extends AbstractAuthenticationProcessingFilter {
         } else {
             creds = new ObjectMapper().readValue(req.getInputStream(), AccountCredentials.class);
         }
+
         User user = userRepository.findByUsername(creds.getUsername());
 
         String password = creds.getPassword().toString();
@@ -67,25 +86,24 @@ public class JWTLoginFilter extends AbstractAuthenticationProcessingFilter {
         } catch (NoSuchAlgorithmException e) {
             e.printStackTrace();
         }
-
+*/
         Collection<GrantedAuthority> grantedAuthorities = new ArrayList<>();
-        if (user != null)
-        {
+        if (user != null) {
             grantedAuthorities.add(new SimpleGrantedAuthority(user.getRole().getName()));
-        }
+        } else
+            Logger.getLogger(this.getClass().getName()).info("INVALID USERNAME\n");
         return getAuthenticationManager().authenticate(new UsernamePasswordAuthenticationToken
-                (creds.getUsername(), sb.toString(), grantedAuthorities));
-    }
+                (creds.getUsername(), creds.getPassword(), grantedAuthorities));
+        }
 
     @Override
     protected void successfulAuthentication(
             HttpServletRequest req,
             HttpServletResponse res, FilterChain chain,
-            Authentication auth) throws IOException, ServletException
-    {
+            Authentication auth) throws IOException, ServletException {
         TokenAuthenticationService
                 .addAuthentication(req, res, auth.getName());
-        Logger.getLogger(this.getClass().getName()).info( "SUCCESSFUL LOGIN\n");
+        Logger.getLogger(this.getClass().getName()).info("SUCCESSFUL LOGIN\n");
     }
 
 }
