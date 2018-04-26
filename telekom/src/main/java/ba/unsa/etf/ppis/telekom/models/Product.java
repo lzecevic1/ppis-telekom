@@ -41,6 +41,12 @@ public class Product {
         this.contracts = contracts;
     }
 
+    public Product(String name, BigDecimal price, ProductCategory category) {
+        this.name = name;
+        this.price = price;
+        this.category = category;
+    }
+
     public Long getId() {
         return id;
     }
