@@ -17,10 +17,7 @@ public class Supplier {
     private String name;
     private String address;
     private SupplierStatus status;
-
-    @ManyToOne
-    @JoinColumn(name = "category_id")
-    private SupplierCategory category;
+    private String category;
 
     @OneToMany(mappedBy = "supplier")
     private Collection<Rating> ratings;
@@ -71,11 +68,11 @@ public class Supplier {
         return ratings;
     }
 
-    public SupplierCategory getCategory() {
+    public String  getCategory() {
         return category;
     }
 
-    public void setCategory(SupplierCategory category) {
+    public void setCategory(String  category) {
         this.category = category;
     }
 

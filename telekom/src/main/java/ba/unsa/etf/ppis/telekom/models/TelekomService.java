@@ -19,7 +19,7 @@ public class TelekomService {
     private String type;
     private String description;
     private BigDecimal price;
-    private ServicePriority priority;
+    private ServicePriority priority = ServicePriority.BUSSINESS_CRITICAL;
     private String responsiblePerson;
     private Integer numRenewedContracts;
     private Integer numCancelledContracts;

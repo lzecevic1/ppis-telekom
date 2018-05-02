@@ -6,17 +6,25 @@
     <div class="panel-body register-form__footer">
     <form>
   <div class="form-group">
+    <label for="exampleFormControlInput1">Id usluge:</label>
+      {{input class="form-control" id="inputId" value=model.serviceId}}
+  </div>
+  <div class="form-group">
     <label for="exampleFormControlInput1">Naziv usluge:</label>
-    <input class="form-control">
+      {{input class="form-control" id="inputName" value=model.name}}
+  </div>
+    <div class="form-group">
+    <label for="exampleFormControlInput1">Odgovorna osoba:</label>
+      {{input class="form-control" id="inputPerson" value=model.responsiblePerson}}
   </div>
     <div class="form-group">
     <label for="exampleFormControlInput1">Cijena usluge:</label>
-    <input class="form-control">
+      {{input class="form-control" id="inputPrice" value=model.price}}
   </div>
 
   <div class="form-group">
     <label for="exampleFormControlSelect1">Tip usluge:</label>
-    <select class="form-control" id="exampleFormControlSelect1">
+    <select class="form-control" id="exampleFormControlSelect1" onchange={{action "selectType" value="target.value"}}>
       <option>Tip 1</option>
       <option>Tip 2</option>
       <option>Tip 3</option>
@@ -26,9 +34,9 @@
   </div>
   <div class="form-group">
     <label for="exampleFormControlTextarea1">Opis usluge</label>
-    <textarea class="form-control" id="exampleFormControlTextarea1" rows="3"></textarea>
+      {{textarea value=name cols="150" rows="6" value=model.description}}
   </div>
-  <button class="btn btn-lg btn-primary col-md-2" type="submit">UNOS</button>
+  <button class="btn btn-lg btn-primary col-md-2" type="submit" {{action 'onNext'}}>UNOS</button>
 </form>
 </div>
 </div>

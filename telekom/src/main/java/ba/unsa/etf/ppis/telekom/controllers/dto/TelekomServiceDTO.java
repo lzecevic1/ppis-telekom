@@ -26,7 +26,7 @@ public class TelekomServiceDTO {
     public BigDecimal price;
 
     @NotNull(message = "Priority of service must be specified")
-    public TelekomService.ServicePriority priority;
+    public TelekomService.ServicePriority priority = TelekomService.ServicePriority.BUSSINESS_OPERATIONAL;
 
     @Size(max = 50, message = "Name of responsible person can't be longer than 50 characters")
     public String responsiblePerson;

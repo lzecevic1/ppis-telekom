@@ -3,34 +3,34 @@
     <p>Usluge:</p>
   </div>
   <div class="service-row-one col-md-4">
-    <h4> USLUGA 1 </h4>
+    <h4> {{model.services.0.serviceId}} </h4>
     <img class='service-row-image' src="/assets/images/usluga.png"><br>
-    <p>15/2 MB/S<br>1GB MAILBOX PROSTORA<br> 1200MB WEB HOSTING</p>
+    <p>{{model.services.0.description}}</p>
   </div>
   <div class="service-row-two col-md-4">
-    <h4> USLUGA 2 </h4>
+    <h4> {{model.services.1.serviceId}} </h4>
     <img class='service-row-image' src="/assets/images/usluga.png"><br>
-    <p>18/2 MB/S<br>1GB MAILBOX PROSTORA<br> 1200MB WEB HOSTING</p>
+    <p>{{model.services.1.description}}</p>
   </div>
      <div class="service-row-three col-md-4">
-    <h4> USLUGA 3 </h4>
+    <h4> {{model.services.2.serviceId}} </h4>
     <img class='service-row-image' src="/assets/images/usluga.png"><br>
-    <p>20/2 MB/S<br>2GB MAILBOX PROSTORA<br> 1200MB WEB HOSTING</p>
+    <p>{{model.services.2.description}}</p>
   </div>
   <div class="services-head col-md-12">
     <p>Dobavljači:</p>
   </div>
   <div class="supplier-row-one col-md-4">
     <img class='service-row-image' src="/assets/images/supplier.png"><br>
-    <h4> LOGOSOFT </h4>
+    <h4> {{model.suppliers.0.name}} </h4>
   </div>
   <div class="supplier-row-two col-md-4">
     <img class='service-row-image' src="/assets/images/supplier.png"><br>
-    <h4> UNIVERZALNO </h4>
+    <h4> {{model.suppliers.1.name}} </h4>
       </div>
      <div class="supplier-row-three col-md-4">
       <img class='service-row-image' src="/assets/images/supplier.png"><br>
-    <h4> TELEMACH </h4>
+    <h4>{{model.suppliers.2.name}} </h4>
   </div>
 
   <div class="col-md-12 button-services">
