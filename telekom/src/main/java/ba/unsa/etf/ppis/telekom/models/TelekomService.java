@@ -56,6 +56,16 @@ public class TelekomService {
         this.numActiveContracts = numActiveContracts;
     }
 
+    public TelekomService(ServiceType serviceType, String description, String responsiblePerson, BigDecimal price,
+                          ServicePriority servicePriority) {
+        this.serviceId = "";
+        this.type = serviceType;
+        this.description = description;
+        this.price = price;
+        this.priority = servicePriority;
+        this.responsiblePerson = responsiblePerson;
+    }
+
     public Long getId() {
         return id;
     }
