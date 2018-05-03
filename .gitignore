@@ -270,7 +270,6 @@ yarn-error.log
 bundle/
 *~
 publish_to_bower/
-bower_components/
 npm-debug.log
 .ember-cli
 DEBUG/
