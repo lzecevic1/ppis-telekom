@@ -9,7 +9,8 @@ import java.util.Set;
 @Entity
 public class Supplier {
 
-    public enum SupplierStatus{ACTIVE, UNACTIVE};
+    public enum SupplierStatus {ACTIVE, UNACTIVE};
+    public enum SupplierCategory {TELEPHONY, MOBILE_DEVICES, NETWORK_EQUIPMENT, ELECTRIC_ENERGY, OTHER}
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -17,7 +18,7 @@ public class Supplier {
     private String name;
     private String address;
     private SupplierStatus status;
-    private String category;
+    private SupplierCategory category;
 
     @OneToMany(mappedBy = "supplier")
     private Collection<Rating> ratings;
@@ -68,11 +69,11 @@ public class Supplier {
         return ratings;
     }
 
-    public String  getCategory() {
+    public SupplierCategory  getCategory() {
         return category;
     }
 
-    public void setCategory(String  category) {
+    public void setCategory(SupplierCategory  category) {
         this.category = category;
     }
 

@@ -23,8 +23,8 @@ public abstract class BaseController<M, S extends BaseService<M, ? >> {
     @ResponseBody
     public ResponseEntity<Object> all() {
         Collection<M> modelInstances = service.all();
-        if (modelInstances.isEmpty())
-            return ResponseEntity.notFound().build();
+        /*if (modelInstances.isEmpty())
+            return ResponseEntity.notFound().build();*/
         return ResponseEntity.ok(modelInstances);
     }
 

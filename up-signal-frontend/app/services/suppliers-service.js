@@ -11,7 +11,7 @@ export default BaseHttpService.extend({
     let newSupplier = Ember.Object.create({
       name: '',
       address: '',
-      category: 'Kategorija 1'
+      category: '0'
     });
     this.set('currentSupplier', newSupplier);
     return this.get('currentSupplier');
@@ -23,7 +23,8 @@ export default BaseHttpService.extend({
       serviceId: '',
       name: '',
       price: '',
-      type: 'Tip 1',
+      type: '0',
+      priority: '0',
       description:'',
       responsiblePerson: ''
     });
@@ -33,18 +34,18 @@ export default BaseHttpService.extend({
 
 
   getAllSuppliers() {
-    return this.ajax('GET', '/suppliers');
+    return this.ajax('GET', 'http://localhost:8080/suppliers');
   },
 
   getAllServices() {
-    return this.ajax('GET', '/telekom-services');
+    return this.ajax('GET', 'http://localhost:8080/telekom-services');
   },
 
   addService: function (service) {
-    return this.ajax('POST', '/telekom-services', service);
+    return this.ajax('POST', 'http://localhost:8080/telekom-services', service);
   },
 
   addSupplier: function (supplier) {
-    return this.ajax('POST', '/suppliers', supplier);
+    return this.ajax('POST', 'http://localhost:8080/suppliers', supplier);
   },
 });
