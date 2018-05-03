@@ -1,5 +1,7 @@
 package ba.unsa.etf.ppis.telekom.controllers.dto;
 
+import ba.unsa.etf.ppis.telekom.models.Product;
+
 import javax.validation.constraints.NotBlank;
 import javax.validation.constraints.NotNull;
 import java.math.BigDecimal;
@@ -12,14 +14,14 @@ public class ProductDTO {
     public BigDecimal price;
 
     @NotNull
-    public Long categoryId;
+    public Product.ProductCategory category;
 
     public ProductDTO() { }
 
-    public ProductDTO(String name, BigDecimal price, Long categoryId) {
+    public ProductDTO(String name, BigDecimal price, Product.ProductCategory category) {
         this.name = name;
         this.price = price;
-        this.categoryId = categoryId;
+        this.category = category;
     }
 
 }

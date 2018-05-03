@@ -25,11 +25,19 @@
   <div class="form-group">
     <label for="exampleFormControlSelect1">Tip usluge:</label>
     <select class="form-control" id="exampleFormControlSelect1" onchange={{action "selectType" value="target.value"}}>
-      <option>Tip 1</option>
-      <option>Tip 2</option>
-      <option>Tip 3</option>
-      <option>Tip 4</option>
-      <option>Tip 5</option>
+      <option value="0">Kablovska televizija</option>
+      <option value="1">Internet</option>
+      <option value="2">Fiksna telefonija</option>
+      <option value="3">Mobilna telefonija</option>
+    </select>
+  </div>
+  <div class="form-group">
+    <label for="exampleFormControlSelect2">Prioritet usluge:</label>
+    <select class="form-control" id="exampleFormControlSelect2" onchange={{action "selectPriority" value="target.value"}}>
+      <option value="0">Mission critical</option>
+      <option value="1">Bussiness critical</option>
+      <option value="2">Bussiness operational</option>
+      <option value="3">Administrative services</option>
     </select>
   </div>
   <div class="form-group">

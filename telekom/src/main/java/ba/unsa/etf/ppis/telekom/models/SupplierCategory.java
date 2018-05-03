@@ -1,4 +1,4 @@
-package ba.unsa.etf.ppis.telekom.models;
+/*package ba.unsa.etf.ppis.telekom.models;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
 
@@ -57,3 +57,4 @@ public class SupplierCategory {
         this.suppliers = suppliers;
     }
 }
+*/

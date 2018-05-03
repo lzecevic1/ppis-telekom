@@ -4,11 +4,12 @@ import ba.unsa.etf.ppis.telekom.controllers.dto.TelekomServiceDTO;
 import ba.unsa.etf.ppis.telekom.controllers.dto.TelekomServiceUpdateDTO;
 import ba.unsa.etf.ppis.telekom.models.TelekomService;
 import ba.unsa.etf.ppis.telekom.repositories.TelekomServiceRepository;
+import org.springframework.stereotype.Service;
 
 import java.util.Collection;
 
 
-@org.springframework.stereotype.Service
+@Service
 public class ServiceForTelekomService extends BaseService<TelekomService, TelekomServiceRepository> {
 
     public Collection<TelekomService> getAll() {
