@@ -10,16 +10,16 @@ import java.util.Collection;
 @Table(name = "service")
 public class TelekomService {
 
-    public enum ServicePriority{MISSION_CRITICAL, BUSSINESS_CRITICAL, BUSSINESS_OPERATIONAL, ADMINISTRATIVE_SERVICES}
-
+    public enum ServicePriority {MISSION_CRITICAL, BUSSINESS_CRITICAL, BUSSINESS_OPERATIONAL, ADMINISTRATIVE_SERVICES}
+    public enum ServiceType {CABLE_TV, iNTERNET, DEVICE, TELEPHONY}
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
     private String serviceId;
-    private String type;
+    private ServiceType type;
     private String description;
     private BigDecimal price;
-    private ServicePriority priority = ServicePriority.BUSSINESS_CRITICAL;
+    private ServicePriority priority; // = ServicePriority.BUSSINESS_CRITICAL;
     private String responsiblePerson;
     private Integer numRenewedContracts;
     private Integer numCancelledContracts;
@@ -43,7 +43,7 @@ public class TelekomService {
 
     public TelekomService() { }
 
-    public TelekomService(String serviceId, String type, String description, BigDecimal price, ServicePriority priority,
+    public TelekomService(String serviceId, ServiceType type, String description, BigDecimal price, ServicePriority priority,
                           String responsiblePerson, Integer numRenewedContracts, Integer numCancelledContracts, Integer numActiveContracts) {
         this.serviceId = serviceId;
         this.type = type;
@@ -54,6 +54,16 @@ public class TelekomService {
         this.numRenewedContracts = numRenewedContracts;
         this.numCancelledContracts = numCancelledContracts;
         this.numActiveContracts = numActiveContracts;
+    }
+
+    public TelekomService(ServiceType serviceType, String description, String responsiblePerson, BigDecimal price,
+                          ServicePriority servicePriority) {
+        this.serviceId = "";
+        this.type = serviceType;
+        this.description = description;
+        this.price = price;
+        this.priority = servicePriority;
+        this.responsiblePerson = responsiblePerson;
     }
 
     public Long getId() {
@@ -72,11 +82,11 @@ public class TelekomService {
         this.serviceId = serviceId;
     }
 
-    public String getType() {
+    public ServiceType getType() {
         return type;
     }
 
-    public void setType(String type) {
+    public void setType(ServiceType type) {
         this.type = type;
     }
 

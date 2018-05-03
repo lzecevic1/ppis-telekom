@@ -9,6 +9,8 @@ import java.util.Collection;
 @Entity
 public class Product {
 
+    public enum ProductCategory {CABLE_TV, iNTERNET, DEVICE, TELEPHONY}
+
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
@@ -16,8 +18,8 @@ public class Product {
     private String name;
     private BigDecimal price;
 
-    @ManyToOne
-    @JoinColumn(name = "category_id")
+    /*@ManyToOne
+    @JoinColumn(name = "category_id")*/
     private ProductCategory category;
 
     @JsonIgnore
