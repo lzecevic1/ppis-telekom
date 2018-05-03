@@ -34,18 +34,18 @@ export default BaseHttpService.extend({
 
 
   getAllSuppliers() {
-    return this.ajax('GET', 'http://localhost:8080/suppliers');
+    return this.ajax('GET', '/suppliers');
   },
 
   getAllServices() {
-    return this.ajax('GET', 'http://localhost:8080/telekom-services');
+    return this.ajax('GET', '/telekom-services');
   },
 
   addService: function (service) {
-    return this.ajax('POST', 'http://localhost:8080/telekom-services', service);
+    return this.ajax('POST', '/telekom-services', service);
   },
 
   addSupplier: function (supplier) {
-    return this.ajax('POST', 'http://localhost:8080/suppliers', supplier);
+    return this.ajax('POST', '/suppliers', supplier);
   },
 });
