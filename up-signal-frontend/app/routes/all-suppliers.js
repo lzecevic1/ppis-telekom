@@ -14,5 +14,10 @@ export default Ember.Route.extend({
     return this.get('_supplierService').getAllSuppliers() || {};
   },
 
+  actions: {
+    delete: function (id) {
+      this.get('_supplierService').deleteSupplier(id).then(()=>this.refresh())
+    }
+  }
 
 });

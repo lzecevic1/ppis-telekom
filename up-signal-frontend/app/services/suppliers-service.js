@@ -48,4 +48,12 @@ export default BaseHttpService.extend({
   addSupplier: function (supplier) {
     return this.ajax('POST', '/suppliers', supplier);
   },
+
+  deleteService: function (id) {
+    return this.ajax('DELETE', `/telekom-services/${id}`);
+  },
+
+  deleteSupplier: function (id) {
+    return this.ajax('DELETE', `/suppliers/${id}`);
+  },
 });

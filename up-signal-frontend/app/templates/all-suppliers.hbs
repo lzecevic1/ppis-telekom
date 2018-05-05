@@ -16,7 +16,7 @@
         <p>Status: {{supplier.status}}</p>
         <p>Kategorija: {{supplier.status}}</p>
         <button class="btn btn-primary list-item-btn">Izmjena</button>
-        <button class="btn btn-primary list-item-btn">Brisanje</button><br>
+        <button class="btn btn-primary list-item-btn" {{action "delete" supplier.id}}>Brisanje</button><br>
       </div>
     {{/panel.body}}
   {{/panels.panel}}

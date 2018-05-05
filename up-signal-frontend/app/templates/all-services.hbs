@@ -17,7 +17,7 @@
         <p>Cijena: {{service.price}}</p>
         <p>Odgovorna osoba: {{service.responsiblePerson}}</p>
         <button class="btn btn-primary list-item-btn">Izmjena</button>
-        <button class="btn btn-primary list-item-btn">Brisanje</button><br>
+        <button class="btn btn-primary list-item-btn" {{action "delete" service.id}}>Brisanje</button><br>
       </div>
     {{/panel.body}}
   {{/panels.panel}}
