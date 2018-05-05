@@ -1,0 +1,26 @@
+<div class="list-top">
+  <p>PREGLED SVIH DOBAVLJACA</p>
+</div>
+<div class="col-md-10 suppliers-body">
+{{#cp-panels accordion=true as |panels|}}
+  {{#each model as |supplier|}}
+  <div class="panel panel-primary">
+  {{#panels.panel as |panel|}}
+    {{#panel.toggle}}
+      <div class="panel-heading">{{supplier.name}}</div>
+    {{/panel.toggle}}
+    {{#panel.body}}
+      <div class="panel-body">
+        <img class='service-row-image' src="/assets/images/supplier-img.png"><br>
+        <p>Adresa: {{supplier.address}}</p>
+        <p>Status: {{supplier.status}}</p>
+        <p>Kategorija: {{supplier.status}}</p>
+        <button class="btn btn-primary list-item-btn">Izmjena</button>
+        <button class="btn btn-primary list-item-btn">Brisanje</button><br>
+      </div>
+    {{/panel.body}}
+  {{/panels.panel}}
+  </div>
+  {{/each}}
+{{/cp-panels}}
+</div>

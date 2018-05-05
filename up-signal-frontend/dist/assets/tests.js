@@ -10,6 +10,11 @@ define('up-signal/tests/app.lint-test', [], function () {
     assert.ok(true, 'app.js should pass ESLint\n\n');
   });
 
+  QUnit.test('components/info-list-item.js', function (assert) {
+    assert.expect(1);
+    assert.ok(true, 'components/info-list-item.js should pass ESLint\n\n');
+  });
+
   QUnit.test('components/main-navigation.js', function (assert) {
     assert.expect(1);
     assert.ok(true, 'components/main-navigation.js should pass ESLint\n\n');
@@ -45,6 +50,16 @@ define('up-signal/tests/app.lint-test', [], function () {
     assert.ok(true, 'routes/about-us.js should pass ESLint\n\n');
   });
 
+  QUnit.test('routes/all-services.js', function (assert) {
+    assert.expect(1);
+    assert.ok(true, 'routes/all-services.js should pass ESLint\n\n');
+  });
+
+  QUnit.test('routes/all-suppliers.js', function (assert) {
+    assert.expect(1);
+    assert.ok(true, 'routes/all-suppliers.js should pass ESLint\n\n');
+  });
+
   QUnit.test('routes/homepage.js', function (assert) {
     assert.expect(1);
     assert.ok(true, 'routes/homepage.js should pass ESLint\n\n');
@@ -73,6 +88,11 @@ define('up-signal/tests/app.lint-test', [], function () {
   QUnit.test('routes/services.js', function (assert) {
     assert.expect(1);
     assert.ok(true, 'routes/services.js should pass ESLint\n\n');
+  });
+
+  QUnit.test('routes/suppliers.js', function (assert) {
+    assert.expect(1);
+    assert.ok(true, 'routes/suppliers.js should pass ESLint\n\n');
   });
 
   QUnit.test('services/base-http-service.js', function (assert) {
@@ -163,6 +183,36 @@ define('up-signal/tests/helpers/start-app', ['exports', 'up-signal/app', 'up-sig
     });
   }
 });
+define('up-signal/tests/integration/components/info-list-item-test', ['ember-qunit'], function (_emberQunit) {
+  'use strict';
+
+  (0, _emberQunit.moduleForComponent)('info-list-item', 'Integration | Component | info list item', {
+    integration: true
+  });
+
+  (0, _emberQunit.test)('it renders', function (assert) {
+
+    // Set any properties with this.set('myProperty', 'value');
+    // Handle any actions with this.on('myAction', function(val) { ... });
+
+    this.render(Ember.HTMLBars.template({
+      "id": "aYhRnOa3",
+      "block": "{\"statements\":[[1,[26,[\"info-list-item\"]],false]],\"locals\":[],\"named\":[],\"yields\":[],\"hasPartials\":false}",
+      "meta": {}
+    }));
+
+    assert.equal(this.$().text().trim(), '');
+
+    // Template block usage:
+    this.render(Ember.HTMLBars.template({
+      "id": "gbp3JGcg",
+      "block": "{\"statements\":[[0,\"\\n\"],[6,[\"info-list-item\"],null,null,{\"statements\":[[0,\"      template block text\\n\"]],\"locals\":[]},null],[0,\"  \"]],\"locals\":[],\"named\":[],\"yields\":[],\"hasPartials\":false}",
+      "meta": {}
+    }));
+
+    assert.equal(this.$().text().trim(), 'template block text');
+  });
+});
 define('up-signal/tests/integration/components/main-navigation-test', ['ember-qunit'], function (_emberQunit) {
   'use strict';
 
@@ -224,6 +274,11 @@ define('up-signal/tests/tests.lint-test', [], function () {
     assert.ok(true, 'helpers/start-app.js should pass ESLint\n\n');
   });
 
+  QUnit.test('integration/components/info-list-item-test.js', function (assert) {
+    assert.expect(1);
+    assert.ok(true, 'integration/components/info-list-item-test.js should pass ESLint\n\n');
+  });
+
   QUnit.test('integration/components/main-navigation-test.js', function (assert) {
     assert.expect(1);
     assert.ok(true, 'integration/components/main-navigation-test.js should pass ESLint\n\n');
@@ -254,6 +309,16 @@ define('up-signal/tests/tests.lint-test', [], function () {
     assert.ok(true, 'unit/routes/about-us-test.js should pass ESLint\n\n');
   });
 
+  QUnit.test('unit/routes/all-services-test.js', function (assert) {
+    assert.expect(1);
+    assert.ok(true, 'unit/routes/all-services-test.js should pass ESLint\n\n');
+  });
+
+  QUnit.test('unit/routes/all-suppliers-test.js', function (assert) {
+    assert.expect(1);
+    assert.ok(true, 'unit/routes/all-suppliers-test.js should pass ESLint\n\n');
+  });
+
   QUnit.test('unit/routes/homepage-test.js', function (assert) {
     assert.expect(1);
     assert.ok(true, 'unit/routes/homepage-test.js should pass ESLint\n\n');
@@ -282,6 +347,11 @@ define('up-signal/tests/tests.lint-test', [], function () {
   QUnit.test('unit/routes/services-test.js', function (assert) {
     assert.expect(1);
     assert.ok(true, 'unit/routes/services-test.js should pass ESLint\n\n');
+  });
+
+  QUnit.test('unit/routes/suppliers-test.js', function (assert) {
+    assert.expect(1);
+    assert.ok(true, 'unit/routes/suppliers-test.js should pass ESLint\n\n');
   });
 
   QUnit.test('unit/services/base-http-service-test.js', function (assert) {
@@ -340,6 +410,32 @@ define('up-signal/tests/unit/routes/about-us-test', ['ember-qunit'], function (_
   'use strict';
 
   (0, _emberQunit.moduleFor)('route:about-us', 'Unit | Route | about us', {
+    // Specify the other units that are required for this test.
+    // needs: ['controller:foo']
+  });
+
+  (0, _emberQunit.test)('it exists', function (assert) {
+    var route = this.subject();
+    assert.ok(route);
+  });
+});
+define('up-signal/tests/unit/routes/all-services-test', ['ember-qunit'], function (_emberQunit) {
+  'use strict';
+
+  (0, _emberQunit.moduleFor)('route:all-services', 'Unit | Route | all services', {
+    // Specify the other units that are required for this test.
+    // needs: ['controller:foo']
+  });
+
+  (0, _emberQunit.test)('it exists', function (assert) {
+    var route = this.subject();
+    assert.ok(route);
+  });
+});
+define('up-signal/tests/unit/routes/all-suppliers-test', ['ember-qunit'], function (_emberQunit) {
+  'use strict';
+
+  (0, _emberQunit.moduleFor)('route:all-suppliers', 'Unit | Route | all suppliers', {
     // Specify the other units that are required for this test.
     // needs: ['controller:foo']
   });
@@ -418,6 +514,19 @@ define('up-signal/tests/unit/routes/services-test', ['ember-qunit'], function (_
   'use strict';
 
   (0, _emberQunit.moduleFor)('route:services', 'Unit | Route | services', {
+    // Specify the other units that are required for this test.
+    // needs: ['controller:foo']
+  });
+
+  (0, _emberQunit.test)('it exists', function (assert) {
+    var route = this.subject();
+    assert.ok(route);
+  });
+});
+define('up-signal/tests/unit/routes/suppliers-test', ['ember-qunit'], function (_emberQunit) {
+  'use strict';
+
+  (0, _emberQunit.moduleFor)('route:suppliers', 'Unit | Route | suppliers', {
     // Specify the other units that are required for this test.
     // needs: ['controller:foo']
   });

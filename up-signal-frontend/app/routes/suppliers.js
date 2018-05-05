@@ -9,8 +9,10 @@ const {
 export default Ember.Route.extend({
   _supplierService: service('suppliers-service'),
 
+
   model() {
-    return this.get('_supplierService').getAllServices() || {};
+    return this.get('_supplierService').getAllSuppliers() || {};
   },
+
 
 });

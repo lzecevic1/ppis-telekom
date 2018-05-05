@@ -14,6 +14,9 @@ Router.map(function() {
   this.route('packages');
   this.route('new-service');
   this.route('new-supplier');
+  this.route('all-services');
+  this.route('all-suppliers');
+  this.route('suppliers');
 });
 
 export default Router;

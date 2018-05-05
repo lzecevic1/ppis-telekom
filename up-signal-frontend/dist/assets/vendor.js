@@ -72925,6 +72925,267 @@ createDeprecatedModule('resolver');
     }
   });
 });
+;define('ember-collapsible-panel/components/cp-panel-body/component', ['exports', 'ember-collapsible-panel/components/cp-panel-body/template'], function (exports, _template) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = Ember.Component.extend({
+    layout: _template.default,
+
+    classNames: ['cp-Panel-body'],
+    classNameBindings: ['isOpen:cp-is-open']
+
+  });
+});
+;define("ember-collapsible-panel/components/cp-panel-body/template", ["exports"], function (exports) {
+  "use strict";
+
+  exports.__esModule = true;
+  exports.default = Ember.HTMLBars.template({ "id": "KeTo3J8o", "block": "{\"statements\":[[6,[\"if\"],[[28,[\"shouldAnimate\"]]],null,{\"statements\":[[0,\"\\n\"],[6,[\"liquid-if\"],[[28,[\"isOpen\"]]],[[\"use\"],[\"crossFade\"]],{\"statements\":[[0,\"    \"],[11,\"div\",[]],[15,\"class\",\"cp-Panel-body-inner\"],[13],[0,\"\\n      \"],[18,\"default\"],[0,\"\\n    \"],[14],[0,\"\\n\"]],\"locals\":[]},null],[0,\"\\n\"]],\"locals\":[]},{\"statements\":[[0,\"\\n\"],[6,[\"if\"],[[28,[\"isOpen\"]]],null,{\"statements\":[[0,\"    \"],[11,\"div\",[]],[15,\"class\",\"cp-Panel-body-inner\"],[13],[0,\"\\n      \"],[18,\"default\"],[0,\"\\n    \"],[14],[0,\"\\n\"]],\"locals\":[]},null],[0,\"\\n\"]],\"locals\":[]}]],\"locals\":[],\"named\":[],\"yields\":[\"default\"],\"hasPartials\":false}", "meta": { "moduleName": "ember-collapsible-panel/components/cp-panel-body/template.hbs" } });
+});
+;define('ember-collapsible-panel/components/cp-panel-toggle/component', ['exports'], function (exports) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = Ember.Component.extend({
+
+    tagName: 'a',
+    classNames: ['cp-Panel-toggle'],
+    classNameBindings: ['isOpen:cp-is-open'],
+
+    // So taps register in iOS
+    attributeBindings: ['href'],
+    href: '#',
+
+    click: function click(e) {
+      e.preventDefault();
+      this.get('on-click')();
+    }
+  });
+});
+;define('ember-collapsible-panel/components/cp-panel/component', ['exports', 'ember-collapsible-panel/components/cp-panel/template'], function (exports, _template) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = Ember.Component.extend({
+    layout: _template.default,
+
+    panelActions: Ember.inject.service(),
+    dependencyChecker: Ember.inject.service(),
+    shouldAnimate: Ember.computed.and('dependencyChecker.hasLiquidFire', 'animate'),
+
+    group: null, // passed in if rendered as part of a {{cp-panels}} group
+
+    classNames: ['cp-Panel'],
+    classNameBindings: ['isOpen:cp-is-open:cp-is-closed'],
+
+    // Caller can overwrite
+    name: Ember.computed.oneWay('elementId'),
+
+    panelState: Ember.computed('name', function () {
+      var name = this.get('name');
+      // debugger;
+      return this.get('panelActions.state.' + name);
+    }),
+
+    isOpen: Ember.computed.readOnly('panelState.isOpen'),
+    isClosed: Ember.computed.not('isOpen'),
+
+    panelsWrapper: null,
+    animate: true,
+
+    didReceiveAttrs: function didReceiveAttrs() {
+      this._super.apply(this, arguments);
+
+      // If caller passes in open=, use it
+      if (this.get('open') !== undefined) {
+        this.set('panelState.boundOpenState', this.get('open'));
+      }
+    },
+
+
+    // Register with parent panels component
+    didInsertElement: function didInsertElement() {
+      var _this = this;
+
+      this._super.apply(this, arguments);
+      Ember.run.scheduleOnce('afterRender', function () {
+        var group = _this.get('group');
+
+        if (group) {
+          _this.get('panelState').set('group', group);
+        }
+      });
+    },
+
+
+    actions: {
+      toggleIsOpen: function toggleIsOpen() {
+        this.get('panelActions').toggle(this.get('name'));
+      }
+    }
+  });
+});
+;define("ember-collapsible-panel/components/cp-panel/template", ["exports"], function (exports) {
+  "use strict";
+
+  exports.__esModule = true;
+  exports.default = Ember.HTMLBars.template({ "id": "9oHP0df2", "block": "{\"statements\":[[18,\"default\",[[33,[\"hash\"],null,[[\"toggle\",\"body\",\"name\",\"isOpen\"],[[33,[\"component\"],[\"cp-panel-toggle\"],[[\"on-click\",\"isOpen\"],[[33,[\"action\"],[[28,[null]],\"toggleIsOpen\"],null],[28,[\"isOpen\"]]]]],[33,[\"component\"],[\"cp-panel-body\"],[[\"shouldAnimate\",\"isOpen\"],[[28,[\"shouldAnimate\"]],[28,[\"isOpen\"]]]]],[28,[\"name\"]],[28,[\"isOpen\"]]]]]]],[0,\"\\n\"]],\"locals\":[],\"named\":[],\"yields\":[\"default\"],\"hasPartials\":false}", "meta": { "moduleName": "ember-collapsible-panel/components/cp-panel/template.hbs" } });
+});
+;define('ember-collapsible-panel/components/cp-panels/component', ['exports', 'ember-collapsible-panel/components/cp-panels/template'], function (exports, _template) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = Ember.Component.extend({
+    layout: _template.default,
+
+    classNames: 'cp-Panels',
+    accordion: false,
+    animate: true,
+
+    _cpPanels: true,
+
+    name: Ember.computed.oneWay('elementId')
+  });
+});
+;define("ember-collapsible-panel/components/cp-panels/template", ["exports"], function (exports) {
+  "use strict";
+
+  exports.__esModule = true;
+  exports.default = Ember.HTMLBars.template({ "id": "aQHa5yM8", "block": "{\"statements\":[[18,\"default\",[[33,[\"hash\"],null,[[\"panel\",\"name\"],[[33,[\"component\"],[\"cp-panel\"],[[\"group\"],[[28,[null]]]]],[28,[\"name\"]]]]]]],[0,\"\\n\"]],\"locals\":[],\"named\":[],\"yields\":[\"default\"],\"hasPartials\":false}", "meta": { "moduleName": "ember-collapsible-panel/components/cp-panels/template.hbs" } });
+});
+;define('ember-collapsible-panel/services/dependency-checker', ['exports'], function (exports) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = Ember.Service.extend({
+
+    hasLiquidFire: Ember.computed('', function () {
+      var config = Ember.getOwner(this).resolveRegistration('config:environment');
+
+      return config['ember-collapsible-panel'].hasLiquidFire;
+    })
+
+  });
+});
+;define('ember-collapsible-panel/services/panel-actions', ['exports'], function (exports) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+
+
+  var State = Ember.Object.extend({
+    name: null,
+    boundOpenState: false,
+    apiOpenState: false,
+    apiWasUsed: false,
+
+    isOpen: Ember.computed('boundOpenState', 'apiOpenState', 'apiWasUsed', function () {
+      if (this.get('apiWasUsed')) {
+        return this.get('apiOpenState');
+      } else {
+        return this.get('boundOpenState');
+      }
+    }),
+
+    animate: true,
+    group: null
+  });
+
+  exports.default = Ember.Service.extend({
+    _registry: Ember.Object.create({
+      keys: Ember.A([]),
+
+      unknownProperty: function unknownProperty(name) {
+        var state = State.create();
+
+        this.get('keys').addObject(name);
+        this.set(name, state);
+
+        return state;
+      },
+
+      // probably not too safe, should only be used in tests
+      reset: function reset() {
+        var _this = this;
+
+        this.get('keys').map(function (i) {
+          return i;
+        }) // copy, so we dont mess with binding/loops
+        .forEach(function (key) {
+          delete _this[key];
+        });
+
+        this.get('keys').clear();
+      }
+    }),
+
+    state: Ember.computed.readOnly('_registry'),
+
+    _panelFor: function _panelFor(name) {
+      return this.get('state.' + name);
+    },
+
+
+    _panels: Ember.computed('state.keys.[]', function () {
+      var keys = this.get('state.keys'),
+          state = this.get('state');
+
+      return keys.reduce(function (result, key) {
+        return result.addObject(state.get(key));
+      }, Ember.A([]));
+    }),
+
+    _panelsInGroup: function _panelsInGroup(name) {
+      return this.get('_panels').filterBy('group.name', name);
+    },
+    open: function open(name) {
+      var panel = this._panelFor(name),
+          group = panel.get('group');
+
+      if (group && group.get('accordion')) {
+        // if this is part of an accordion close
+        // everything else
+        this.closeAll(group.get('name'));
+      }
+
+      panel.set('apiOpenState', true);
+      panel.set('apiWasUsed', true);
+    },
+    close: function close(name) {
+      this._panelFor(name).set('apiOpenState', false);
+      this._panelFor(name).set('apiWasUsed', true);
+    },
+    toggle: function toggle(name) {
+      var panel = this._panelFor(name);
+      return panel.get('isOpen') ? this.close(name) : this.open(name);
+    },
+    openAll: function openAll(group) {
+      this._panelsInGroup(group).forEach(function (panel) {
+        panel.set('apiOpenState', true);
+        panel.set('apiWasUsed', true);
+      });
+    },
+    closeAll: function closeAll(group) {
+      this._panelsInGroup(group).forEach(function (panel) {
+        panel.set('apiOpenState', false);
+        panel.set('apiWasUsed', true);
+      });
+    }
+  });
+});
 ;define("ember-getowner-polyfill/index", ["exports", "ember"], function (exports, _ember) {
 
   _ember["default"].deprecate("ember-getowner-polyfill is now a true polyfill. Use Ember.getOwner directly instead of importing from ember-getowner-polyfill", false, {

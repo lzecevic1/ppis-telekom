@@ -1,0 +1,22 @@
+<div class="body-grey">
+  <div class="services-head col-md-12">
+    <p>Dobavljači:</p>
+  </div>
+  <div class="supplier-row-one col-md-4">
+    <img class='service-row-image' src="/assets/images/supplier.png"><br>
+    <h4> {{model.0.name}} </h4>
+  </div>
+  <div class="supplier-row-two col-md-4">
+    <img class='service-row-image' src="/assets/images/supplier.png"><br>
+    <h4> {{model.1.name}} </h4>
+      </div>
+     <div class="supplier-row-three col-md-4">
+      <img class='service-row-image' src="/assets/images/supplier.png"><br>
+    <h4>{{model.2.name}} </h4>
+  </div>
+
+  <div class="col-md-12 button-services">
+    {{#link-to 'new-supplier'}}<button class="btn btn-primary">NOVI DOBAVLJAČ</button>{{/link-to}}
+    {{#link-to 'all-suppliers'}}<button class="btn btn-primary">SVI DOBAVLJAČI</button>{{/link-to}}
+  </div>
+</div>

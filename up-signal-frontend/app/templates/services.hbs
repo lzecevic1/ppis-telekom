@@ -3,38 +3,23 @@
     <p>Usluge:</p>
   </div>
   <div class="service-row-one col-md-4">
-    <h4> {{model.services.0.serviceId}} </h4>
+    <h4> {{model.0.serviceId}} </h4>
     <img class='service-row-image' src="/assets/images/usluga.png"><br>
-    <p>{{model.services.0.description}}</p>
+    <p>{{model.0.description}}</p>
   </div>
   <div class="service-row-two col-md-4">
-    <h4> {{model.services.1.serviceId}} </h4>
+    <h4> {{model.1.serviceId}} </h4>
     <img class='service-row-image' src="/assets/images/usluga.png"><br>
-    <p>{{model.services.1.description}}</p>
+    <p>{{model.1.description}}</p>
   </div>
      <div class="service-row-three col-md-4">
-    <h4> {{model.services.2.serviceId}} </h4>
+    <h4> {{model.2.serviceId}} </h4>
     <img class='service-row-image' src="/assets/images/usluga.png"><br>
-    <p>{{model.services.2.description}}</p>
-  </div>
-  <div class="services-head col-md-12">
-    <p>Dobavljači:</p>
-  </div>
-  <div class="supplier-row-one col-md-4">
-    <img class='service-row-image' src="/assets/images/supplier.png"><br>
-    <h4> {{model.suppliers.0.name}} </h4>
-  </div>
-  <div class="supplier-row-two col-md-4">
-    <img class='service-row-image' src="/assets/images/supplier.png"><br>
-    <h4> {{model.suppliers.1.name}} </h4>
-      </div>
-     <div class="supplier-row-three col-md-4">
-      <img class='service-row-image' src="/assets/images/supplier.png"><br>
-    <h4>{{model.suppliers.2.name}} </h4>
+    <p>{{model.2.description}}</p>
   </div>
 
   <div class="col-md-12 button-services">
-    {{#link-to 'new-service'}}<button class="btn btn-lg btn-primary col-md-5">NOVA USLUGA</button>{{/link-to}}
-    {{#link-to 'new-supplier'}}<button class="btn btn-lg btn-primary col-md-5 pull-right">NOVI DOBAVLJAČ</button>{{/link-to}}
+    {{#link-to 'new-service'}}<button class="btn btn-primary">NOVA USLUGA</button>{{/link-to}}
+    {{#link-to 'all-services'}}<button class="btn btn-primary">SVE USLUGE</button>{{/link-to}}
   </div>
 </div>
