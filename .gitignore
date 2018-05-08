@@ -276,4 +276,6 @@ DEBUG/
 *.tgz
 *.tar.gz
 *.log
+up-signal-frontend/bower_components
+up-signal-frontend/dist
 
