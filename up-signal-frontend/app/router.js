@@ -17,6 +17,7 @@ Router.map(function() {
   this.route('all-services');
   this.route('all-suppliers');
   this.route('suppliers');
+  this.route('news');
 });
 
 export default Router;
