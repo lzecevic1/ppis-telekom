@@ -1,26 +1,54 @@
 <div class="list-top">
-  <p>PREGLED SVIH DOBAVLJACA</p>
+    <p>PREGLED SVIH DOBAVLJACA</p>
 </div>
-<div class="col-md-10 suppliers-body">
-{{#cp-panels accordion=true as |panels|}}
-  {{#each model as |supplier|}}
-  <div class="panel panel-primary">
-  {{#panels.panel as |panel|}}
-    {{#panel.toggle}}
-      <div class="panel-heading">{{supplier.name}}</div>
-    {{/panel.toggle}}
-    {{#panel.body}}
-      <div class="panel-body">
-        <img class='service-row-image' src="/assets/images/supplier-img.png"><br>
-        <p>Adresa: {{supplier.address}}</p>
-        <p>Status: {{supplier.status}}</p>
-        <p>Kategorija: {{supplier.category}}</p>
-        <button class="btn btn-primary list-item-btn">Izmjena</button>
-        <button class="btn btn-primary list-item-btn" {{action "delete" supplier.id}}>Brisanje</button><br>
-      </div>
-    {{/panel.body}}
-  {{/panels.panel}}
-  </div>
-  {{/each}}
-{{/cp-panels}}
+<div class="container">
+    <div class="row justify-content-md-center">
+        <div class="col-md-12 suppliers-body">
+            {{#cp-panels accordion=true as |panels|}}
+            {{#each model as |supplier|}}
+            <div class="panel panel-primary">
+                {{#panels.panel as |panel|}}
+                    {{#panel.toggle}}
+                    <div class="panel-heading">{{supplier.name}}</div>
+                    {{/panel.toggle}}
+                    {{#panel.body}}
+                    <div class="panel-body">
+                        <div class="row">
+                            <div class="col-md-3">
+                                <img class='service-row-image' src="/assets/images/supplier-img.png"><br>
+                            </div>
+                            <div class="col-md-9">
+                                <p> <b> Adresa: </b> {{supplier.address}} </p>
+                                <p> <b> Status: </b> {{supplier.status}} </p>
+                                <p> <b> Kategorija: </b> {{supplier.category}} </p>
+                            </div>
+                        </div>
+                        <div class="row">
+                            <div class="col-md-3 col-md-offset-9">
+                                <button class="btn btn-primary list-item-btn">Izmjena</button>
+                                <button class="btn btn-primary list-item-btn" {{action "setSupplierToDelete" supplier.id}}>Brisanje</button><br>
+                            </div>
+                        </div>
+                    </div>
+                    {{/panel.body}}
+                {{/panels.panel}}
+            </div>
+            {{/each}}
+            {{/cp-panels}}
+        </div>
+    </div>
 </div>
+
+{{#bs-modal-simple
+    title="Potvrda"
+    closeTitle="Ne"
+    submitTitle="Da"
+    autoClose=true
+    size=null
+    fade=false
+    open=supplierId
+    onSubmit=(action "delete" supplierId)
+    onHide=(action "cancelDeleting")}}
+    Da li ste sigurni da zelite izbrisati ovog dobavljaca?
+{{/bs-modal-simple}}
+

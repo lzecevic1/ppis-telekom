@@ -9,8 +9,8 @@ import java.util.Set;
 @Entity
 public class Supplier {
 
-    public enum SupplierStatus {ACTIVE, UNACTIVE};
-    public enum SupplierCategory {TELEPHONY, MOBILE_DEVICES, NETWORK_EQUIPMENT, ELECTRIC_ENERGY, OTHER}
+    public enum SupplierStatus {Aktivan, Neaktivan};
+    public enum SupplierCategory {Telefonija, Mobilni_uredjaji, Mrezna_oprema, Elektricna_oprema, Ostalo}
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)

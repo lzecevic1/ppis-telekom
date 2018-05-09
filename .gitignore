@@ -265,7 +265,6 @@ tmp*.gem
 tmp.bpm
 tmp.spade
 tests/source
-node_modules
 yarn-error.log
 bundle/
 *~
@@ -276,6 +275,7 @@ DEBUG/
 *.tgz
 *.tar.gz
 *.log
-up-signal-frontend/bower_components
-up-signal-frontend/dist
+/up-signal-frontend/bower_components
+/up-signal-frontend/dist
+/up-signal-frontend/node_modules
 

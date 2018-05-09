@@ -1,27 +1,56 @@
 <div class="list-top">
-  <p>PREGLED SVIH USLUGA</p>
+    <p>PREGLED SVIH USLUGA</p>
 </div>
-<div class="col-md-10 suppliers-body">
-{{#cp-panels accordion=true as |panels|}}
-  {{#each model as |service|}}
-  <div class="panel panel-primary">
-  {{#panels.panel as |panel|}}
-    {{#panel.toggle}}
-      <div class="panel-heading">{{service.id}}</div>
-    {{/panel.toggle}}
-    {{#panel.body}}
-      <div class="panel-body">
-        <img class='service-row-image' src="/assets/images/technology.png"><br>
-        <p>Tip usluge: {{service.type}}</p>
-        <p>Opis: {{service.description}}</p>
-        <p>Cijena: {{service.price}}</p>
-        <p>Odgovorna osoba: {{service.responsiblePerson}}</p>
-        <button class="btn btn-primary list-item-btn">Izmjena</button>
-        <button class="btn btn-primary list-item-btn" {{action "delete" service.id}}>Brisanje</button><br>
-      </div>
-    {{/panel.body}}
-  {{/panels.panel}}
-  </div>
-  {{/each}}
-{{/cp-panels}}
+<div class="container">
+    <div class="row justify-content-md-center">
+        <div class="col-md-12 suppliers-body">
+            {{#cp-panels accordion=true as |panels|}}
+            {{#each model as |service|}}
+            <div class="panel panel-primary">
+                {{#panels.panel as |panel|}}
+                    {{#panel.toggle}}
+                    <div class="panel-heading">{{service.serviceId}}</div>
+                    {{/panel.toggle}}
+                    {{#panel.body}}
+                    <div class="panel-body"> 
+                        <div class="row">
+                            <div class="col-md-3">
+                                <img class='service-row-image' src="/assets/images/technology.png"><br>
+                            </div>
+                            <div class="col-md-9">
+                                <p> <b>Tip usluge:</b> {{service.type}}</p>
+                                <p> <b>Opis: </b> {{service.description}}</p>
+                                <p> <b>Odgovorna osoba: </b>{{service.responsiblePerson}}</p>
+                                <p> <i>Cijena se nalazi u glavnom cjenovniku</i></p>
+                            </div>
+                        </div>
+                        <div class="row">
+                            <div class="col-md-3 col-md-offset-9">
+                                <button class="btn btn-primary list-item-btn">Izmjena</button>
+                                <button class="btn btn-primary list-item-btn" {{action "setServiceToDelete" service.id}}>Brisanje</button><br>
+                            </div>
+                        </div>
+                    </div>
+                    {{/panel.body}}
+                {{/panels.panel}}
+        </div>
+        {{/each}}
+        {{/cp-panels}}
+        </div>
+    </div>
 </div>
+
+{{#bs-modal-simple
+    title="Potvrda"
+    closeTitle="Ne"
+    submitTitle="Da"
+    autoClose=true
+    size=null
+    fade=false
+    open=serviceId
+    onSubmit=(action "delete" serviceId)
+    onHide=(action "cancelDeleting")}}
+    Da li ste sigurni da zelite izbrisati ovu uslugu?
+{{/bs-modal-simple}}
+
+  

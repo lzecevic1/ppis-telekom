@@ -12,6 +12,12 @@ module.exports = function(defaults) {
       'ember-cli-selectize': {
         'theme': 'bootstrap3'
       }
+    },
+
+    'ember-bootstrap': {
+      'bootstrapVersion': 3,
+      'importBootstrapFont': true,
+      'importBootstrapCSS': false
     }
   });
 

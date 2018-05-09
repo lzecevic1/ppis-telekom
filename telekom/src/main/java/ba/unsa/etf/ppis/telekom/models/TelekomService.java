@@ -57,13 +57,14 @@ public class TelekomService {
     }
 
     public TelekomService(ServiceType serviceType, String description, String responsiblePerson, BigDecimal price,
-                          ServicePriority servicePriority) {
+                          ServicePriority servicePriority, String serviceId) {
         this.serviceId = "";
         this.type = serviceType;
         this.description = description;
         this.price = price;
         this.priority = servicePriority;
         this.responsiblePerson = responsiblePerson;
+        this.serviceId = serviceId;
     }
 
     public Long getId() {
