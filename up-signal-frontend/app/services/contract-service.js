@@ -6,7 +6,7 @@ export default BaseHttpService.extend({
 	newContract: null,
 
   createContract() {
-    let newSupplier = Ember.Object.create({
+    let newContract = Ember.Object.create({
       startDate: '',
       endDate: '',
       responsiblePerson: ''
@@ -29,5 +29,5 @@ export default BaseHttpService.extend({
 
   deleteContract: function (id) {
     return this.ajax('DELETE', `/contracts/${id}`);
-  },
+  }
 });
