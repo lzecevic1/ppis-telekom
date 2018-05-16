@@ -29,6 +29,7 @@
                                 {{#if (diff session.data.authenticated.user.role.name "SERVICER")}}
                                     <button class="btn btn-primary list-item-btn">Izmjena</button>
                                     <button class="btn btn-primary list-item-btn" {{action "setSupplierToDelete" supplier.id}}>Brisanje</button><br>
+                                    <button class="btn btn-primary list-item-btn" >Kreiraj ugovor</button><br>
                                 {{/if}}
                                 {{/if}}
                             </div>
@@ -55,4 +56,3 @@
     onHide=(action "cancelDeleting")}}
     Da li ste sigurni da zelite izbrisati ovog dobavljaca?
 {{/bs-modal-simple}}
-
