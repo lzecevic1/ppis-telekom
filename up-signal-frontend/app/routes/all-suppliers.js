@@ -20,7 +20,11 @@ export default LoginRoute.extend({
   },
 
   actions: {
-  
+
+  createContract: function(id) {
+    this.transitionTo('new-contract', id);
+  }
+
   }
 });
 

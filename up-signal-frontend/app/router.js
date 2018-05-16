@@ -18,7 +18,7 @@ Router.map(function() {
   this.route('all-suppliers');
   this.route('suppliers');
   this.route('news');
-  this.route('new-contract');
+  this.route('new-contract', { path: '/:id/new-contract'});
 });
 
 export default Router;

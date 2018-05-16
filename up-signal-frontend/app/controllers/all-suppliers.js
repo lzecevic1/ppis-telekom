@@ -27,10 +27,6 @@ export default Ember.Controller.extend({
     this.set('supplierId', null);
   },
 
-  createContract: function(id) {
-
-  },
-
   rateSupplier: function(supplierId,rating) {
 
 
