@@ -1,3 +1,4 @@
+@import "ember-bootstrap/bootstrap";
 @import "bootstrap-custom/bootstrap-constants";
 @import "bootstrap-custom";
 @import "bootstrap-custom/bootstrap-overrides";
@@ -7,5 +8,3 @@
 @import "routes/lists";
 @import "routes/news";
 @import "components/main-navigation";
-
-@import "ember-bootstrap/bootstrap";

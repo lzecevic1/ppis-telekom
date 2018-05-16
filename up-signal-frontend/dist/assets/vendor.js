@@ -91622,7 +91622,7 @@ createDeprecatedModule('resolver');
   if (Ember.EXTEND_PROTOTYPES === true || Ember.EXTEND_PROTOTYPES.String) {
     /**
       See {{#crossLink "Ember.String/pluralize"}}{{/crossLink}}
-        @method pluralize
+       @method pluralize
       @for String
     */
     Object.defineProperty(String.prototype, 'pluralize', {
@@ -91640,7 +91640,7 @@ createDeprecatedModule('resolver');
 
     /**
       See {{#crossLink "Ember.String/singularize"}}{{/crossLink}}
-        @method singularize
+       @method singularize
       @for String
     */
     Object.defineProperty(String.prototype, 'singularize', {
@@ -91861,9 +91861,9 @@ createDeprecatedModule('resolver');
   Inflector.prototype = {
     /**
       @public
-        As inflections can be costly, and commonly the same subset of words are repeatedly
+       As inflections can be costly, and commonly the same subset of words are repeatedly
       inflected an optional cache is provided.
-        @method enableCache
+       @method enableCache
     */
     enableCache: function enableCache() {
       this.purgeCache();
@@ -91881,7 +91881,7 @@ createDeprecatedModule('resolver');
 
     /**
       @public
-        @method purgedCache
+       @method purgedCache
     */
     purgeCache: function purgeCache() {
       this._cacheUsed = false;
@@ -91892,7 +91892,7 @@ createDeprecatedModule('resolver');
     /**
       @public
       disable caching
-        @method disableCache;
+       @method disableCache;
     */
     disableCache: function disableCache() {
       this._sCache = null;
@@ -91978,7 +91978,7 @@ createDeprecatedModule('resolver');
 
     /**
       @protected
-        @method inflect
+       @method inflect
       @param {String} word
       @param {Object} typeRules
       @param {Object} irregular
