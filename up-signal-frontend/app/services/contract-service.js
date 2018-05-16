@@ -21,7 +21,7 @@ export default BaseHttpService.extend({
 
   getContract: function(id) {
   	return this.ajax('GET', `/contracts/${id}`)
-  }
+  },
 
   addContract: function (contract) {
     return this.ajax('POST', '/contracts', contract);

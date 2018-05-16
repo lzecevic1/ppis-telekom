@@ -1,47 +1,24 @@
 <div class="list-top">
     <p>PREGLED SVIH DOBAVLJACA</p>
 </div>
-<div class="container">
-    <div class="row justify-content-md-center">
-        <div class="col-md-12 suppliers-body">
-            {{#cp-panels accordion=true as |panels|}}
-            {{#each model as |supplier|}}
-            <div class="panel panel-primary">
-                {{#panels.panel as |panel|}}
-                    {{#panel.toggle}}
-                    <div class="panel-heading">{{supplier.name}}</div>
-                    {{/panel.toggle}}
-                    {{#panel.body}}
-                    <div class="panel-body">
-                        <div class="row">
-                            <div class="col-md-3">
-                                <img class='service-row-image' src="/assets/images/supplier-img.png"><br>
-                            </div>
-                            <div class="col-md-9">
-                                <p> <b> Adresa: </b> {{supplier.address}} </p>
-                                <p> <b> Status: </b> {{supplier.status}} </p>
-                                <p> <b> Kategorija: </b> {{supplier.category}} </p>
-                            </div>
-                        </div>
-                        <div class="row">
-                            <div class="col-md-3 col-md-offset-9">
-                                {{#if session.isAuthenticated}}
-                                {{#if (diff session.data.authenticated.user.role.name "SERVICER")}}
-                                    <button class="btn btn-primary list-item-btn">Izmjena</button>
-                                    <button class="btn btn-primary list-item-btn" {{action "setSupplierToDelete" supplier.id}}>Brisanje</button><br>
-                                    <button class="btn btn-primary list-item-btn" >Kreiraj ugovor</button><br>
-                                {{/if}}
-                                {{/if}}
-                            </div>
-                        </div>
-                    </div>
-                    {{/panel.body}}
-                {{/panels.panel}}
-            </div>
-            {{/each}}
-            {{/cp-panels}}
+    <div class="container-supplier">
+    {{#each model as |supplier|}}
+      <div class="box first">
+        <span class="icon-cont"><i class="glyphicon glyphicon-user"></i></span>
+        <h3>{{supplier.name}}</h3>
+        <div class = "details">
+        <p> <b> Adresa: </b> {{supplier.address}} </p>
+        <p> <b> Status: </b> {{supplier.status}} </p>
+        <p> <b> Kategorija: </b> {{supplier.category}} </p>
+        {{#if session.isAuthenticated}}
+        {{#if (diff session.data.authenticated.user.role.name "SERVICER")}}
+           <br> <button class="btn btn-default list-item-btn" {{action "createContract" supplier.id}}>Novi Ugovor</button>
+            <button class="btn btn-default list-item-btn" {{action "setSupplierToDelete" supplier.id}}>Brisanje</button><br>
+        {{/if}}
+        {{/if}}
         </div>
     </div>
+{{/each}}
 </div>
 
 {{#bs-modal-simple
@@ -56,3 +33,4 @@
     onHide=(action "cancelDeleting")}}
     Da li ste sigurni da zelite izbrisati ovog dobavljaca?
 {{/bs-modal-simple}}
+

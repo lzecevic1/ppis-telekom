@@ -15,6 +15,11 @@ define('up-signal/tests/app.lint-test', [], function () {
     assert.ok(true, 'authenticators/application.js should pass ESLint\n\n');
   });
 
+  QUnit.test('components/create-contract.js', function (assert) {
+    assert.expect(1);
+    assert.ok(true, 'components/create-contract.js should pass ESLint\n\n');
+  });
+
   QUnit.test('components/info-list-item.js', function (assert) {
     assert.expect(1);
     assert.ok(true, 'components/info-list-item.js should pass ESLint\n\n');
@@ -33,11 +38,6 @@ define('up-signal/tests/app.lint-test', [], function () {
   QUnit.test('controllers/all-suppliers.js', function (assert) {
     assert.expect(1);
     assert.ok(true, 'controllers/all-suppliers.js should pass ESLint\n\n');
-  });
-
-  QUnit.test('controllers/create-contract.js', function (assert) {
-    assert.expect(1);
-    assert.ok(true, 'controllers/create-contract.js should pass ESLint\n\n');
   });
 
   QUnit.test('controllers/login.js', function (assert) {
@@ -115,11 +115,6 @@ define('up-signal/tests/app.lint-test', [], function () {
     assert.ok(false, 'routes/all-suppliers.js should pass ESLint\n\n12:15 - \'transition\' is defined but never used. (no-unused-vars)');
   });
 
-  QUnit.test('routes/create-contact.js', function (assert) {
-    assert.expect(1);
-    assert.ok(true, 'routes/create-contact.js should pass ESLint\n\n');
-  });
-
   QUnit.test('routes/homepage.js', function (assert) {
     assert.expect(1);
     assert.ok(true, 'routes/homepage.js should pass ESLint\n\n');
@@ -168,6 +163,11 @@ define('up-signal/tests/app.lint-test', [], function () {
   QUnit.test('services/base-http-service.js', function (assert) {
     assert.expect(1);
     assert.ok(true, 'services/base-http-service.js should pass ESLint\n\n');
+  });
+
+  QUnit.test('services/contract-service.js', function (assert) {
+    assert.expect(1);
+    assert.ok(false, 'services/contract-service.js should pass ESLint\n\n23:2 - Mixed spaces and tabs. (no-mixed-spaces-and-tabs)');
   });
 
   QUnit.test('services/suppliers-service.js', function (assert) {
@@ -299,6 +299,36 @@ define('up-signal/tests/helpers/start-app', ['exports', 'up-signal/app', 'up-sig
     });
   }
 });
+define('up-signal/tests/integration/components/create-contract-test', ['ember-qunit'], function (_emberQunit) {
+  'use strict';
+
+  (0, _emberQunit.moduleForComponent)('create-contract', 'Integration | Component | create contract', {
+    integration: true
+  });
+
+  (0, _emberQunit.test)('it renders', function (assert) {
+
+    // Set any properties with this.set('myProperty', 'value');
+    // Handle any actions with this.on('myAction', function(val) { ... });
+
+    this.render(Ember.HTMLBars.template({
+      "id": "El3p0BbU",
+      "block": "{\"statements\":[[1,[26,[\"create-contract\"]],false]],\"locals\":[],\"named\":[],\"yields\":[],\"hasPartials\":false}",
+      "meta": {}
+    }));
+
+    assert.equal(this.$().text().trim(), '');
+
+    // Template block usage:
+    this.render(Ember.HTMLBars.template({
+      "id": "QFk193lT",
+      "block": "{\"statements\":[[0,\"\\n\"],[6,[\"create-contract\"],null,null,{\"statements\":[[0,\"      template block text\\n\"]],\"locals\":[]},null],[0,\"  \"]],\"locals\":[],\"named\":[],\"yields\":[],\"hasPartials\":false}",
+      "meta": {}
+    }));
+
+    assert.equal(this.$().text().trim(), 'template block text');
+  });
+});
 define('up-signal/tests/integration/components/info-list-item-test', ['ember-qunit'], function (_emberQunit) {
   'use strict';
 
@@ -390,6 +420,11 @@ define('up-signal/tests/tests.lint-test', [], function () {
     assert.ok(true, 'helpers/start-app.js should pass ESLint\n\n');
   });
 
+  QUnit.test('integration/components/create-contract-test.js', function (assert) {
+    assert.expect(1);
+    assert.ok(true, 'integration/components/create-contract-test.js should pass ESLint\n\n');
+  });
+
   QUnit.test('integration/components/info-list-item-test.js', function (assert) {
     assert.expect(1);
     assert.ok(true, 'integration/components/info-list-item-test.js should pass ESLint\n\n');
@@ -403,11 +438,6 @@ define('up-signal/tests/tests.lint-test', [], function () {
   QUnit.test('test-helper.js', function (assert) {
     assert.expect(1);
     assert.ok(true, 'test-helper.js should pass ESLint\n\n');
-  });
-
-  QUnit.test('unit/controllers/create-contract-test.js', function (assert) {
-    assert.expect(1);
-    assert.ok(true, 'unit/controllers/create-contract-test.js should pass ESLint\n\n');
   });
 
   QUnit.test('unit/controllers/login-test.js', function (assert) {
@@ -438,11 +468,6 @@ define('up-signal/tests/tests.lint-test', [], function () {
   QUnit.test('unit/routes/all-suppliers-test.js', function (assert) {
     assert.expect(1);
     assert.ok(true, 'unit/routes/all-suppliers-test.js should pass ESLint\n\n');
-  });
-
-  QUnit.test('unit/routes/create-contact-test.js', function (assert) {
-    assert.expect(1);
-    assert.ok(true, 'unit/routes/create-contact-test.js should pass ESLint\n\n');
   });
 
   QUnit.test('unit/routes/homepage-test.js', function (assert) {
@@ -495,23 +520,14 @@ define('up-signal/tests/tests.lint-test', [], function () {
     assert.ok(true, 'unit/services/base-http-service-test.js should pass ESLint\n\n');
   });
 
+  QUnit.test('unit/services/contract-service-test.js', function (assert) {
+    assert.expect(1);
+    assert.ok(true, 'unit/services/contract-service-test.js should pass ESLint\n\n');
+  });
+
   QUnit.test('unit/services/suppliers-service-test.js', function (assert) {
     assert.expect(1);
     assert.ok(true, 'unit/services/suppliers-service-test.js should pass ESLint\n\n');
-  });
-});
-define('up-signal/tests/unit/controllers/create-contract-test', ['ember-qunit'], function (_emberQunit) {
-  'use strict';
-
-  (0, _emberQunit.moduleFor)('controller:create-contract', 'Unit | Controller | create contract', {
-    // Specify the other units that are required for this test.
-    // needs: ['controller:foo']
-  });
-
-  // Replace this with your real tests.
-  (0, _emberQunit.test)('it exists', function (assert) {
-    var controller = this.subject();
-    assert.ok(controller);
   });
 });
 define('up-signal/tests/unit/controllers/login-test', ['ember-qunit'], function (_emberQunit) {
@@ -586,19 +602,6 @@ define('up-signal/tests/unit/routes/all-suppliers-test', ['ember-qunit'], functi
   'use strict';
 
   (0, _emberQunit.moduleFor)('route:all-suppliers', 'Unit | Route | all suppliers', {
-    // Specify the other units that are required for this test.
-    // needs: ['controller:foo']
-  });
-
-  (0, _emberQunit.test)('it exists', function (assert) {
-    var route = this.subject();
-    assert.ok(route);
-  });
-});
-define('up-signal/tests/unit/routes/create-contact-test', ['ember-qunit'], function (_emberQunit) {
-  'use strict';
-
-  (0, _emberQunit.moduleFor)('route:create-contact', 'Unit | Route | create contact', {
     // Specify the other units that are required for this test.
     // needs: ['controller:foo']
   });
@@ -729,6 +732,20 @@ define('up-signal/tests/unit/services/base-http-service-test', ['ember-qunit'], 
   'use strict';
 
   (0, _emberQunit.moduleFor)('service:base-http-service', 'Unit | Service | base http service', {
+    // Specify the other units that are required for this test.
+    // needs: ['service:foo']
+  });
+
+  // Replace this with your real tests.
+  (0, _emberQunit.test)('it exists', function (assert) {
+    var service = this.subject();
+    assert.ok(service);
+  });
+});
+define('up-signal/tests/unit/services/contract-service-test', ['ember-qunit'], function (_emberQunit) {
+  'use strict';
+
+  (0, _emberQunit.moduleFor)('service:contract-service', 'Unit | Service | contract service', {
     // Specify the other units that are required for this test.
     // needs: ['service:foo']
   });
