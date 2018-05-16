@@ -1,0 +1,24 @@
+<div class="container new-service-body">
+ <div class="panel panel-default">
+   <div class="panel-body">
+    <h4>Unesite podatke o novom ugovoru:</h4>
+    </div>
+    <div class="panel-body register-form__footer">
+    <form>
+  <div class="form-group">
+    <label for="exampleFormControlInput1">Početak ugovora:</label>
+      {{input type="date" class="form-control" id="startDate" value=model.startDate}}
+  </div>
+    <div class="form-group">
+    <label for="exampleFormControlInput1">Kraj ugovora:</label>
+      {{input type="date" class="form-control" id="endDate" value=model.endDate}}
+  </div>
+    <div class="form-group">
+    <label for="exampleFormControlInput1">Ime odgovorne osobe:</label>
+      {{input class="form-control" id="responsiblePerson" value=model.responsiblePerson}}
+  </div>
+  <button class="btn btn-lg btn-primary col-md-2" type="submit" {{action 'onNext'}}>UNOS</button>
+</form>
+</div>
+</div>
+</div>
