@@ -3,13 +3,36 @@
     <div class="collapse navbar-collapse" id="bs-example-navbar-collapse-8">
       <img class="logo" src="/assets/images/logo.png">
       <ul class="nav navbar-nav pull-right main-navbar">
-        <li>{{#link-to 'homepage'}}POČETNA{{/link-to}}</li>
-        <li>{{#link-to 'news'}} NOVOSTI {{/link-to}}</li>
-        <li>{{#link-to 'services'}} USLUGE {{/link-to}}</li>
-        <li>{{#link-to 'suppliers'}} DOBAVLJAČI {{/link-to}}</li>
+        <li class="nav-bar-list-item">{{#link-to 'homepage'}}Početna{{/link-to}}</li>
+        <li class="nav-bar-list-item">{{#link-to 'news'}} Novosti {{/link-to}}</li>
+        <li class="nav-bar-list-item">{{#link-to 'services'}} Usluge {{/link-to}}</li>
         {{!-- <li>{{#link-to 'packages'}} PAKETI{{/link-to}}</li> --}}
-        <li>{{#link-to 'login'}} PRIJAVA {{/link-to}}</li>
+        {{#if session.isAuthenticated}}
+        <li class="nav-bar-list-item">{{#link-to 'suppliers'}} Dobavljači {{/link-to}}</li>
+          <li class="nav-bar-list-item dropdown">
+            <a class="dropdown-toggle" data-toggle="dropdown">Dobrodošao , <b class="user-logged"> {{session.data.authenticated.user.username}}</b> <b class="caret"></b></a>
+                <ul class="dropdown-menu">
+                  <li {{action 'activateModal'}} class="nav-bar-list-item">
+                    {{#link-to 'homepage'}} 
+                      Odjava
+                    {{/link-to}}
+                  </li>
+                </ul>
+            </li>
+        {{else}}
+          <li>{{#link-to 'login'}} Prijava {{/link-to}}</li>
+        {{/if}}
       </ul>
     </div>
   </div>
 </nav>
+{{#bs-modal-simple
+    title="Odjava"
+    closeTitle="Ne"
+    submitTitle="Da"
+    open=active
+    onSubmit=(action "logout")
+    onHide=(action "hideModal")
+    }}
+    Da li ste sigurni da se zelite odjaviti?
+{{/bs-modal-simple}}
