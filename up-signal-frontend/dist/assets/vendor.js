@@ -96608,6 +96608,192 @@ define("ember-resolver/features", [], function () {
     return compare(a, b);
   }
 });
+;define('ember-star-rating/components/star-rating', ['exports', 'ember-star-rating/templates/components/star-rating'], function (exports, _starRating) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+
+  var RatingComponent = Ember.Component.extend({
+    layout: _starRating.default,
+
+    fillColor: 'yellow',
+    baseColor: 'lightgrey',
+    numStars: 5,
+    anyPercent: false,
+    rating: 0,
+    wholeOnly: false,
+    readOnly: false,
+    width: 26,
+    height: 26,
+    useHalfStars: true,
+    svgPath: 'M25.326,10.137c-0.117-0.361-0.431-0.625-0.807-0.68l-7.34-1.066l-3.283-6.651 c-0.337-0.683-1.456-0.683-1.793,0L8.82,8.391L1.48,9.457c-0.376,0.055-0.689,0.318-0.807,0.68c-0.117,0.363-0.02,0.76,0.253,1.025 l5.312,5.178l-1.254,7.31c-0.064,0.375,0.09,0.755,0.397,0.978c0.309,0.225,0.717,0.254,1.054,0.076L13,21.252l6.564,3.451 c0.146,0.077,0.307,0.115,0.466,0.115c0.207,0,0.413-0.064,0.588-0.191c0.308-0.223,0.462-0.603,0.397-0.978l-1.254-7.31 l5.312-5.178C25.346,10.896,25.443,10.5,25.326,10.137z',
+    viewBox: '0 0 26 26',
+
+    onHover: function onHover() {},
+    onClick: function onClick() {},
+    fastboot: Ember.computed(function () {
+      var owner = Ember.getOwner(this);
+      return owner.lookup('service:fastboot');
+    }),
+    style: Ember.computed('width', 'height', function () {
+      var style = '';
+      if (Ember.get(this, 'width')) {
+        style += 'width: ' + Ember.get(this, 'width') + '; ';
+      }
+      if (Ember.get(this, 'height')) {
+        style += 'height: ' + Ember.get(this, 'height') + ';';
+      }
+      return Ember.String.htmlSafe(style);
+    }),
+
+    init: function init() {
+      this._super.apply(this, arguments);
+      var num = Ember.get(this, 'numStars');
+      var stars = Array.apply(null, { length: num }).map(function () {
+        return 1;
+      });
+      Ember.set(this, 'stars', stars);
+    },
+    didReceiveAttrs: function didReceiveAttrs() {
+      var _this = this;
+
+      this._super.apply(this, arguments);
+      if (Ember.get(this, 'fastboot.isFastBoot')) return;
+      Ember.run.scheduleOnce('afterRender', function () {
+        return _this.$().removeClass('has-rating');
+      });
+      if (Ember.get(this, 'rating') > 0) {
+        Ember.run.scheduleOnce('afterRender', function () {
+          return _this.$().addClass('has-rating');
+        });
+      }
+      Ember.run.scheduleOnce('afterRender', function () {
+        var rating = Ember.get(_this, 'rating');
+        _this._updateStars(rating);
+      });
+    },
+    didInsertElement: function didInsertElement() {
+      this._super.apply(this, arguments);
+      this.$().css('display', 'inline-block');
+      if (Ember.get(this, 'readOnly') === false) {
+        this.$().css('cursor', 'pointer');
+      }
+    },
+    mouseMove: function mouseMove(event) {
+      var rating = this._render(event);
+      Ember.get(this, 'onHover')(rating || 0);
+    },
+    mouseLeave: function mouseLeave() {
+      var rating = this._reset();
+      Ember.get(this, 'onHover')(rating || 0);
+    },
+    click: function click(event) {
+      var rating = this._update(event);
+      Ember.get(this, 'onClick')(rating || 0);
+    },
+    _render: function _render(event) {
+      if (Ember.get(this, 'readOnly')) {
+        return;
+      }
+      var pageX = event.pageX;
+      var target = this._getTarget(pageX);
+      var rating = Math.floor(target * 2) / 2;
+      this._updateStars(rating);
+      this.$().removeClass('has-rating').addClass('is-rating');
+      return rating;
+    },
+    _reset: function _reset() {
+      if (Ember.get(this, 'readOnly')) {
+        return;
+      }
+      var rating = Ember.get(this, 'rating');
+      this._updateStars(Math.floor(rating * 2) / 2);
+      this.$().removeClass('is-rating');
+      if (rating > 0) {
+        this.$().addClass('has-rating');
+      }
+      return rating;
+    },
+    _update: function _update(event) {
+      if (Ember.get(this, 'readOnly')) {
+        return;
+      }
+      var pageX = event.pageX;
+      var target = this._getTarget(pageX);
+      var rating = Math.floor(target * 2) / 2;
+
+      if (Ember.get(this, 'wholeOnly') === true) {
+        return Math.ceil(rating);
+      }
+
+      return rating;
+    },
+    _getTarget: function _getTarget(x) {
+      var numStars = Ember.get(this, 'numStars');
+      var numStarsFilled = numStars * (x - this.$().offset().left) / this.$().width() + 0.5;
+      if (Ember.get(this, 'useHalfStars')) {
+        return numStarsFilled;
+      }
+      return Math.ceil(numStarsFilled - 0.5);
+    },
+    _getStarOffset: function _getStarOffset(rating, index) {
+      var result = rating - index;
+      if (Ember.get(this, 'useHalfStars')) {
+        if (result > -0.01) {
+          return '100%';
+        } else if (result > -0.51) {
+          return '50%';
+        } else {
+          return '0%';
+        }
+      } else {
+        if (result > -0.51) {
+          return '100%';
+        } else {
+          return '0%';
+        }
+      }
+    },
+    _updateStars: function _updateStars(rating) {
+      var _this2 = this;
+
+      this.$().find('> svg').each(function (index, elem) {
+        var offset = 0;
+
+        if (Ember.get(_this2, 'anyPercent') === true) {
+          offset = rating - index > 0 ? rating - index > 1 ? '100%' : ((rating - index) * 100).toFixed(0) + '%' : '0%';
+        } else {
+          offset = _this2._getStarOffset(rating, index + 1);
+        }
+
+        if (Ember.get(_this2, 'wholeOnly') === true) {
+          rating = Math.ceil(rating);
+        }
+
+        _this2.$(elem).find('stop').eq(0).attr('offset', offset);
+        var klass = offset === '100%' ? 'star-full' : offset === '50%' ? 'star-half' : 'star-empty';
+        if (Ember.get(_this2, 'anyPercent') === true && klass === 'star-empty' && offset !== '0%') {
+          klass = 'star-variable';
+        }
+        _this2.$(elem).attr('class', '').attr('class', klass);
+      });
+    }
+  });
+
+  RatingComponent.reopenClass({
+    positionalParams: ['rating']
+  });
+
+  exports.default = RatingComponent;
+});
+;define("ember-star-rating/templates/components/star-rating", ["exports"], function (exports) {
+  "use strict";
+
+  exports.__esModule = true;
+  exports.default = Ember.HTMLBars.template({ "id": "4RJMlRy+", "block": "{\"statements\":[[6,[\"each\"],[[28,[\"stars\"]]],null,{\"statements\":[[0,\"  \"],[11,\"svg\",[]],[16,\"width\",[26,[\"width\"]],null],[16,\"height\",[26,[\"height\"]],null],[16,\"style\",[26,[\"style\"]],null],[15,\"xmlns\",\"http://www.w3.org/2000/svg\",\"http://www.w3.org/2000/xmlns/\"],[15,\"xmlns:xlink\",\"http://www.w3.org/1999/xlink\",\"http://www.w3.org/2000/xmlns/\"],[16,\"viewBox\",[26,[\"viewBox\"]],null],[13],[0,\"\\n    \"],[11,\"defs\",[]],[13],[0,\"\\n      \"],[11,\"linearGradient\",[]],[16,\"id\",[34,[[26,[\"elementId\"]],\"-star-\",[28,[\"index\"]]]]],[15,\"x1\",\"0%\"],[15,\"y1\",\"0%\"],[15,\"x2\",\"100%\"],[15,\"y2\",\"0%\"],[13],[0,\"\\n        \"],[11,\"stop\",[]],[15,\"class\",\"star-rating-filled\"],[15,\"offset\",\"0%\"],[16,\"stop-color\",[26,[\"fillColor\"]],null],[13],[14],[0,\"\\n        \"],[11,\"stop\",[]],[15,\"class\",\"star-rating-base\"],[15,\"offset\",\"0%\"],[16,\"stop-color\",[26,[\"baseColor\"]],null],[13],[14],[0,\"\\n      \"],[14],[0,\"\\n    \"],[14],[0,\"\\n\\n    \"],[11,\"path\",[]],[16,\"fill\",[34,[\"url(#\",[26,[\"elementId\"]],\"-star-\",[28,[\"index\"]],\")\"]]],[16,\"d\",[26,[\"svgPath\"]],null],[13],[14],[0,\"\\n  \"],[14],[0,\"\\n\"]],\"locals\":[\"star\",\"index\"]},null]],\"locals\":[],\"named\":[],\"yields\":[],\"hasPartials\":false}", "meta": { "moduleName": "ember-star-rating/templates/components/star-rating.hbs" } });
+});
 ;define('ember-welcome-page/components/welcome-page', ['exports', 'ember-welcome-page/templates/components/welcome-page'], function (exports, _welcomePage) {
   'use strict';
 

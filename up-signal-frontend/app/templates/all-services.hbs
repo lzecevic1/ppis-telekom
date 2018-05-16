@@ -1,48 +1,26 @@
 <div class="list-top">
     <p>PREGLED SVIH USLUGA</p>
 </div>
-<div class="container">
-    <div class="row justify-content-md-center">
-        <div class="col-md-12 suppliers-body">
-            {{#cp-panels accordion=true as |panels|}}
-            {{#each model as |service|}}
-            <div class="panel panel-primary">
-                {{#panels.panel as |panel|}}
-                    {{#panel.toggle}}
-                    <div class="panel-heading">{{service.serviceId}}</div>
-                    {{/panel.toggle}}
-                    {{#panel.body}}
-                    <div class="panel-body"> 
-                        <div class="row">
-                            <div class="col-md-3">
-                                <img class='service-row-image' src="/assets/images/technology.png"><br>
-                            </div>
-                            <div class="col-md-9">
-                                <p> <b>Tip usluge:</b> {{service.type}}</p>
-                                <p> <b>Opis: </b> {{service.description}}</p>
-                                <p> <b>Odgovorna osoba: </b>{{service.responsiblePerson}}</p>
-                                <p> <i>Cijena se nalazi u glavnom cjenovniku</i></p>
-                            </div>
-                        </div>
-                        <div class="row">
-                            <div class="col-md-3 col-md-offset-9">
-                                    {{#if session.isAuthenticated}}
-                                        {{#if (diff session.data.authenticated.user.role.name "SUPPLIER")}}
-                                            <button class="btn btn-primary list-item-btn">Izmjena</button>
-                                            <button class="btn btn-primary list-item-btn" {{action "setServiceToDelete" service.id}}>Brisanje</button><br>
-                                        {{/if}}
-                                    {{/if}}
+    <div class="container-supplier">
+    {{#each model as |service|}}
+        <div class="box box-service">
+        <span class="icon-cont"><i class="glyphicon glyphicon-shopping-cart"></i></span>
+        <h3>{{service.serviceId}}</h3>
+        <div class = "details">
+        <p> <b>Tip usluge:</b> {{service.type}}</p>
+        <p> <b>Opis: </b> {{service.description}}</p>
+        <p> <b>Odgovorna osoba: </b>{{service.responsiblePerson}}</p>
+        <p> <i>Cijena se nalazi u glavnom cjenovniku</i></p>
 
-                            </div>
-                        </div>
-                    </div>
-                    {{/panel.body}}
-                {{/panels.panel}}
+        {{#if session.isAuthenticated}}
+            {{#if (diff session.data.authenticated.user.role.name "SUPPLIER")}} <br>
+                <button class="btn btn-default list-item-btn">Izmjena</button>
+                <button class="btn btn-default list-item-btn" {{action "setServiceToDelete" service.id}}>Brisanje</button><br>
+            {{/if}}
+        {{/if}}
+        </div>
         </div>
         {{/each}}
-        {{/cp-panels}}
-        </div>
-    </div>
 </div>
 
 {{#bs-modal-simple
@@ -58,4 +36,3 @@
     Da li ste sigurni da zelite izbrisati ovu uslugu?
 {{/bs-modal-simple}}
 
-  

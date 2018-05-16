@@ -93,9 +93,14 @@
   transition: all 0.5s;
 }
 
+.box-service{
+  height: 465px !important;
+
+}
+
 .box {
   width: 24%;
-  height: 380px;
+  height: 420px;
   margin: 0.2%;
   padding: 15px;
   display: inline-block;
@@ -151,6 +156,7 @@
   text-transform: uppercase;
   letter-spacing: 2px;
   padding: 15px;
+  padding-top: 0px;
   border-bottom: 1px solid rgba(255,255,255,0);
 
   position: absolute;

@@ -25,6 +25,15 @@ export default Ember.Controller.extend({
 
   cancelDeleting: function() {
     this.set('supplierId', null);
+  },
+
+  createContract: function(id) {
+
+  },
+
+  rateSupplier: function(supplierId,rating) {
+
+
   }
 
 }
