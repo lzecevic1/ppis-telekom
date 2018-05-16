@@ -10,7 +10,7 @@ Router.map(function() {
   this.route('homepage');
   this.route('login');
   this.route('about-us');
-  this.route('services', function() {});
+  this.route('services');
   this.route('packages');
   this.route('new-service');
   this.route('new-supplier');

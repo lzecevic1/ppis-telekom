@@ -10,7 +10,7 @@ export default Ember.Controller.extend({
      _supplierService: service('suppliers-service'),
     
      serviceId: null,
-
+     session: Ember.inject.service('session'),
     actions: { 
         delete: function(serviceId) {
             this.get('_supplierService').deleteService(serviceId).then(()=>{

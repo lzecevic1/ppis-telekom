@@ -1,10 +1,18 @@
  <div id="fullBg" />
 
 <div class="container">
-  <form class="form-signin">
-      <input type="text" class="form-control" name="username" placeholder="korisničko ime" required="" autofocus="" />
-      <input type="password" class="form-control" name="password" placeholder="šifra" required=""/>
-      <button class="btn btn-lg btn-primary btn-block" type="submit">PRIJAVA</button>
+    <form class="form-signin">
+      {{input type="text" class="form-control" placeholder="korisničko ime" required="" autofocus="" value=model.username}}
+      {{input type="password" class="form-control" placeholder="šifra" required="" value=model.password}}
+      <button class="btn btn-lg btn-primary btn-block" type="submit" {{action 'login'}}>PRIJAVA</button>
       <br><p class="text-center sign-up"><strong>Registrujte</strong> se za novi korisnički račun</p>
     </form>
+
 </div>
+{{#bs-modal-simple
+    open=openModal
+    closeTitle="OK"
+    onHide=(action "returnToHomePage")
+    }}
+    Uspješna prijava!
+{{/bs-modal-simple}}

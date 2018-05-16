@@ -11,7 +11,6 @@ public class User {
     private Long id;
     private String username;
     private String password;
-    private String hashedPassword;
     private String email;
     private String phoneNumber;
     private Gender gender;
@@ -22,10 +21,9 @@ public class User {
     public User() {
     }
 
-    public User(String username, String password, String hashedPassword, String email, String phoneNumber, Gender gender, Role role) {
+    public User(String username, String password, String email, String phoneNumber, Gender gender, Role role) {
         this.username = username;
         this.password = password;
-        this.hashedPassword = hashedPassword;
         this.email = email;
         this.phoneNumber = phoneNumber;
         this.gender = gender;
@@ -90,14 +88,6 @@ public class User {
 
     public void setPassword(String password) {
         this.password = password;
-    }
-
-    public String getHashedPassword() {
-        return hashedPassword;
-    }
-
-    public void setHashedPassword(String hashedPassword) {
-        this.hashedPassword = hashedPassword;
     }
 
     @Override

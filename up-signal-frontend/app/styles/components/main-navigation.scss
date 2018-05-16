@@ -6,3 +6,20 @@
 .main-navbar {
   margin-top: 7px;
 }
+
+.nav-bar-list-item:hover {
+  background-color: #e7e7e7;
+  border-radius: 5%;
+}
+
+.user-logged {
+  color: darkblue;
+}
+
+.status-info {
+  font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+}
+
+.dropdown-toggle:hover {
+  cursor: pointer;
+}

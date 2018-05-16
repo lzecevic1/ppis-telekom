@@ -10,6 +10,11 @@ define('up-signal/tests/app.lint-test', [], function () {
     assert.ok(true, 'app.js should pass ESLint\n\n');
   });
 
+  QUnit.test('authenticators/application.js', function (assert) {
+    assert.expect(1);
+    assert.ok(true, 'authenticators/application.js should pass ESLint\n\n');
+  });
+
   QUnit.test('components/info-list-item.js', function (assert) {
     assert.expect(1);
     assert.ok(true, 'components/info-list-item.js should pass ESLint\n\n');
@@ -18,6 +23,16 @@ define('up-signal/tests/app.lint-test', [], function () {
   QUnit.test('components/main-navigation.js', function (assert) {
     assert.expect(1);
     assert.ok(true, 'components/main-navigation.js should pass ESLint\n\n');
+  });
+
+  QUnit.test('controllers/all-services.js', function (assert) {
+    assert.expect(1);
+    assert.ok(true, 'controllers/all-services.js should pass ESLint\n\n');
+  });
+
+  QUnit.test('controllers/all-suppliers.js', function (assert) {
+    assert.expect(1);
+    assert.ok(true, 'controllers/all-suppliers.js should pass ESLint\n\n');
   });
 
   QUnit.test('controllers/login.js', function (assert) {
@@ -33,6 +48,41 @@ define('up-signal/tests/app.lint-test', [], function () {
   QUnit.test('controllers/new-supplier.js', function (assert) {
     assert.expect(1);
     assert.ok(true, 'controllers/new-supplier.js should pass ESLint\n\n');
+  });
+
+  QUnit.test('controllers/services.js', function (assert) {
+    assert.expect(1);
+    assert.ok(true, 'controllers/services.js should pass ESLint\n\n');
+  });
+
+  QUnit.test('controllers/suppliers.js', function (assert) {
+    assert.expect(1);
+    assert.ok(true, 'controllers/suppliers.js should pass ESLint\n\n');
+  });
+
+  QUnit.test('helpers/diff.js', function (assert) {
+    assert.expect(1);
+    assert.ok(true, 'helpers/diff.js should pass ESLint\n\n');
+  });
+
+  QUnit.test('helpers/eq.js', function (assert) {
+    assert.expect(1);
+    assert.ok(true, 'helpers/eq.js should pass ESLint\n\n');
+  });
+
+  QUnit.test('initializers/base-http-service.js', function (assert) {
+    assert.expect(1);
+    assert.ok(true, 'initializers/base-http-service.js should pass ESLint\n\n');
+  });
+
+  QUnit.test('models/base-model.js', function (assert) {
+    assert.expect(1);
+    assert.ok(true, 'models/base-model.js should pass ESLint\n\n');
+  });
+
+  QUnit.test('models/user.js', function (assert) {
+    assert.expect(1);
+    assert.ok(true, 'models/user.js should pass ESLint\n\n');
   });
 
   QUnit.test('resolver.js', function (assert) {
@@ -57,7 +107,7 @@ define('up-signal/tests/app.lint-test', [], function () {
 
   QUnit.test('routes/all-suppliers.js', function (assert) {
     assert.expect(1);
-    assert.ok(true, 'routes/all-suppliers.js should pass ESLint\n\n');
+    assert.ok(false, 'routes/all-suppliers.js should pass ESLint\n\n12:15 - \'transition\' is defined but never used. (no-unused-vars)');
   });
 
   QUnit.test('routes/homepage.js', function (assert) {
@@ -65,19 +115,24 @@ define('up-signal/tests/app.lint-test', [], function () {
     assert.ok(true, 'routes/homepage.js should pass ESLint\n\n');
   });
 
+  QUnit.test('routes/index.js', function (assert) {
+    assert.expect(1);
+    assert.ok(true, 'routes/index.js should pass ESLint\n\n');
+  });
+
   QUnit.test('routes/login.js', function (assert) {
     assert.expect(1);
-    assert.ok(true, 'routes/login.js should pass ESLint\n\n');
+    assert.ok(false, 'routes/login.js should pass ESLint\n\n6:13 - \'transition\' is defined but never used. (no-unused-vars)');
   });
 
   QUnit.test('routes/new-service.js', function (assert) {
     assert.expect(1);
-    assert.ok(true, 'routes/new-service.js should pass ESLint\n\n');
+    assert.ok(false, 'routes/new-service.js should pass ESLint\n\n18:15 - \'transition\' is defined but never used. (no-unused-vars)');
   });
 
   QUnit.test('routes/new-supplier.js', function (assert) {
     assert.expect(1);
-    assert.ok(true, 'routes/new-supplier.js should pass ESLint\n\n');
+    assert.ok(false, 'routes/new-supplier.js should pass ESLint\n\n17:15 - \'transition\' is defined but never used. (no-unused-vars)');
   });
 
   QUnit.test('routes/news.js', function (assert) {
@@ -97,7 +152,7 @@ define('up-signal/tests/app.lint-test', [], function () {
 
   QUnit.test('routes/suppliers.js', function (assert) {
     assert.expect(1);
-    assert.ok(true, 'routes/suppliers.js should pass ESLint\n\n');
+    assert.ok(false, 'routes/suppliers.js should pass ESLint\n\n15:15 - \'transition\' is defined but never used. (no-unused-vars)');
   });
 
   QUnit.test('services/base-http-service.js', function (assert) {
@@ -109,6 +164,11 @@ define('up-signal/tests/app.lint-test', [], function () {
     assert.expect(1);
     assert.ok(true, 'services/suppliers-service.js should pass ESLint\n\n');
   });
+
+  QUnit.test('services/telekom-http.js', function (assert) {
+    assert.expect(1);
+    assert.ok(true, 'services/telekom-http.js should pass ESLint\n\n');
+  });
 });
 define('up-signal/tests/helpers/destroy-app', ['exports'], function (exports) {
   'use strict';
@@ -119,6 +179,47 @@ define('up-signal/tests/helpers/destroy-app', ['exports'], function (exports) {
   exports.default = destroyApp;
   function destroyApp(application) {
     Ember.run(application, 'destroy');
+  }
+});
+define('up-signal/tests/helpers/ember-simple-auth', ['exports', 'ember-simple-auth/authenticators/test'], function (exports, _test) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.authenticateSession = authenticateSession;
+  exports.currentSession = currentSession;
+  exports.invalidateSession = invalidateSession;
+
+
+  var TEST_CONTAINER_KEY = 'authenticator:test';
+
+  function ensureAuthenticator(app, container) {
+    var authenticator = container.lookup(TEST_CONTAINER_KEY);
+    if (!authenticator) {
+      app.register(TEST_CONTAINER_KEY, _test.default);
+    }
+  }
+
+  function authenticateSession(app, sessionData) {
+    var container = app.__container__;
+
+    var session = container.lookup('service:session');
+    ensureAuthenticator(app, container);
+    session.authenticate(TEST_CONTAINER_KEY, sessionData);
+    return app.testHelpers.wait();
+  }
+
+  function currentSession(app) {
+    return app.__container__.lookup('service:session');
+  }
+
+  function invalidateSession(app) {
+    var session = app.__container__.lookup('service:session');
+    if (session.get('isAuthenticated')) {
+      session.invalidate();
+    }
+    return app.testHelpers.wait();
   }
 });
 define('up-signal/tests/helpers/module-for-acceptance', ['exports', 'qunit', 'up-signal/tests/helpers/start-app', 'up-signal/tests/helpers/destroy-app'], function (exports, _qunit, _startApp, _destroyApp) {
@@ -329,6 +430,11 @@ define('up-signal/tests/tests.lint-test', [], function () {
     assert.ok(true, 'unit/routes/homepage-test.js should pass ESLint\n\n');
   });
 
+  QUnit.test('unit/routes/index-test.js', function (assert) {
+    assert.expect(1);
+    assert.ok(true, 'unit/routes/index-test.js should pass ESLint\n\n');
+  });
+
   QUnit.test('unit/routes/login-test.js', function (assert) {
     assert.expect(1);
     assert.ok(true, 'unit/routes/login-test.js should pass ESLint\n\n');
@@ -459,6 +565,19 @@ define('up-signal/tests/unit/routes/homepage-test', ['ember-qunit'], function (_
   'use strict';
 
   (0, _emberQunit.moduleFor)('route:homepage', 'Unit | Route | homepage', {
+    // Specify the other units that are required for this test.
+    // needs: ['controller:foo']
+  });
+
+  (0, _emberQunit.test)('it exists', function (assert) {
+    var route = this.subject();
+    assert.ok(route);
+  });
+});
+define('up-signal/tests/unit/routes/index-test', ['ember-qunit'], function (_emberQunit) {
+  'use strict';
+
+  (0, _emberQunit.moduleFor)('route:index', 'Unit | Route | index', {
     // Specify the other units that are required for this test.
     // needs: ['controller:foo']
   });

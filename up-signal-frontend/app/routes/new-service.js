@@ -1,4 +1,5 @@
 import Ember from 'ember';
+import LoginRoute from './login';
 
 const {
   inject: {
@@ -6,12 +7,21 @@ const {
   }
 } = Ember;
 
-export default Ember.Route.extend({
+export default LoginRoute.extend({
   _supplierService: service('suppliers-service'),
 
   model: function () {
     //returns an empty supplier model
     return this.get('_supplierService').createService();
+  },
+
+  beforeModel(transition)
+  {
+    if(!this.get('session.isAuthenticated')) {
+      this.transitionTo('login');
+    }
+    else if(this.get('session.data.authenticated.user.role.name') == "SUPPLIER")
+      this.transitionTo('homepage');
   },
 
   actions: {

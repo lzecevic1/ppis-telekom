@@ -24,6 +24,806 @@ define('up-signal/app', ['exports', 'up-signal/resolver', 'ember-load-initialize
 
   exports.default = App;
 });
+define('up-signal/authenticators/application', ['exports', 'ember-simple-auth/authenticators/base'], function (exports, _base) {
+    'use strict';
+
+    Object.defineProperty(exports, "__esModule", {
+        value: true
+    });
+    var Promise = Ember.RSVP.Promise;
+    exports.default = _base.default.extend({
+        telekomHttp: Ember.inject.service('telekom-http'),
+
+        restore: function restore(data) {
+            return new Promise(function (resolve, reject) {
+                if (!Ember.isEmpty(data.token)) {
+                    resolve(data);
+                } else {
+                    reject();
+                }
+            });
+        },
+        authenticate: function authenticate(credentials, callback) {
+            return this.get('telekomHttp').post('login', credentials, function (resp) {
+                if (callback) {
+                    callback(resp);
+                }
+
+                return resp;
+            });
+        },
+        invalidate: function invalidate(data) {
+            return Promise.resolve(data);
+        }
+    });
+});
+define('up-signal/components/bs-accordion', ['exports', 'ember-bootstrap/components/bs-accordion'], function (exports, _bsAccordion) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  Object.defineProperty(exports, 'default', {
+    enumerable: true,
+    get: function () {
+      return _bsAccordion.default;
+    }
+  });
+});
+define('up-signal/components/bs-accordion/item', ['exports', 'ember-bootstrap/components/bs-accordion/item'], function (exports, _item) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  Object.defineProperty(exports, 'default', {
+    enumerable: true,
+    get: function () {
+      return _item.default;
+    }
+  });
+});
+define('up-signal/components/bs-accordion/item/body', ['exports', 'ember-bootstrap/components/bs-accordion/item/body'], function (exports, _body) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  Object.defineProperty(exports, 'default', {
+    enumerable: true,
+    get: function () {
+      return _body.default;
+    }
+  });
+});
+define('up-signal/components/bs-accordion/item/title', ['exports', 'ember-bootstrap/components/bs-accordion/item/title'], function (exports, _title) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  Object.defineProperty(exports, 'default', {
+    enumerable: true,
+    get: function () {
+      return _title.default;
+    }
+  });
+});
+define('up-signal/components/bs-alert', ['exports', 'ember-bootstrap/components/bs-alert'], function (exports, _bsAlert) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  Object.defineProperty(exports, 'default', {
+    enumerable: true,
+    get: function () {
+      return _bsAlert.default;
+    }
+  });
+});
+define('up-signal/components/bs-button-group', ['exports', 'ember-bootstrap/components/bs-button-group'], function (exports, _bsButtonGroup) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  Object.defineProperty(exports, 'default', {
+    enumerable: true,
+    get: function () {
+      return _bsButtonGroup.default;
+    }
+  });
+});
+define('up-signal/components/bs-button-group/button', ['exports', 'ember-bootstrap/components/bs-button-group/button'], function (exports, _button) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  Object.defineProperty(exports, 'default', {
+    enumerable: true,
+    get: function () {
+      return _button.default;
+    }
+  });
+});
+define('up-signal/components/bs-button', ['exports', 'ember-bootstrap/components/bs-button'], function (exports, _bsButton) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  Object.defineProperty(exports, 'default', {
+    enumerable: true,
+    get: function () {
+      return _bsButton.default;
+    }
+  });
+});
+define('up-signal/components/bs-carousel', ['exports', 'ember-bootstrap/components/bs-carousel'], function (exports, _bsCarousel) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  Object.defineProperty(exports, 'default', {
+    enumerable: true,
+    get: function () {
+      return _bsCarousel.default;
+    }
+  });
+});
+define('up-signal/components/bs-carousel/slide', ['exports', 'ember-bootstrap/components/bs-carousel/slide'], function (exports, _slide) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  Object.defineProperty(exports, 'default', {
+    enumerable: true,
+    get: function () {
+      return _slide.default;
+    }
+  });
+});
+define('up-signal/components/bs-collapse', ['exports', 'ember-bootstrap/components/bs-collapse'], function (exports, _bsCollapse) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  Object.defineProperty(exports, 'default', {
+    enumerable: true,
+    get: function () {
+      return _bsCollapse.default;
+    }
+  });
+});
+define('up-signal/components/bs-dropdown', ['exports', 'ember-bootstrap/components/bs-dropdown'], function (exports, _bsDropdown) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  Object.defineProperty(exports, 'default', {
+    enumerable: true,
+    get: function () {
+      return _bsDropdown.default;
+    }
+  });
+});
+define('up-signal/components/bs-dropdown/button', ['exports', 'ember-bootstrap/components/bs-dropdown/button'], function (exports, _button) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  Object.defineProperty(exports, 'default', {
+    enumerable: true,
+    get: function () {
+      return _button.default;
+    }
+  });
+});
+define('up-signal/components/bs-dropdown/menu', ['exports', 'ember-bootstrap/components/bs-dropdown/menu'], function (exports, _menu) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  Object.defineProperty(exports, 'default', {
+    enumerable: true,
+    get: function () {
+      return _menu.default;
+    }
+  });
+});
+define('up-signal/components/bs-dropdown/menu/divider', ['exports', 'ember-bootstrap/components/bs-dropdown/menu/divider'], function (exports, _divider) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  Object.defineProperty(exports, 'default', {
+    enumerable: true,
+    get: function () {
+      return _divider.default;
+    }
+  });
+});
+define('up-signal/components/bs-dropdown/menu/item', ['exports', 'ember-bootstrap/components/bs-dropdown/menu/item'], function (exports, _item) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  Object.defineProperty(exports, 'default', {
+    enumerable: true,
+    get: function () {
+      return _item.default;
+    }
+  });
+});
+define('up-signal/components/bs-dropdown/menu/link-to', ['exports', 'ember-bootstrap/components/bs-dropdown/menu/link-to'], function (exports, _linkTo) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  Object.defineProperty(exports, 'default', {
+    enumerable: true,
+    get: function () {
+      return _linkTo.default;
+    }
+  });
+});
+define('up-signal/components/bs-dropdown/toggle', ['exports', 'ember-bootstrap/components/bs-dropdown/toggle'], function (exports, _toggle) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  Object.defineProperty(exports, 'default', {
+    enumerable: true,
+    get: function () {
+      return _toggle.default;
+    }
+  });
+});
+define('up-signal/components/bs-form', ['exports', 'ember-bootstrap/components/bs-form'], function (exports, _bsForm) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  Object.defineProperty(exports, 'default', {
+    enumerable: true,
+    get: function () {
+      return _bsForm.default;
+    }
+  });
+});
+define('up-signal/components/bs-form/element', ['exports', 'ember-bootstrap/components/bs-form/element'], function (exports, _element) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  Object.defineProperty(exports, 'default', {
+    enumerable: true,
+    get: function () {
+      return _element.default;
+    }
+  });
+});
+define('up-signal/components/bs-form/element/control', ['exports', 'ember-bootstrap/components/bs-form/element/control'], function (exports, _control) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  Object.defineProperty(exports, 'default', {
+    enumerable: true,
+    get: function () {
+      return _control.default;
+    }
+  });
+});
+define('up-signal/components/bs-form/element/control/checkbox', ['exports', 'ember-bootstrap/components/bs-form/element/control/checkbox'], function (exports, _checkbox) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  Object.defineProperty(exports, 'default', {
+    enumerable: true,
+    get: function () {
+      return _checkbox.default;
+    }
+  });
+});
+define('up-signal/components/bs-form/element/control/input', ['exports', 'ember-bootstrap/components/bs-form/element/control/input'], function (exports, _input) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  Object.defineProperty(exports, 'default', {
+    enumerable: true,
+    get: function () {
+      return _input.default;
+    }
+  });
+});
+define('up-signal/components/bs-form/element/control/textarea', ['exports', 'ember-bootstrap/components/bs-form/element/control/textarea'], function (exports, _textarea) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  Object.defineProperty(exports, 'default', {
+    enumerable: true,
+    get: function () {
+      return _textarea.default;
+    }
+  });
+});
+define('up-signal/components/bs-form/element/errors', ['exports', 'ember-bootstrap/components/bs-form/element/errors'], function (exports, _errors) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  Object.defineProperty(exports, 'default', {
+    enumerable: true,
+    get: function () {
+      return _errors.default;
+    }
+  });
+});
+define('up-signal/components/bs-form/element/feedback-icon', ['exports', 'ember-bootstrap/components/bs-form/element/feedback-icon'], function (exports, _feedbackIcon) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  Object.defineProperty(exports, 'default', {
+    enumerable: true,
+    get: function () {
+      return _feedbackIcon.default;
+    }
+  });
+});
+define('up-signal/components/bs-form/element/help-text', ['exports', 'ember-bootstrap/components/bs-form/element/help-text'], function (exports, _helpText) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  Object.defineProperty(exports, 'default', {
+    enumerable: true,
+    get: function () {
+      return _helpText.default;
+    }
+  });
+});
+define('up-signal/components/bs-form/element/label', ['exports', 'ember-bootstrap/components/bs-form/element/label'], function (exports, _label) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  Object.defineProperty(exports, 'default', {
+    enumerable: true,
+    get: function () {
+      return _label.default;
+    }
+  });
+});
+define('up-signal/components/bs-form/element/layout/horizontal', ['exports', 'ember-bootstrap/components/bs-form/element/layout/horizontal'], function (exports, _horizontal) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  Object.defineProperty(exports, 'default', {
+    enumerable: true,
+    get: function () {
+      return _horizontal.default;
+    }
+  });
+});
+define('up-signal/components/bs-form/element/layout/horizontal/checkbox', ['exports', 'ember-bootstrap/components/bs-form/element/layout/horizontal/checkbox'], function (exports, _checkbox) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  Object.defineProperty(exports, 'default', {
+    enumerable: true,
+    get: function () {
+      return _checkbox.default;
+    }
+  });
+});
+define('up-signal/components/bs-form/element/layout/inline', ['exports', 'ember-bootstrap/components/bs-form/element/layout/inline'], function (exports, _inline) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  Object.defineProperty(exports, 'default', {
+    enumerable: true,
+    get: function () {
+      return _inline.default;
+    }
+  });
+});
+define('up-signal/components/bs-form/element/layout/inline/checkbox', ['exports', 'ember-bootstrap/components/bs-form/element/layout/inline/checkbox'], function (exports, _checkbox) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  Object.defineProperty(exports, 'default', {
+    enumerable: true,
+    get: function () {
+      return _checkbox.default;
+    }
+  });
+});
+define('up-signal/components/bs-form/element/layout/vertical', ['exports', 'ember-bootstrap/components/bs-form/element/layout/vertical'], function (exports, _vertical) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  Object.defineProperty(exports, 'default', {
+    enumerable: true,
+    get: function () {
+      return _vertical.default;
+    }
+  });
+});
+define('up-signal/components/bs-form/element/layout/vertical/checkbox', ['exports', 'ember-bootstrap/components/bs-form/element/layout/vertical/checkbox'], function (exports, _checkbox) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  Object.defineProperty(exports, 'default', {
+    enumerable: true,
+    get: function () {
+      return _checkbox.default;
+    }
+  });
+});
+define('up-signal/components/bs-form/group', ['exports', 'ember-bootstrap/components/bs-form/group'], function (exports, _group) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  Object.defineProperty(exports, 'default', {
+    enumerable: true,
+    get: function () {
+      return _group.default;
+    }
+  });
+});
+define('up-signal/components/bs-modal-simple', ['exports', 'ember-bootstrap/components/bs-modal-simple'], function (exports, _bsModalSimple) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  Object.defineProperty(exports, 'default', {
+    enumerable: true,
+    get: function () {
+      return _bsModalSimple.default;
+    }
+  });
+});
+define('up-signal/components/bs-modal', ['exports', 'ember-bootstrap/components/bs-modal'], function (exports, _bsModal) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  Object.defineProperty(exports, 'default', {
+    enumerable: true,
+    get: function () {
+      return _bsModal.default;
+    }
+  });
+});
+define('up-signal/components/bs-modal/body', ['exports', 'ember-bootstrap/components/bs-modal/body'], function (exports, _body) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  Object.defineProperty(exports, 'default', {
+    enumerable: true,
+    get: function () {
+      return _body.default;
+    }
+  });
+});
+define('up-signal/components/bs-modal/dialog', ['exports', 'ember-bootstrap/components/bs-modal/dialog'], function (exports, _dialog) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  Object.defineProperty(exports, 'default', {
+    enumerable: true,
+    get: function () {
+      return _dialog.default;
+    }
+  });
+});
+define('up-signal/components/bs-modal/footer', ['exports', 'ember-bootstrap/components/bs-modal/footer'], function (exports, _footer) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  Object.defineProperty(exports, 'default', {
+    enumerable: true,
+    get: function () {
+      return _footer.default;
+    }
+  });
+});
+define('up-signal/components/bs-modal/header', ['exports', 'ember-bootstrap/components/bs-modal/header'], function (exports, _header) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  Object.defineProperty(exports, 'default', {
+    enumerable: true,
+    get: function () {
+      return _header.default;
+    }
+  });
+});
+define('up-signal/components/bs-modal/header/close', ['exports', 'ember-bootstrap/components/bs-modal/header/close'], function (exports, _close) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  Object.defineProperty(exports, 'default', {
+    enumerable: true,
+    get: function () {
+      return _close.default;
+    }
+  });
+});
+define('up-signal/components/bs-modal/header/title', ['exports', 'ember-bootstrap/components/bs-modal/header/title'], function (exports, _title) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  Object.defineProperty(exports, 'default', {
+    enumerable: true,
+    get: function () {
+      return _title.default;
+    }
+  });
+});
+define('up-signal/components/bs-nav', ['exports', 'ember-bootstrap/components/bs-nav'], function (exports, _bsNav) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  Object.defineProperty(exports, 'default', {
+    enumerable: true,
+    get: function () {
+      return _bsNav.default;
+    }
+  });
+});
+define('up-signal/components/bs-nav/item', ['exports', 'ember-bootstrap/components/bs-nav/item'], function (exports, _item) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  Object.defineProperty(exports, 'default', {
+    enumerable: true,
+    get: function () {
+      return _item.default;
+    }
+  });
+});
+define('up-signal/components/bs-nav/link-to', ['exports', 'ember-bootstrap/components/bs-nav/link-to'], function (exports, _linkTo) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  Object.defineProperty(exports, 'default', {
+    enumerable: true,
+    get: function () {
+      return _linkTo.default;
+    }
+  });
+});
+define('up-signal/components/bs-navbar', ['exports', 'ember-bootstrap/components/bs-navbar'], function (exports, _bsNavbar) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  Object.defineProperty(exports, 'default', {
+    enumerable: true,
+    get: function () {
+      return _bsNavbar.default;
+    }
+  });
+});
+define('up-signal/components/bs-navbar/content', ['exports', 'ember-bootstrap/components/bs-navbar/content'], function (exports, _content) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  Object.defineProperty(exports, 'default', {
+    enumerable: true,
+    get: function () {
+      return _content.default;
+    }
+  });
+});
+define('up-signal/components/bs-navbar/link-to', ['exports', 'ember-bootstrap/components/bs-navbar/link-to'], function (exports, _linkTo) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  Object.defineProperty(exports, 'default', {
+    enumerable: true,
+    get: function () {
+      return _linkTo.default;
+    }
+  });
+});
+define('up-signal/components/bs-navbar/nav', ['exports', 'ember-bootstrap/components/bs-navbar/nav'], function (exports, _nav) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  Object.defineProperty(exports, 'default', {
+    enumerable: true,
+    get: function () {
+      return _nav.default;
+    }
+  });
+});
+define('up-signal/components/bs-navbar/toggle', ['exports', 'ember-bootstrap/components/bs-navbar/toggle'], function (exports, _toggle) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  Object.defineProperty(exports, 'default', {
+    enumerable: true,
+    get: function () {
+      return _toggle.default;
+    }
+  });
+});
+define('up-signal/components/bs-popover', ['exports', 'ember-bootstrap/components/bs-popover'], function (exports, _bsPopover) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  Object.defineProperty(exports, 'default', {
+    enumerable: true,
+    get: function () {
+      return _bsPopover.default;
+    }
+  });
+});
+define('up-signal/components/bs-popover/element', ['exports', 'ember-bootstrap/components/bs-popover/element'], function (exports, _element) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  Object.defineProperty(exports, 'default', {
+    enumerable: true,
+    get: function () {
+      return _element.default;
+    }
+  });
+});
+define('up-signal/components/bs-progress', ['exports', 'ember-bootstrap/components/bs-progress'], function (exports, _bsProgress) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  Object.defineProperty(exports, 'default', {
+    enumerable: true,
+    get: function () {
+      return _bsProgress.default;
+    }
+  });
+});
+define('up-signal/components/bs-progress/bar', ['exports', 'ember-bootstrap/components/bs-progress/bar'], function (exports, _bar) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  Object.defineProperty(exports, 'default', {
+    enumerable: true,
+    get: function () {
+      return _bar.default;
+    }
+  });
+});
+define('up-signal/components/bs-tab', ['exports', 'ember-bootstrap/components/bs-tab'], function (exports, _bsTab) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  Object.defineProperty(exports, 'default', {
+    enumerable: true,
+    get: function () {
+      return _bsTab.default;
+    }
+  });
+});
+define('up-signal/components/bs-tab/pane', ['exports', 'ember-bootstrap/components/bs-tab/pane'], function (exports, _pane) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  Object.defineProperty(exports, 'default', {
+    enumerable: true,
+    get: function () {
+      return _pane.default;
+    }
+  });
+});
+define('up-signal/components/bs-tooltip', ['exports', 'ember-bootstrap/components/bs-tooltip'], function (exports, _bsTooltip) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  Object.defineProperty(exports, 'default', {
+    enumerable: true,
+    get: function () {
+      return _bsTooltip.default;
+    }
+  });
+});
+define('up-signal/components/bs-tooltip/element', ['exports', 'ember-bootstrap/components/bs-tooltip/element'], function (exports, _element) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  Object.defineProperty(exports, 'default', {
+    enumerable: true,
+    get: function () {
+      return _element.default;
+    }
+  });
+});
 define('up-signal/components/cp-panel-body', ['exports', 'ember-collapsible-panel/components/cp-panel-body/component'], function (exports, _component) {
   'use strict';
 
@@ -76,6 +876,32 @@ define('up-signal/components/cp-panels', ['exports', 'ember-collapsible-panel/co
     }
   });
 });
+define('up-signal/components/ember-popper-targeting-parent', ['exports', 'ember-popper/components/ember-popper-targeting-parent'], function (exports, _emberPopperTargetingParent) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  Object.defineProperty(exports, 'default', {
+    enumerable: true,
+    get: function () {
+      return _emberPopperTargetingParent.default;
+    }
+  });
+});
+define('up-signal/components/ember-popper', ['exports', 'ember-popper/components/ember-popper'], function (exports, _emberPopper) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  Object.defineProperty(exports, 'default', {
+    enumerable: true,
+    get: function () {
+      return _emberPopper.default;
+    }
+  });
+});
 define('up-signal/components/ember-selectize', ['exports', 'ember-cli-selectize/components/ember-selectize'], function (exports, _emberSelectize) {
   'use strict';
 
@@ -93,12 +919,29 @@ define('up-signal/components/info-list-item', ['exports'], function (exports) {
   exports.default = Ember.Component.extend({});
 });
 define('up-signal/components/main-navigation', ['exports'], function (exports) {
-  'use strict';
+    'use strict';
 
-  Object.defineProperty(exports, "__esModule", {
-    value: true
-  });
-  exports.default = Ember.Component.extend({});
+    Object.defineProperty(exports, "__esModule", {
+        value: true
+    });
+    exports.default = Ember.Component.extend({
+        session: Ember.inject.service('session'),
+        classNames: ['main-navigation'],
+        active: false,
+        actions: {
+            logout: function logout() {
+                this.get('session').invalidate();
+                Ember.set(this, 'active', false);
+                this.transitionToRoute("/");
+            },
+            activateModal: function activateModal() {
+                Ember.set(this, 'active', true);
+            },
+            hideModal: function hideModal() {
+                Ember.set(this, 'active', false);
+            }
+        }
+    });
 });
 define('up-signal/components/welcome-page', ['exports', 'ember-welcome-page/components/welcome-page'], function (exports, _welcomePage) {
   'use strict';
@@ -113,13 +956,107 @@ define('up-signal/components/welcome-page', ['exports', 'ember-welcome-page/comp
     }
   });
 });
-define('up-signal/controllers/login', ['exports'], function (exports) {
-  'use strict';
+define('up-signal/controllers/all-services', ['exports'], function (exports) {
+    'use strict';
 
-  Object.defineProperty(exports, "__esModule", {
-    value: true
-  });
-  exports.default = Ember.Controller.extend({});
+    Object.defineProperty(exports, "__esModule", {
+        value: true
+    });
+    var service = Ember.inject.service;
+    exports.default = Ember.Controller.extend({
+        _supplierService: service('suppliers-service'),
+
+        serviceId: null,
+        session: Ember.inject.service('session'),
+        actions: {
+            delete: function _delete(serviceId) {
+                var _this = this;
+
+                this.get('_supplierService').deleteService(serviceId).then(function () {
+                    _this.set('serviceId', null);
+                    _this.get('target.router').refresh();
+                });
+            },
+
+            setServiceToDelete: function setServiceToDelete(serviceId) {
+                this.set('serviceId', serviceId);
+            },
+
+            cancelDeleting: function cancelDeleting() {
+                this.set('serviceId', null);
+            }
+        }
+    });
+});
+define('up-signal/controllers/all-suppliers', ['exports'], function (exports) {
+    'use strict';
+
+    Object.defineProperty(exports, "__esModule", {
+        value: true
+    });
+    var service = Ember.inject.service;
+    exports.default = Ember.Controller.extend({
+        _supplierService: service('suppliers-service'),
+
+        supplierId: null,
+        session: Ember.inject.service('session'),
+        actions: {
+            delete: function _delete(supplierId) {
+                var _this = this;
+
+                this.get('_supplierService').deleteSupplier(supplierId).then(function () {
+                    _this.set('supplierId', null);
+                    _this.get('target.router').refresh();
+                });
+            },
+
+            setSupplierToDelete: function setSupplierToDelete(serviceId) {
+                this.set('supplierId', serviceId);
+            },
+
+            cancelDeleting: function cancelDeleting() {
+                this.set('supplierId', null);
+            }
+        }
+    });
+});
+define('up-signal/controllers/login', ['exports'], function (exports) {
+    'use strict';
+
+    Object.defineProperty(exports, "__esModule", {
+        value: true
+    });
+    exports.default = Ember.Controller.extend({
+        session: Ember.inject.service(),
+
+        model: {},
+        errorMessage: '',
+        openModal: false,
+        actions: {
+            login: function login() {
+                var _this = this;
+
+                this.get('session').authenticate('authenticator:application', this.model, function (data) {
+                    console.log(data);
+                    Ember.set(_this, 'errorMessage', '');
+                    Ember.set(_this, 'model', {});
+                    Ember.set(_this, 'openModal', true);
+                }).catch(function (reason) {
+                    Ember.set(_this, 'errorMessage', JSON.parse(reason.responseText).errorMessage);
+                    _this.set('authenticationError', _this.errorMessage || reason);
+                });
+            },
+
+            onCancel: function onCancel() {
+                this.transitionToRoute('/');
+            },
+
+            returnToHomePage: function returnToHomePage() {
+                Ember.set(this, 'openModal', null);
+                this.transitionToRoute("/");
+            }
+        }
+    });
 });
 define('up-signal/controllers/new-service', ['exports'], function (exports) {
   'use strict';
@@ -152,6 +1089,27 @@ define('up-signal/controllers/new-supplier', ['exports'], function (exports) {
     }
   });
 });
+define('up-signal/controllers/services', ['exports'], function (exports) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = Ember.Controller.extend({
+    session: Ember.inject.service('session')
+  });
+});
+define('up-signal/controllers/suppliers', ['exports'], function (exports) {
+    'use strict';
+
+    Object.defineProperty(exports, "__esModule", {
+        value: true
+    });
+    exports.default = Ember.Controller.extend({
+        session: Ember.inject.service('session')
+
+    });
+});
 define('up-signal/helpers/app-version', ['exports', 'up-signal/config/environment', 'ember-cli-app-version/utils/regexp'], function (exports, _environment, _regexp) {
   'use strict';
 
@@ -176,6 +1134,108 @@ define('up-signal/helpers/app-version', ['exports', 'up-signal/config/environmen
 
   exports.default = Ember.Helper.helper(appVersion);
 });
+define('up-signal/helpers/bs-contains', ['exports', 'ember-bootstrap/helpers/bs-contains'], function (exports, _bsContains) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  Object.defineProperty(exports, 'default', {
+    enumerable: true,
+    get: function () {
+      return _bsContains.default;
+    }
+  });
+  Object.defineProperty(exports, 'bsContains', {
+    enumerable: true,
+    get: function () {
+      return _bsContains.bsContains;
+    }
+  });
+});
+define('up-signal/helpers/bs-eq', ['exports', 'ember-bootstrap/helpers/bs-eq'], function (exports, _bsEq) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  Object.defineProperty(exports, 'default', {
+    enumerable: true,
+    get: function () {
+      return _bsEq.default;
+    }
+  });
+  Object.defineProperty(exports, 'eq', {
+    enumerable: true,
+    get: function () {
+      return _bsEq.eq;
+    }
+  });
+});
+define('up-signal/helpers/cancel-all', ['exports', 'ember-concurrency/helpers/cancel-all'], function (exports, _cancelAll) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  Object.defineProperty(exports, 'default', {
+    enumerable: true,
+    get: function () {
+      return _cancelAll.default;
+    }
+  });
+  Object.defineProperty(exports, 'cancelAll', {
+    enumerable: true,
+    get: function () {
+      return _cancelAll.cancelAll;
+    }
+  });
+});
+define('up-signal/helpers/diff', ['exports'], function (exports) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+
+
+  var diff = function diff(params) {
+    return params[0] != params[1];
+  };
+  exports.default = Ember.Helper.helper(diff);
+});
+define('up-signal/helpers/eq', ['exports'], function (exports) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+
+
+  var eq = function eq(params) {
+    return params[0] === params[1];
+  };
+  exports.default = Ember.Helper.helper(eq);
+});
+define('up-signal/helpers/perform', ['exports', 'ember-concurrency/helpers/perform'], function (exports, _perform) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  Object.defineProperty(exports, 'default', {
+    enumerable: true,
+    get: function () {
+      return _perform.default;
+    }
+  });
+  Object.defineProperty(exports, 'perform', {
+    enumerable: true,
+    get: function () {
+      return _perform.perform;
+    }
+  });
+});
 define('up-signal/helpers/pluralize', ['exports', 'ember-inflector/lib/helpers/pluralize'], function (exports, _pluralize) {
   'use strict';
 
@@ -191,6 +1251,25 @@ define('up-signal/helpers/singularize', ['exports', 'ember-inflector/lib/helpers
     value: true
   });
   exports.default = _singularize.default;
+});
+define('up-signal/helpers/task', ['exports', 'ember-concurrency/helpers/task'], function (exports, _task) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  Object.defineProperty(exports, 'default', {
+    enumerable: true,
+    get: function () {
+      return _task.default;
+    }
+  });
+  Object.defineProperty(exports, 'task', {
+    enumerable: true,
+    get: function () {
+      return _task.task;
+    }
+  });
 });
 define('up-signal/initializers/app-version', ['exports', 'ember-cli-app-version/initializer-factory', 'up-signal/config/environment'], function (exports, _initializerFactory, _environment) {
   'use strict';
@@ -210,6 +1289,24 @@ define('up-signal/initializers/app-version', ['exports', 'ember-cli-app-version/
   exports.default = {
     name: 'App Version',
     initialize: (0, _initializerFactory.default)(name, version)
+  };
+});
+define('up-signal/initializers/base-http-service', ['exports'], function (exports) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.initialize = initialize;
+  function initialize(application) {
+    application.inject('route', 'base-http-service', 'service:base-http-service');
+    application.inject('controller', 'base-http-service', 'service:base-http-service');
+    application.inject('component', 'base-http-service', 'service:base-http-service');
+  }
+
+  exports.default = {
+    name: 'base-http-service',
+    initialize: initialize
   };
 });
 define('up-signal/initializers/container-debug-adapter', ['exports', 'ember-resolver/resolvers/classic/container-debug-adapter'], function (exports, _containerDebugAdapter) {
@@ -241,6 +1338,25 @@ define('up-signal/initializers/data-adapter', ['exports'], function (exports) {
     initialize: function initialize() {}
   };
 });
+define('up-signal/initializers/ember-concurrency', ['exports', 'ember-concurrency/initializers/ember-concurrency'], function (exports, _emberConcurrency) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  Object.defineProperty(exports, 'default', {
+    enumerable: true,
+    get: function () {
+      return _emberConcurrency.default;
+    }
+  });
+  Object.defineProperty(exports, 'initialize', {
+    enumerable: true,
+    get: function () {
+      return _emberConcurrency.initialize;
+    }
+  });
+});
 define('up-signal/initializers/ember-data', ['exports', 'ember-data/setup-container', 'ember-data'], function (exports, _setupContainer) {
   'use strict';
 
@@ -250,6 +1366,26 @@ define('up-signal/initializers/ember-data', ['exports', 'ember-data/setup-contai
   exports.default = {
     name: 'ember-data',
     initialize: _setupContainer.default
+  };
+});
+define('up-signal/initializers/ember-simple-auth', ['exports', 'up-signal/config/environment', 'ember-simple-auth/configuration', 'ember-simple-auth/initializers/setup-session', 'ember-simple-auth/initializers/setup-session-service', 'ember-simple-auth/initializers/setup-session-restoration'], function (exports, _environment, _configuration, _setupSession, _setupSessionService, _setupSessionRestoration) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = {
+    name: 'ember-simple-auth',
+
+    initialize: function initialize(registry) {
+      var config = _environment.default['ember-simple-auth'] || {};
+      config.baseURL = _environment.default.rootURL || _environment.default.baseURL;
+      _configuration.default.load(config);
+
+      (0, _setupSession.default)(registry);
+      (0, _setupSessionService.default)(registry);
+      (0, _setupSessionRestoration.default)(registry);
+    }
   };
 });
 define('up-signal/initializers/export-application-global', ['exports', 'up-signal/config/environment'], function (exports, _environment) {
@@ -314,6 +1450,22 @@ define('up-signal/initializers/injectStore', ['exports'], function (exports) {
     initialize: function initialize() {}
   };
 });
+define('up-signal/initializers/load-bootstrap-config', ['exports', 'up-signal/config/environment', 'ember-bootstrap/config'], function (exports, _environment, _config) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.initialize = initialize;
+  function initialize() /* container, application */{
+    _config.default.load(_environment.default['ember-bootstrap'] || {});
+  }
+
+  exports.default = {
+    name: 'load-bootstrap-config',
+    initialize: initialize
+  };
+});
 define('up-signal/initializers/store', ['exports'], function (exports) {
   'use strict';
 
@@ -349,6 +1501,79 @@ define("up-signal/instance-initializers/ember-data", ["exports", "ember-data/ins
     initialize: _initializeStoreService.default
   };
 });
+define('up-signal/instance-initializers/ember-simple-auth', ['exports'], function (exports) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = {
+    name: 'ember-simple-auth',
+
+    initialize: function initialize() {}
+  };
+});
+define('up-signal/models/base-model', ['exports'], function (exports) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = Ember.Object.extend({
+    modelProperties: [],
+
+    getModelProperties: function getModelProperties() {
+      return this.get('modelProperties');
+    },
+
+    serialize: function serialize() {
+      var obj = {};
+      var _modelProperties = this.getModelProperties();
+      var _iteratorNormalCompletion = true;
+      var _didIteratorError = false;
+      var _iteratorError = undefined;
+
+      try {
+        for (var _iterator = _modelProperties[Symbol.iterator](), _step; !(_iteratorNormalCompletion = (_step = _iterator.next()).done); _iteratorNormalCompletion = true) {
+          var property = _step.value;
+
+          obj[property] = this.get(property);
+        }
+      } catch (err) {
+        _didIteratorError = true;
+        _iteratorError = err;
+      } finally {
+        try {
+          if (!_iteratorNormalCompletion && _iterator.return) {
+            _iterator.return();
+          }
+        } finally {
+          if (_didIteratorError) {
+            throw _iteratorError;
+          }
+        }
+      }
+
+      return JSON.stringify(obj);
+    },
+    deserialize: function deserialize() {}
+
+  });
+});
+define('up-signal/models/user', ['exports', 'up-signal/models/base-model'], function (exports, _baseModel) {
+	'use strict';
+
+	Object.defineProperty(exports, "__esModule", {
+		value: true
+	});
+
+
+	var _modelProperties = ['id', 'username', 'password', 'email', 'phoneNumber', 'gender'];
+
+	exports.default = _baseModel.default.extend({
+		modelProperties: _modelProperties
+	});
+});
 define('up-signal/resolver', ['exports', 'ember-resolver'], function (exports, _emberResolver) {
   'use strict';
 
@@ -374,7 +1599,7 @@ define('up-signal/router', ['exports', 'up-signal/config/environment'], function
     this.route('homepage');
     this.route('login');
     this.route('about-us');
-    this.route('services', function () {});
+    this.route('services');
     this.route('packages');
     this.route('new-service');
     this.route('new-supplier');
@@ -403,50 +1628,46 @@ define('up-signal/routes/all-services', ['exports'], function (exports) {
   var service = Ember.inject.service;
   exports.default = Ember.Route.extend({
     _supplierService: service('suppliers-service'),
-
     model: function model() {
+      console.log("get all suppliers");
       return this.get('_supplierService').getAllServices() || {};
     },
 
 
-    actions: {
-      delete: function _delete(id) {
-        var _this = this;
-
-        this.get('_supplierService').deleteService(id).then(function () {
-          return _this.refresh();
-        });
-      }
-    }
-
+    actions: {}
   });
 });
-define('up-signal/routes/all-suppliers', ['exports'], function (exports) {
+define('up-signal/routes/all-suppliers', ['exports', 'up-signal/routes/login'], function (exports, _login) {
   'use strict';
 
   Object.defineProperty(exports, "__esModule", {
     value: true
   });
   var service = Ember.inject.service;
-  exports.default = Ember.Route.extend({
+  exports.default = _login.default.extend({
     _supplierService: service('suppliers-service'),
 
+    beforeModel: function beforeModel(transition) {
+      if (!this.get('session.isAuthenticated')) {
+        this.transitionTo('login');
+      }
+    },
     model: function model() {
       return this.get('_supplierService').getAllSuppliers() || {};
     },
 
 
-    actions: {
-      delete: function _delete(id) {
-        var _this = this;
-
-        this.get('_supplierService').deleteSupplier(id).then(function () {
-          return _this.refresh();
-        });
-      }
-    }
-
+    actions: {}
   });
+});
+define('up-signal/routes/application', ['exports'], function (exports) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  var Route = Ember.Route;
+  exports.default = Route.extend();
 });
 define('up-signal/routes/homepage', ['exports'], function (exports) {
   'use strict';
@@ -456,28 +1677,61 @@ define('up-signal/routes/homepage', ['exports'], function (exports) {
   });
   exports.default = Ember.Route.extend({});
 });
+define('up-signal/routes/index', ['exports'], function (exports) {
+    'use strict';
+
+    Object.defineProperty(exports, "__esModule", {
+        value: true
+    });
+    exports.default = Ember.Route.extend({
+        beforeModel: function beforeModel() {
+            this.replaceWith('homepage');
+        }
+    });
+});
 define('up-signal/routes/login', ['exports'], function (exports) {
   'use strict';
 
   Object.defineProperty(exports, "__esModule", {
     value: true
   });
-  exports.default = Ember.Route.extend({});
+  exports.default = Ember.Route.extend({
+    session: Ember.inject.service(),
+
+    beforeModel: function beforeModel(transition) {
+      if (this.get('session.isAuthenticated')) {
+        var previousTransition = this.get('previousTransition');
+        if (previousTransition) {
+          this.set('previousTransition', null);
+          previousTransition.retry();
+        } else {
+          this.transitionTo('homepage');
+        }
+      }
+    }
+  });
 });
-define('up-signal/routes/new-service', ['exports'], function (exports) {
+define('up-signal/routes/new-service', ['exports', 'up-signal/routes/login'], function (exports, _login) {
   'use strict';
 
   Object.defineProperty(exports, "__esModule", {
     value: true
   });
   var service = Ember.inject.service;
-  exports.default = Ember.Route.extend({
+  exports.default = _login.default.extend({
     _supplierService: service('suppliers-service'),
 
     model: function model() {
       //returns an empty supplier model
       return this.get('_supplierService').createService();
     },
+
+    beforeModel: function beforeModel(transition) {
+      if (!this.get('session.isAuthenticated')) {
+        this.transitionTo('login');
+      } else if (this.get('session.data.authenticated.user.role.name') == "SUPPLIER") this.transitionTo('homepage');
+    },
+
 
     actions: {
       onNext: function onNext() {
@@ -491,19 +1745,24 @@ define('up-signal/routes/new-service', ['exports'], function (exports) {
     }
   });
 });
-define('up-signal/routes/new-supplier', ['exports'], function (exports) {
+define('up-signal/routes/new-supplier', ['exports', 'up-signal/routes/login'], function (exports, _login) {
   'use strict';
 
   Object.defineProperty(exports, "__esModule", {
     value: true
   });
   var service = Ember.inject.service;
-  exports.default = Ember.Route.extend({
+  exports.default = _login.default.extend({
     _supplierService: service('suppliers-service'),
 
     model: function model() {
       //returns an empty supplier model
       return this.get('_supplierService').createSupplier();
+    },
+    beforeModel: function beforeModel(transition) {
+      if (!this.get('session.isAuthenticated')) {
+        this.transitionTo('login');
+      } else if (this.get('session.data.authenticated.user.role.name') == "SERVICER") this.transitionTo('homepage');
     },
 
     actions: {
@@ -549,16 +1808,21 @@ define('up-signal/routes/services', ['exports'], function (exports) {
     }
   });
 });
-define('up-signal/routes/suppliers', ['exports'], function (exports) {
+define('up-signal/routes/suppliers', ['exports', 'up-signal/routes/login'], function (exports, _login) {
   'use strict';
 
   Object.defineProperty(exports, "__esModule", {
     value: true
   });
   var service = Ember.inject.service;
-  exports.default = Ember.Route.extend({
+  exports.default = _login.default.extend({
     _supplierService: service('suppliers-service'),
 
+    beforeModel: function beforeModel(transition) {
+      if (!this.get('session.isAuthenticated')) {
+        this.transitionTo('login');
+      }
+    },
     model: function model() {
       return this.get('_supplierService').getAllSuppliers() || {};
     }
@@ -594,6 +1858,14 @@ define('up-signal/services/base-http-service', ['exports'], function (exports) {
     }
   });
 });
+define('up-signal/services/cookies', ['exports', 'ember-cookies/services/cookies'], function (exports, _cookies) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = _cookies.default;
+});
 define('up-signal/services/dependency-checker', ['exports', 'ember-collapsible-panel/services/dependency-checker'], function (exports, _dependencyChecker) {
   'use strict';
 
@@ -619,6 +1891,14 @@ define('up-signal/services/panel-actions', ['exports', 'ember-collapsible-panel/
       return _panelActions.default;
     }
   });
+});
+define('up-signal/services/session', ['exports', 'ember-simple-auth/services/session'], function (exports, _session) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = _session.default;
 });
 define('up-signal/services/suppliers-service', ['exports', 'up-signal/services/base-http-service'], function (exports, _baseHttpService) {
   'use strict';
@@ -678,6 +1958,64 @@ define('up-signal/services/suppliers-service', ['exports', 'up-signal/services/b
     }
   });
 });
+define('up-signal/services/telekom-http', ['exports'], function (exports) {
+    'use strict';
+
+    Object.defineProperty(exports, "__esModule", {
+        value: true
+    });
+    var ajax = Ember.$.ajax,
+        run = Ember.run;
+    var RSVP = Ember.RSVP;
+    exports.default = Ember.Service.extend({
+        _innerCreateMethod: function _innerCreateMethod(route, data, httpRequest, happyPath, unhappyPath) {
+            var requestOptions = {
+                url: '/' + route,
+                contentType: 'application/json',
+                type: httpRequest,
+                dataType: 'json'
+            };
+
+            if (data) {
+                requestOptions.data = JSON.stringify(data);
+            }
+
+            return new RSVP.Promise(function (resolve, reject) {
+                ajax(requestOptions).then(function (response) {
+                    run(function () {
+                        if (happyPath) {
+                            return resolve(happyPath(response));
+                        } else {
+                            return resolve();
+                        }
+                    });
+                }, function (error) {
+                    run(function () {
+                        if (unhappyPath) {
+                            return unhappyPath(error);
+                        }
+
+                        return reject(error);
+                    });
+                });
+            });
+        },
+        get: function get(route, data, happyPath, unhappyPath) {
+            return this._innerCreateMethod(route, null, 'GET', happyPath, unhappyPath);
+        },
+        post: function post(route, data, happyPath, unhappyPath) {
+            return this._innerCreateMethod(route, data, 'POST', happyPath, unhappyPath);
+        }
+    });
+});
+define('up-signal/session-stores/application', ['exports', 'ember-simple-auth/session-stores/adaptive'], function (exports, _adaptive) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = _adaptive.default.extend();
+});
 define("up-signal/templates/about-us", ["exports"], function (exports) {
   "use strict";
 
@@ -692,7 +2030,7 @@ define("up-signal/templates/all-services", ["exports"], function (exports) {
   Object.defineProperty(exports, "__esModule", {
     value: true
   });
-  exports.default = Ember.HTMLBars.template({ "id": "CwH5g12r", "block": "{\"statements\":[[11,\"div\",[]],[15,\"class\",\"list-top\"],[13],[0,\"\\n  \"],[11,\"p\",[]],[13],[0,\"PREGLED SVIH USLUGA\"],[14],[0,\"\\n\"],[14],[0,\"\\n\"],[11,\"div\",[]],[15,\"class\",\"col-md-10 suppliers-body\"],[13],[0,\"\\n\"],[6,[\"cp-panels\"],null,[[\"accordion\"],[true]],{\"statements\":[[6,[\"each\"],[[28,[\"model\"]]],null,{\"statements\":[[0,\"  \"],[11,\"div\",[]],[15,\"class\",\"panel panel-primary\"],[13],[0,\"\\n\"],[6,[\"component\"],[[28,[\"panels\",\"panel\"]]],null,{\"statements\":[[6,[\"component\"],[[28,[\"panel\",\"toggle\"]]],null,{\"statements\":[[0,\"      \"],[11,\"div\",[]],[15,\"class\",\"panel-heading\"],[13],[1,[28,[\"service\",\"id\"]],false],[14],[0,\"\\n\"]],\"locals\":[]},null],[6,[\"component\"],[[28,[\"panel\",\"body\"]]],null,{\"statements\":[[0,\"      \"],[11,\"div\",[]],[15,\"class\",\"panel-body\"],[13],[0,\"\\n        \"],[11,\"img\",[]],[15,\"class\",\"service-row-image\"],[15,\"src\",\"/assets/images/technology.png\"],[13],[14],[11,\"br\",[]],[13],[14],[0,\"\\n        \"],[11,\"p\",[]],[13],[0,\"Tip usluge: \"],[1,[28,[\"service\",\"type\"]],false],[14],[0,\"\\n        \"],[11,\"p\",[]],[13],[0,\"Opis: \"],[1,[28,[\"service\",\"description\"]],false],[14],[0,\"\\n        \"],[11,\"p\",[]],[13],[0,\"Cijena: \"],[1,[28,[\"service\",\"price\"]],false],[14],[0,\"\\n        \"],[11,\"p\",[]],[13],[0,\"Odgovorna osoba: \"],[1,[28,[\"service\",\"responsiblePerson\"]],false],[14],[0,\"\\n        \"],[11,\"button\",[]],[15,\"class\",\"btn btn-primary list-item-btn\"],[13],[0,\"Izmjena\"],[14],[0,\"\\n        \"],[11,\"button\",[]],[15,\"class\",\"btn btn-primary list-item-btn\"],[5,[\"action\"],[[28,[null]],\"delete\",[28,[\"service\",\"id\"]]]],[13],[0,\"Brisanje\"],[14],[11,\"br\",[]],[13],[14],[0,\"\\n      \"],[14],[0,\"\\n\"]],\"locals\":[]},null]],\"locals\":[\"panel\"]},null],[0,\"  \"],[14],[0,\"\\n\"]],\"locals\":[\"service\"]},null]],\"locals\":[\"panels\"]},null],[14]],\"locals\":[],\"named\":[],\"yields\":[],\"hasPartials\":false}", "meta": { "moduleName": "up-signal/templates/all-services.hbs" } });
+  exports.default = Ember.HTMLBars.template({ "id": "MHtPg0p1", "block": "{\"statements\":[[11,\"div\",[]],[15,\"class\",\"list-top\"],[13],[0,\"\\n    \"],[11,\"p\",[]],[13],[0,\"PREGLED SVIH USLUGA\"],[14],[0,\"\\n\"],[14],[0,\"\\n\"],[11,\"div\",[]],[15,\"class\",\"container\"],[13],[0,\"\\n    \"],[11,\"div\",[]],[15,\"class\",\"row justify-content-md-center\"],[13],[0,\"\\n        \"],[11,\"div\",[]],[15,\"class\",\"col-md-12 suppliers-body\"],[13],[0,\"\\n\"],[6,[\"cp-panels\"],null,[[\"accordion\"],[true]],{\"statements\":[[6,[\"each\"],[[28,[\"model\"]]],null,{\"statements\":[[0,\"            \"],[11,\"div\",[]],[15,\"class\",\"panel panel-primary\"],[13],[0,\"\\n\"],[6,[\"component\"],[[28,[\"panels\",\"panel\"]]],null,{\"statements\":[[6,[\"component\"],[[28,[\"panel\",\"toggle\"]]],null,{\"statements\":[[0,\"                    \"],[11,\"div\",[]],[15,\"class\",\"panel-heading\"],[13],[1,[28,[\"service\",\"serviceId\"]],false],[14],[0,\"\\n\"]],\"locals\":[]},null],[6,[\"component\"],[[28,[\"panel\",\"body\"]]],null,{\"statements\":[[0,\"                    \"],[11,\"div\",[]],[15,\"class\",\"panel-body\"],[13],[0,\" \\n                        \"],[11,\"div\",[]],[15,\"class\",\"row\"],[13],[0,\"\\n                            \"],[11,\"div\",[]],[15,\"class\",\"col-md-3\"],[13],[0,\"\\n                                \"],[11,\"img\",[]],[15,\"class\",\"service-row-image\"],[15,\"src\",\"/assets/images/technology.png\"],[13],[14],[11,\"br\",[]],[13],[14],[0,\"\\n                            \"],[14],[0,\"\\n                            \"],[11,\"div\",[]],[15,\"class\",\"col-md-9\"],[13],[0,\"\\n                                \"],[11,\"p\",[]],[13],[0,\" \"],[11,\"b\",[]],[13],[0,\"Tip usluge:\"],[14],[0,\" \"],[1,[28,[\"service\",\"type\"]],false],[14],[0,\"\\n                                \"],[11,\"p\",[]],[13],[0,\" \"],[11,\"b\",[]],[13],[0,\"Opis: \"],[14],[0,\" \"],[1,[28,[\"service\",\"description\"]],false],[14],[0,\"\\n                                \"],[11,\"p\",[]],[13],[0,\" \"],[11,\"b\",[]],[13],[0,\"Odgovorna osoba: \"],[14],[1,[28,[\"service\",\"responsiblePerson\"]],false],[14],[0,\"\\n                                \"],[11,\"p\",[]],[13],[0,\" \"],[11,\"i\",[]],[13],[0,\"Cijena se nalazi u glavnom cjenovniku\"],[14],[14],[0,\"\\n                            \"],[14],[0,\"\\n                        \"],[14],[0,\"\\n                        \"],[11,\"div\",[]],[15,\"class\",\"row\"],[13],[0,\"\\n                            \"],[11,\"div\",[]],[15,\"class\",\"col-md-3 col-md-offset-9\"],[13],[0,\"\\n\"],[6,[\"if\"],[[28,[\"session\",\"isAuthenticated\"]]],null,{\"statements\":[[6,[\"if\"],[[33,[\"diff\"],[[28,[\"session\",\"data\",\"authenticated\",\"user\",\"role\",\"name\"]],\"SUPPLIER\"],null]],null,{\"statements\":[[0,\"                                            \"],[11,\"button\",[]],[15,\"class\",\"btn btn-primary list-item-btn\"],[13],[0,\"Izmjena\"],[14],[0,\"\\n                                            \"],[11,\"button\",[]],[15,\"class\",\"btn btn-primary list-item-btn\"],[5,[\"action\"],[[28,[null]],\"setServiceToDelete\",[28,[\"service\",\"id\"]]]],[13],[0,\"Brisanje\"],[14],[11,\"br\",[]],[13],[14],[0,\"\\n\"]],\"locals\":[]},null]],\"locals\":[]},null],[0,\"\\n                            \"],[14],[0,\"\\n                        \"],[14],[0,\"\\n                    \"],[14],[0,\"\\n\"]],\"locals\":[]},null]],\"locals\":[\"panel\"]},null],[0,\"        \"],[14],[0,\"\\n\"]],\"locals\":[\"service\"]},null]],\"locals\":[\"panels\"]},null],[0,\"        \"],[14],[0,\"\\n    \"],[14],[0,\"\\n\"],[14],[0,\"\\n\\n\"],[6,[\"bs-modal-simple\"],null,[[\"title\",\"closeTitle\",\"submitTitle\",\"autoClose\",\"size\",\"fade\",\"open\",\"onSubmit\",\"onHide\"],[\"Potvrda\",\"Ne\",\"Da\",true,null,false,[28,[\"serviceId\"]],[33,[\"action\"],[[28,[null]],\"delete\",[28,[\"serviceId\"]]],null],[33,[\"action\"],[[28,[null]],\"cancelDeleting\"],null]]],{\"statements\":[[0,\"    Da li ste sigurni da zelite izbrisati ovu uslugu?\\n\"]],\"locals\":[]},null],[0,\"\\n  \"]],\"locals\":[],\"named\":[],\"yields\":[],\"hasPartials\":false}", "meta": { "moduleName": "up-signal/templates/all-services.hbs" } });
 });
 define("up-signal/templates/all-suppliers", ["exports"], function (exports) {
   "use strict";
@@ -700,7 +2038,7 @@ define("up-signal/templates/all-suppliers", ["exports"], function (exports) {
   Object.defineProperty(exports, "__esModule", {
     value: true
   });
-  exports.default = Ember.HTMLBars.template({ "id": "S9cSaD1x", "block": "{\"statements\":[[11,\"div\",[]],[15,\"class\",\"list-top\"],[13],[0,\"\\n  \"],[11,\"p\",[]],[13],[0,\"PREGLED SVIH DOBAVLJACA\"],[14],[0,\"\\n\"],[14],[0,\"\\n\"],[11,\"div\",[]],[15,\"class\",\"col-md-10 suppliers-body\"],[13],[0,\"\\n\"],[6,[\"cp-panels\"],null,[[\"accordion\"],[true]],{\"statements\":[[6,[\"each\"],[[28,[\"model\"]]],null,{\"statements\":[[0,\"  \"],[11,\"div\",[]],[15,\"class\",\"panel panel-primary\"],[13],[0,\"\\n\"],[6,[\"component\"],[[28,[\"panels\",\"panel\"]]],null,{\"statements\":[[6,[\"component\"],[[28,[\"panel\",\"toggle\"]]],null,{\"statements\":[[0,\"      \"],[11,\"div\",[]],[15,\"class\",\"panel-heading\"],[13],[1,[28,[\"supplier\",\"name\"]],false],[14],[0,\"\\n\"]],\"locals\":[]},null],[6,[\"component\"],[[28,[\"panel\",\"body\"]]],null,{\"statements\":[[0,\"      \"],[11,\"div\",[]],[15,\"class\",\"panel-body\"],[13],[0,\"\\n        \"],[11,\"img\",[]],[15,\"class\",\"service-row-image\"],[15,\"src\",\"/assets/images/supplier-img.png\"],[13],[14],[11,\"br\",[]],[13],[14],[0,\"\\n        \"],[11,\"p\",[]],[13],[0,\"Adresa: \"],[1,[28,[\"supplier\",\"address\"]],false],[14],[0,\"\\n        \"],[11,\"p\",[]],[13],[0,\"Status: \"],[1,[28,[\"supplier\",\"status\"]],false],[14],[0,\"\\n        \"],[11,\"p\",[]],[13],[0,\"Kategorija: \"],[1,[28,[\"supplier\",\"category\"]],false],[14],[0,\"\\n        \"],[11,\"button\",[]],[15,\"class\",\"btn btn-primary list-item-btn\"],[13],[0,\"Izmjena\"],[14],[0,\"\\n        \"],[11,\"button\",[]],[15,\"class\",\"btn btn-primary list-item-btn\"],[5,[\"action\"],[[28,[null]],\"delete\",[28,[\"supplier\",\"id\"]]]],[13],[0,\"Brisanje\"],[14],[11,\"br\",[]],[13],[14],[0,\"\\n      \"],[14],[0,\"\\n\"]],\"locals\":[]},null]],\"locals\":[\"panel\"]},null],[0,\"  \"],[14],[0,\"\\n\"]],\"locals\":[\"supplier\"]},null]],\"locals\":[\"panels\"]},null],[14],[0,\"\\n\"]],\"locals\":[],\"named\":[],\"yields\":[],\"hasPartials\":false}", "meta": { "moduleName": "up-signal/templates/all-suppliers.hbs" } });
+  exports.default = Ember.HTMLBars.template({ "id": "VCMQUD0f", "block": "{\"statements\":[[11,\"div\",[]],[15,\"class\",\"list-top\"],[13],[0,\"\\n    \"],[11,\"p\",[]],[13],[0,\"PREGLED SVIH DOBAVLJACA\"],[14],[0,\"\\n\"],[14],[0,\"\\n\"],[11,\"div\",[]],[15,\"class\",\"container\"],[13],[0,\"\\n    \"],[11,\"div\",[]],[15,\"class\",\"row justify-content-md-center\"],[13],[0,\"\\n        \"],[11,\"div\",[]],[15,\"class\",\"col-md-12 suppliers-body\"],[13],[0,\"\\n\"],[6,[\"cp-panels\"],null,[[\"accordion\"],[true]],{\"statements\":[[6,[\"each\"],[[28,[\"model\"]]],null,{\"statements\":[[0,\"            \"],[11,\"div\",[]],[15,\"class\",\"panel panel-primary\"],[13],[0,\"\\n\"],[6,[\"component\"],[[28,[\"panels\",\"panel\"]]],null,{\"statements\":[[6,[\"component\"],[[28,[\"panel\",\"toggle\"]]],null,{\"statements\":[[0,\"                    \"],[11,\"div\",[]],[15,\"class\",\"panel-heading\"],[13],[1,[28,[\"supplier\",\"name\"]],false],[14],[0,\"\\n\"]],\"locals\":[]},null],[6,[\"component\"],[[28,[\"panel\",\"body\"]]],null,{\"statements\":[[0,\"                    \"],[11,\"div\",[]],[15,\"class\",\"panel-body\"],[13],[0,\"\\n                        \"],[11,\"div\",[]],[15,\"class\",\"row\"],[13],[0,\"\\n                            \"],[11,\"div\",[]],[15,\"class\",\"col-md-3\"],[13],[0,\"\\n                                \"],[11,\"img\",[]],[15,\"class\",\"service-row-image\"],[15,\"src\",\"/assets/images/supplier-img.png\"],[13],[14],[11,\"br\",[]],[13],[14],[0,\"\\n                            \"],[14],[0,\"\\n                            \"],[11,\"div\",[]],[15,\"class\",\"col-md-9\"],[13],[0,\"\\n                                \"],[11,\"p\",[]],[13],[0,\" \"],[11,\"b\",[]],[13],[0,\" Adresa: \"],[14],[0,\" \"],[1,[28,[\"supplier\",\"address\"]],false],[0,\" \"],[14],[0,\"\\n                                \"],[11,\"p\",[]],[13],[0,\" \"],[11,\"b\",[]],[13],[0,\" Status: \"],[14],[0,\" \"],[1,[28,[\"supplier\",\"status\"]],false],[0,\" \"],[14],[0,\"\\n                                \"],[11,\"p\",[]],[13],[0,\" \"],[11,\"b\",[]],[13],[0,\" Kategorija: \"],[14],[0,\" \"],[1,[28,[\"supplier\",\"category\"]],false],[0,\" \"],[14],[0,\"\\n                            \"],[14],[0,\"\\n                        \"],[14],[0,\"\\n                        \"],[11,\"div\",[]],[15,\"class\",\"row\"],[13],[0,\"\\n                            \"],[11,\"div\",[]],[15,\"class\",\"col-md-3 col-md-offset-9\"],[13],[0,\"\\n\"],[6,[\"if\"],[[28,[\"session\",\"isAuthenticated\"]]],null,{\"statements\":[[6,[\"if\"],[[33,[\"diff\"],[[28,[\"session\",\"data\",\"authenticated\",\"user\",\"role\",\"name\"]],\"SERVICER\"],null]],null,{\"statements\":[[0,\"                                    \"],[11,\"button\",[]],[15,\"class\",\"btn btn-primary list-item-btn\"],[13],[0,\"Izmjena\"],[14],[0,\"\\n                                    \"],[11,\"button\",[]],[15,\"class\",\"btn btn-primary list-item-btn\"],[5,[\"action\"],[[28,[null]],\"setSupplierToDelete\",[28,[\"supplier\",\"id\"]]]],[13],[0,\"Brisanje\"],[14],[11,\"br\",[]],[13],[14],[0,\"\\n\"]],\"locals\":[]},null]],\"locals\":[]},null],[0,\"                            \"],[14],[0,\"\\n                        \"],[14],[0,\"\\n                    \"],[14],[0,\"\\n\"]],\"locals\":[]},null]],\"locals\":[\"panel\"]},null],[0,\"            \"],[14],[0,\"\\n\"]],\"locals\":[\"supplier\"]},null]],\"locals\":[\"panels\"]},null],[0,\"        \"],[14],[0,\"\\n    \"],[14],[0,\"\\n\"],[14],[0,\"\\n\\n\"],[6,[\"bs-modal-simple\"],null,[[\"title\",\"closeTitle\",\"submitTitle\",\"autoClose\",\"size\",\"fade\",\"open\",\"onSubmit\",\"onHide\"],[\"Potvrda\",\"Ne\",\"Da\",true,null,false,[28,[\"supplierId\"]],[33,[\"action\"],[[28,[null]],\"delete\",[28,[\"supplierId\"]]],null],[33,[\"action\"],[[28,[null]],\"cancelDeleting\"],null]]],{\"statements\":[[0,\"    Da li ste sigurni da zelite izbrisati ovog dobavljaca?\\n\"]],\"locals\":[]},null],[0,\"\\n\"]],\"locals\":[],\"named\":[],\"yields\":[],\"hasPartials\":false}", "meta": { "moduleName": "up-signal/templates/all-suppliers.hbs" } });
 });
 define("up-signal/templates/application", ["exports"], function (exports) {
   "use strict";
@@ -709,6 +2047,32 @@ define("up-signal/templates/application", ["exports"], function (exports) {
     value: true
   });
   exports.default = Ember.HTMLBars.template({ "id": "vF5McWGu", "block": "{\"statements\":[[1,[26,[\"main-navigation\"]],false],[0,\"\\n\"],[1,[26,[\"outlet\"]],false],[0,\"\\n\"]],\"locals\":[],\"named\":[],\"yields\":[],\"hasPartials\":false}", "meta": { "moduleName": "up-signal/templates/application.hbs" } });
+});
+define('up-signal/templates/components/ember-popper-targeting-parent', ['exports', 'ember-popper/templates/components/ember-popper-targeting-parent'], function (exports, _emberPopperTargetingParent) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  Object.defineProperty(exports, 'default', {
+    enumerable: true,
+    get: function () {
+      return _emberPopperTargetingParent.default;
+    }
+  });
+});
+define('up-signal/templates/components/ember-popper', ['exports', 'ember-popper/templates/components/ember-popper'], function (exports, _emberPopper) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  Object.defineProperty(exports, 'default', {
+    enumerable: true,
+    get: function () {
+      return _emberPopper.default;
+    }
+  });
 });
 define("up-signal/templates/components/info-list-item", ["exports"], function (exports) {
   "use strict";
@@ -724,7 +2088,7 @@ define("up-signal/templates/components/main-navigation", ["exports"], function (
   Object.defineProperty(exports, "__esModule", {
     value: true
   });
-  exports.default = Ember.HTMLBars.template({ "id": "4Y+Hb9J3", "block": "{\"statements\":[[11,\"nav\",[]],[15,\"class\",\"navbar navbar-default navbar-static-top main-navigation\"],[13],[0,\"\\n  \"],[11,\"div\",[]],[15,\"class\",\"container\"],[13],[0,\"\\n    \"],[11,\"div\",[]],[15,\"class\",\"collapse navbar-collapse\"],[15,\"id\",\"bs-example-navbar-collapse-8\"],[13],[0,\"\\n      \"],[11,\"img\",[]],[15,\"class\",\"logo\"],[15,\"src\",\"/assets/images/logo.png\"],[13],[14],[0,\"\\n      \"],[11,\"ul\",[]],[15,\"class\",\"nav navbar-nav pull-right main-navbar\"],[13],[0,\"\\n        \"],[11,\"li\",[]],[13],[6,[\"link-to\"],[\"homepage\"],null,{\"statements\":[[0,\"POČETNA\"]],\"locals\":[]},null],[14],[0,\"\\n        \"],[11,\"li\",[]],[13],[6,[\"link-to\"],[\"news\"],null,{\"statements\":[[0,\" NOVOSTI \"]],\"locals\":[]},null],[14],[0,\"\\n        \"],[11,\"li\",[]],[13],[6,[\"link-to\"],[\"services\"],null,{\"statements\":[[0,\" USLUGE \"]],\"locals\":[]},null],[14],[0,\"\\n        \"],[11,\"li\",[]],[13],[6,[\"link-to\"],[\"suppliers\"],null,{\"statements\":[[0,\" DOBAVLJAČI \"]],\"locals\":[]},null],[14],[0,\"\\n\"],[0,\"        \"],[11,\"li\",[]],[13],[6,[\"link-to\"],[\"login\"],null,{\"statements\":[[0,\" PRIJAVA \"]],\"locals\":[]},null],[14],[0,\"\\n      \"],[14],[0,\"\\n    \"],[14],[0,\"\\n  \"],[14],[0,\"\\n\"],[14],[0,\"\\n\"]],\"locals\":[],\"named\":[],\"yields\":[],\"hasPartials\":false}", "meta": { "moduleName": "up-signal/templates/components/main-navigation.hbs" } });
+  exports.default = Ember.HTMLBars.template({ "id": "Nqhcotcz", "block": "{\"statements\":[[11,\"nav\",[]],[15,\"class\",\"navbar navbar-default navbar-static-top main-navigation\"],[13],[0,\"\\n  \"],[11,\"div\",[]],[15,\"class\",\"container\"],[13],[0,\"\\n    \"],[11,\"div\",[]],[15,\"class\",\"collapse navbar-collapse\"],[15,\"id\",\"bs-example-navbar-collapse-8\"],[13],[0,\"\\n      \"],[11,\"img\",[]],[15,\"class\",\"logo\"],[15,\"src\",\"/assets/images/logo.png\"],[13],[14],[0,\"\\n      \"],[11,\"ul\",[]],[15,\"class\",\"nav navbar-nav pull-right main-navbar\"],[13],[0,\"\\n        \"],[11,\"li\",[]],[15,\"class\",\"nav-bar-list-item\"],[13],[6,[\"link-to\"],[\"homepage\"],null,{\"statements\":[[0,\"Početna\"]],\"locals\":[]},null],[14],[0,\"\\n        \"],[11,\"li\",[]],[15,\"class\",\"nav-bar-list-item\"],[13],[6,[\"link-to\"],[\"news\"],null,{\"statements\":[[0,\" Novosti \"]],\"locals\":[]},null],[14],[0,\"\\n        \"],[11,\"li\",[]],[15,\"class\",\"nav-bar-list-item\"],[13],[6,[\"link-to\"],[\"services\"],null,{\"statements\":[[0,\" Usluge \"]],\"locals\":[]},null],[14],[0,\"\\n\"],[6,[\"if\"],[[28,[\"session\",\"isAuthenticated\"]]],null,{\"statements\":[[0,\"        \"],[11,\"li\",[]],[15,\"class\",\"nav-bar-list-item\"],[13],[6,[\"link-to\"],[\"suppliers\"],null,{\"statements\":[[0,\" Dobavljači \"]],\"locals\":[]},null],[14],[0,\"\\n          \"],[11,\"li\",[]],[15,\"class\",\"nav-bar-list-item dropdown\"],[13],[0,\"\\n            \"],[11,\"a\",[]],[15,\"class\",\"dropdown-toggle\"],[15,\"data-toggle\",\"dropdown\"],[13],[0,\"Dobrodošao , \"],[11,\"b\",[]],[15,\"class\",\"user-logged\"],[13],[0,\" \"],[1,[28,[\"session\",\"data\",\"authenticated\",\"user\",\"username\"]],false],[14],[0,\" \"],[11,\"b\",[]],[15,\"class\",\"caret\"],[13],[14],[14],[0,\"\\n                \"],[11,\"ul\",[]],[15,\"class\",\"dropdown-menu\"],[13],[0,\"\\n                  \"],[11,\"li\",[]],[15,\"class\",\"nav-bar-list-item\"],[5,[\"action\"],[[28,[null]],\"activateModal\"]],[13],[0,\"\\n\"],[6,[\"link-to\"],[\"homepage\"],null,{\"statements\":[[0,\"                      Odjava\\n\"]],\"locals\":[]},null],[0,\"                  \"],[14],[0,\"\\n                \"],[14],[0,\"\\n            \"],[14],[0,\"\\n\"]],\"locals\":[]},{\"statements\":[[0,\"          \"],[11,\"li\",[]],[13],[6,[\"link-to\"],[\"login\"],null,{\"statements\":[[0,\" Prijava \"]],\"locals\":[]},null],[14],[0,\"\\n\"]],\"locals\":[]}],[0,\"      \"],[14],[0,\"\\n    \"],[14],[0,\"\\n  \"],[14],[0,\"\\n\"],[14],[0,\"\\n\"],[6,[\"bs-modal-simple\"],null,[[\"title\",\"closeTitle\",\"submitTitle\",\"open\",\"onSubmit\",\"onHide\"],[\"Odjava\",\"Ne\",\"Da\",[28,[\"active\"]],[33,[\"action\"],[[28,[null]],\"logout\"],null],[33,[\"action\"],[[28,[null]],\"hideModal\"],null]]],{\"statements\":[[0,\"    Da li ste sigurni da se zelite odjaviti?\\n\"]],\"locals\":[]},null]],\"locals\":[],\"named\":[],\"yields\":[],\"hasPartials\":false}", "meta": { "moduleName": "up-signal/templates/components/main-navigation.hbs" } });
 });
 define("up-signal/templates/homepage", ["exports"], function (exports) {
   "use strict";
@@ -734,13 +2098,21 @@ define("up-signal/templates/homepage", ["exports"], function (exports) {
   });
   exports.default = Ember.HTMLBars.template({ "id": "oyBG8tR7", "block": "{\"statements\":[[11,\"div\",[]],[15,\"id\",\"wrapper\"],[13],[0,\"\\n  \"],[11,\"img\",[]],[15,\"src\",\"/assets/images/naslovna.jpg\"],[13],[14],[0,\"\\n\"],[14],[0,\"\\n\"],[11,\"div\",[]],[15,\"class\",\"home-row-one col-md-4\"],[13],[0,\"\\n  \"],[11,\"img\",[]],[15,\"class\",\"home-row-image\"],[15,\"src\",\"/assets/images/info.png\"],[13],[14],[11,\"br\",[]],[13],[14],[0,\"\\n\\n  \"],[11,\"h3\",[]],[13],[0,\"Čime se mi bavimo ?\"],[14],[0,\" \"],[11,\"br\",[]],[13],[14],[0,\"\\n  \"],[11,\"p\",[]],[13],[0,\"„Up Signal“ d.o.o. Sarajevo, kompanija zasnovana na integritetu, poštovanju i\\n    usklađenosti sa zakonima, prvi je privatni telekom operater u Bosni i Hercegovini koja je\\n    iskoristila mogućnosti liberaliziranog tržišta i u kratkom roku postala predvodnikom promjene. \"],[11,\"br\",[]],[13],[14],[11,\"br\",[]],[13],[14],[0,\"\\n    Poduzetničkim poduhvatom osnivača, ušla je u historiju kao kompanija koja je svojim\\n    korisnicima pružila kvalitetu telekomunikacionih usluga sa najvišim svjetskim standardima.\"],[14],[0,\"\\n\\n  \"],[14],[0,\"\\n  \"],[11,\"div\",[]],[15,\"class\",\"home-row-two col-md-4\"],[13],[0,\"\\n  \"],[11,\"img\",[]],[15,\"src\",\"/assets/images/meal.png\"],[15,\"class\",\"home-row-image\"],[13],[14],[11,\"br\",[]],[13],[14],[0,\"\\n    \"],[11,\"h3\",[]],[13],[0,\"Šta nudimo? \"],[14],[0,\" \"],[11,\"br\",[]],[13],[14],[0,\"\\n    \"],[11,\"p\",[]],[13],[0,\"U\\n      okviru svog poslovanja „Up Signal“ telekom pruža sljedeće usluge: \"],[11,\"br\",[]],[13],[14],[0,\"\\n      \"],[11,\"br\",[]],[13],[14],[0,\"Fiksne usluge – privatni/poslovni korisnici.\\n      \"],[11,\"br\",[]],[13],[14],[0,\"Mobilne usluge – privatni/poslovni korisnici.\\n      \"],[11,\"br\",[]],[13],[14],[0,\"Analogne i digitalne kablovske usluge.\\n      \"],[11,\"br\",[]],[13],[14],[0,\"Pristupa internetu i web hosting.\\n      \"],[11,\"br\",[]],[13],[14],[0,\"Uređaja i opreme za prethodno navedene usluge (fiksni i mobilni uređaji te terminalnu\\n      opremu).\\n      \"],[11,\"br\",[]],[13],[14],[0,\"Servisiranje opreme.\"],[14],[0,\"\\n    \"],[14],[0,\"\\n    \"],[11,\"div\",[]],[15,\"class\",\"home-row-three col-md-4\"],[13],[0,\"\\n      \"],[11,\"img\",[]],[15,\"src\",\"/assets/images/support.png\"],[15,\"class\",\"home-row-image\"],[13],[14],[11,\"br\",[]],[13],[14],[0,\"\\n      \"],[11,\"h3\",[]],[13],[0,\"Kako nas kontaktirati? \"],[14],[0,\" \"],[11,\"br\",[]],[13],[14],[0,\"\\n      \"],[11,\"p\",[]],[13],[0,\"Adresa : \"],[11,\"br\",[]],[13],[14],[0,\" Zmaja od Bosne bb \"],[11,\"br\",[]],[13],[14],[0,\"\\n        \"],[11,\"br\",[]],[13],[14],[0,\" Broj Telefona : \"],[11,\"br\",[]],[13],[14],[0,\"\\n        +38733656555 \"],[11,\"br\",[]],[13],[14],[0,\"\\n        +38761200555 \"],[11,\"br\",[]],[13],[14],[11,\"br\",[]],[13],[14],[0,\"\\n        Email adresa: \"],[11,\"br\",[]],[13],[14],[0,\"\\n        info@upsignal.com\\n      \"],[14],[0,\"\\n    \"],[14],[0,\"\\n\\n\"]],\"locals\":[],\"named\":[],\"yields\":[],\"hasPartials\":false}", "meta": { "moduleName": "up-signal/templates/homepage.hbs" } });
 });
+define("up-signal/templates/index", ["exports"], function (exports) {
+  "use strict";
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = Ember.HTMLBars.template({ "id": "c3gu5CjX", "block": "{\"statements\":[[1,[26,[\"outlet\"]],false],[0,\"\\n\"]],\"locals\":[],\"named\":[],\"yields\":[],\"hasPartials\":false}", "meta": { "moduleName": "up-signal/templates/index.hbs" } });
+});
 define("up-signal/templates/login", ["exports"], function (exports) {
   "use strict";
 
   Object.defineProperty(exports, "__esModule", {
     value: true
   });
-  exports.default = Ember.HTMLBars.template({ "id": "Og+Ibcl4", "block": "{\"statements\":[[0,\" \"],[11,\"div\",[]],[15,\"id\",\"fullBg\"],[13],[14],[0,\"\\n\\n\"],[11,\"div\",[]],[15,\"class\",\"container\"],[13],[0,\"\\n  \"],[11,\"form\",[]],[15,\"class\",\"form-signin\"],[13],[0,\"\\n      \"],[11,\"input\",[]],[15,\"type\",\"text\"],[15,\"class\",\"form-control\"],[15,\"name\",\"username\"],[15,\"placeholder\",\"korisničko ime\"],[15,\"required\",\"\"],[15,\"autofocus\",\"\"],[13],[14],[0,\"\\n      \"],[11,\"input\",[]],[15,\"type\",\"password\"],[15,\"class\",\"form-control\"],[15,\"name\",\"password\"],[15,\"placeholder\",\"šifra\"],[15,\"required\",\"\"],[13],[14],[0,\"\\n      \"],[11,\"button\",[]],[15,\"class\",\"btn btn-lg btn-primary btn-block\"],[15,\"type\",\"submit\"],[13],[0,\"PRIJAVA\"],[14],[0,\"\\n      \"],[11,\"br\",[]],[13],[14],[11,\"p\",[]],[15,\"class\",\"text-center sign-up\"],[13],[11,\"strong\",[]],[13],[0,\"Registrujte\"],[14],[0,\" se za novi korisnički račun\"],[14],[0,\"\\n    \"],[14],[0,\"\\n\"],[14]],\"locals\":[],\"named\":[],\"yields\":[],\"hasPartials\":false}", "meta": { "moduleName": "up-signal/templates/login.hbs" } });
+  exports.default = Ember.HTMLBars.template({ "id": "WqaDCa5E", "block": "{\"statements\":[[0,\" \"],[11,\"div\",[]],[15,\"id\",\"fullBg\"],[13],[14],[0,\"\\n\\n\"],[11,\"div\",[]],[15,\"class\",\"container\"],[13],[0,\"\\n    \"],[11,\"form\",[]],[15,\"class\",\"form-signin\"],[13],[0,\"\\n      \"],[1,[33,[\"input\"],null,[[\"type\",\"class\",\"placeholder\",\"required\",\"autofocus\",\"value\"],[\"text\",\"form-control\",\"korisničko ime\",\"\",\"\",[28,[\"model\",\"username\"]]]]],false],[0,\"\\n      \"],[1,[33,[\"input\"],null,[[\"type\",\"class\",\"placeholder\",\"required\",\"value\"],[\"password\",\"form-control\",\"šifra\",\"\",[28,[\"model\",\"password\"]]]]],false],[0,\"\\n      \"],[11,\"button\",[]],[15,\"class\",\"btn btn-lg btn-primary btn-block\"],[15,\"type\",\"submit\"],[5,[\"action\"],[[28,[null]],\"login\"]],[13],[0,\"PRIJAVA\"],[14],[0,\"\\n      \"],[11,\"br\",[]],[13],[14],[11,\"p\",[]],[15,\"class\",\"text-center sign-up\"],[13],[11,\"strong\",[]],[13],[0,\"Registrujte\"],[14],[0,\" se za novi korisnički račun\"],[14],[0,\"\\n    \"],[14],[0,\"\\n\\n\"],[14],[0,\"\\n\"],[6,[\"bs-modal-simple\"],null,[[\"open\",\"closeTitle\",\"onHide\"],[[28,[\"openModal\"]],\"OK\",[33,[\"action\"],[[28,[null]],\"returnToHomePage\"],null]]],{\"statements\":[[0,\"    Uspješna prijava!\\n\"]],\"locals\":[]},null]],\"locals\":[],\"named\":[],\"yields\":[],\"hasPartials\":false}", "meta": { "moduleName": "up-signal/templates/login.hbs" } });
 });
 define("up-signal/templates/new-service", ["exports"], function (exports) {
   "use strict";
@@ -780,7 +2152,7 @@ define("up-signal/templates/services", ["exports"], function (exports) {
   Object.defineProperty(exports, "__esModule", {
     value: true
   });
-  exports.default = Ember.HTMLBars.template({ "id": "1kIZwJrT", "block": "{\"statements\":[[11,\"div\",[]],[15,\"class\",\"body-grey\"],[13],[0,\"\\n  \"],[11,\"div\",[]],[15,\"class\",\"services-head\"],[13],[0,\"\\n    \"],[11,\"p\",[]],[13],[0,\"Usluge:\"],[14],[0,\"\\n  \"],[14],[0,\"\\n  \"],[11,\"div\",[]],[15,\"class\",\"service-row-one col-md-4\"],[13],[0,\"\\n    \"],[11,\"h4\",[]],[13],[0,\" \"],[1,[28,[\"model\",\"0\",\"serviceId\"]],false],[0,\" \"],[14],[0,\"\\n    \"],[11,\"img\",[]],[15,\"class\",\"service-row-image\"],[15,\"src\",\"/assets/images/usluga.png\"],[13],[14],[11,\"br\",[]],[13],[14],[0,\"\\n    \"],[11,\"p\",[]],[13],[1,[28,[\"model\",\"0\",\"description\"]],false],[14],[0,\"\\n  \"],[14],[0,\"\\n  \"],[11,\"div\",[]],[15,\"class\",\"service-row-two col-md-4\"],[13],[0,\"\\n    \"],[11,\"h4\",[]],[13],[0,\" \"],[1,[28,[\"model\",\"1\",\"serviceId\"]],false],[0,\" \"],[14],[0,\"\\n    \"],[11,\"img\",[]],[15,\"class\",\"service-row-image\"],[15,\"src\",\"/assets/images/usluga.png\"],[13],[14],[11,\"br\",[]],[13],[14],[0,\"\\n    \"],[11,\"p\",[]],[13],[1,[28,[\"model\",\"1\",\"description\"]],false],[14],[0,\"\\n  \"],[14],[0,\"\\n     \"],[11,\"div\",[]],[15,\"class\",\"service-row-three col-md-4\"],[13],[0,\"\\n    \"],[11,\"h4\",[]],[13],[0,\" \"],[1,[28,[\"model\",\"2\",\"serviceId\"]],false],[0,\" \"],[14],[0,\"\\n    \"],[11,\"img\",[]],[15,\"class\",\"service-row-image\"],[15,\"src\",\"/assets/images/usluga.png\"],[13],[14],[11,\"br\",[]],[13],[14],[0,\"\\n    \"],[11,\"p\",[]],[13],[1,[28,[\"model\",\"2\",\"description\"]],false],[14],[0,\"\\n  \"],[14],[0,\"\\n\\n  \"],[11,\"div\",[]],[15,\"class\",\"col-md-12 button-services\"],[13],[0,\"\\n    \"],[6,[\"link-to\"],[\"new-service\"],null,{\"statements\":[[11,\"button\",[]],[15,\"class\",\"btn btn-primary\"],[13],[0,\"NOVA USLUGA\"],[14]],\"locals\":[]},null],[0,\"\\n    \"],[6,[\"link-to\"],[\"all-services\"],null,{\"statements\":[[11,\"button\",[]],[15,\"class\",\"btn btn-primary\"],[13],[0,\"SVE USLUGE\"],[14]],\"locals\":[]},null],[0,\"\\n  \"],[14],[0,\"\\n\"],[14],[0,\"\\n\"]],\"locals\":[],\"named\":[],\"yields\":[],\"hasPartials\":false}", "meta": { "moduleName": "up-signal/templates/services.hbs" } });
+  exports.default = Ember.HTMLBars.template({ "id": "dPLKPmBR", "block": "{\"statements\":[[11,\"div\",[]],[15,\"class\",\"body-grey\"],[13],[0,\"\\n  \"],[11,\"div\",[]],[15,\"class\",\"services-head\"],[13],[0,\"\\n    \"],[11,\"p\",[]],[13],[0,\"Usluge:\"],[14],[0,\"\\n  \"],[14],[0,\"\\n  \"],[11,\"div\",[]],[15,\"class\",\"service-row-one col-md-4\"],[13],[0,\"\\n    \"],[11,\"h4\",[]],[13],[0,\" \"],[1,[28,[\"model\",\"0\",\"serviceId\"]],false],[0,\" \"],[14],[0,\"\\n    \"],[11,\"img\",[]],[15,\"class\",\"service-row-image\"],[15,\"src\",\"/assets/images/usluga.png\"],[13],[14],[11,\"br\",[]],[13],[14],[0,\"\\n    \"],[11,\"p\",[]],[13],[1,[28,[\"model\",\"0\",\"description\"]],false],[14],[0,\"\\n  \"],[14],[0,\"\\n  \"],[11,\"div\",[]],[15,\"class\",\"service-row-two col-md-4\"],[13],[0,\"\\n    \"],[11,\"h4\",[]],[13],[0,\" \"],[1,[28,[\"model\",\"1\",\"serviceId\"]],false],[0,\" \"],[14],[0,\"\\n    \"],[11,\"img\",[]],[15,\"class\",\"service-row-image\"],[15,\"src\",\"/assets/images/usluga.png\"],[13],[14],[11,\"br\",[]],[13],[14],[0,\"\\n    \"],[11,\"p\",[]],[13],[1,[28,[\"model\",\"1\",\"description\"]],false],[14],[0,\"\\n  \"],[14],[0,\"\\n     \"],[11,\"div\",[]],[15,\"class\",\"service-row-three col-md-4\"],[13],[0,\"\\n    \"],[11,\"h4\",[]],[13],[0,\" \"],[1,[28,[\"model\",\"2\",\"serviceId\"]],false],[0,\" \"],[14],[0,\"\\n    \"],[11,\"img\",[]],[15,\"class\",\"service-row-image\"],[15,\"src\",\"/assets/images/usluga.png\"],[13],[14],[11,\"br\",[]],[13],[14],[0,\"\\n    \"],[11,\"p\",[]],[13],[1,[28,[\"model\",\"2\",\"description\"]],false],[14],[0,\"\\n  \"],[14],[0,\"\\n\\n  \"],[11,\"div\",[]],[15,\"class\",\"col-md-12 button-services\"],[13],[0,\"\\n\"],[6,[\"if\"],[[28,[\"session\",\"isAuthenticated\"]]],null,{\"statements\":[[6,[\"if\"],[[33,[\"diff\"],[[28,[\"session\",\"data\",\"authenticated\",\"user\",\"role\",\"name\"]],\"SUPPLIER\"],null]],null,{\"statements\":[[0,\"        \"],[6,[\"link-to\"],[\"new-service\"],null,{\"statements\":[[11,\"button\",[]],[15,\"class\",\"btn btn-primary\"],[13],[0,\"NOVA USLUGA\"],[14]],\"locals\":[]},null],[0,\"\\n\"]],\"locals\":[]},null]],\"locals\":[]},null],[0,\"    \"],[6,[\"link-to\"],[\"all-services\"],null,{\"statements\":[[11,\"button\",[]],[15,\"class\",\"btn btn-primary\"],[13],[0,\"SVE USLUGE\"],[14]],\"locals\":[]},null],[0,\"\\n  \"],[14],[0,\"\\n\"],[14],[0,\"\\n\"]],\"locals\":[],\"named\":[],\"yields\":[],\"hasPartials\":false}", "meta": { "moduleName": "up-signal/templates/services.hbs" } });
 });
 define("up-signal/templates/suppliers", ["exports"], function (exports) {
   "use strict";
@@ -788,7 +2160,7 @@ define("up-signal/templates/suppliers", ["exports"], function (exports) {
   Object.defineProperty(exports, "__esModule", {
     value: true
   });
-  exports.default = Ember.HTMLBars.template({ "id": "PlYgjU2o", "block": "{\"statements\":[[11,\"div\",[]],[15,\"class\",\"body-grey\"],[13],[0,\"\\n  \"],[11,\"div\",[]],[15,\"class\",\"services-head col-md-12\"],[13],[0,\"\\n    \"],[11,\"p\",[]],[13],[0,\"Dobavljači:\"],[14],[0,\"\\n  \"],[14],[0,\"\\n  \"],[11,\"div\",[]],[15,\"class\",\"supplier-row-one col-md-4\"],[13],[0,\"\\n    \"],[11,\"img\",[]],[15,\"class\",\"service-row-image\"],[15,\"src\",\"/assets/images/supplier.png\"],[13],[14],[11,\"br\",[]],[13],[14],[0,\"\\n    \"],[11,\"h4\",[]],[13],[0,\" \"],[1,[28,[\"model\",\"0\",\"name\"]],false],[0,\" \"],[14],[0,\"\\n  \"],[14],[0,\"\\n  \"],[11,\"div\",[]],[15,\"class\",\"supplier-row-two col-md-4\"],[13],[0,\"\\n    \"],[11,\"img\",[]],[15,\"class\",\"service-row-image\"],[15,\"src\",\"/assets/images/supplier.png\"],[13],[14],[11,\"br\",[]],[13],[14],[0,\"\\n    \"],[11,\"h4\",[]],[13],[0,\" \"],[1,[28,[\"model\",\"1\",\"name\"]],false],[0,\" \"],[14],[0,\"\\n      \"],[14],[0,\"\\n     \"],[11,\"div\",[]],[15,\"class\",\"supplier-row-three col-md-4\"],[13],[0,\"\\n      \"],[11,\"img\",[]],[15,\"class\",\"service-row-image\"],[15,\"src\",\"/assets/images/supplier.png\"],[13],[14],[11,\"br\",[]],[13],[14],[0,\"\\n    \"],[11,\"h4\",[]],[13],[1,[28,[\"model\",\"2\",\"name\"]],false],[0,\" \"],[14],[0,\"\\n  \"],[14],[0,\"\\n\\n  \"],[11,\"div\",[]],[15,\"class\",\"col-md-12 button-services\"],[13],[0,\"\\n    \"],[6,[\"link-to\"],[\"new-supplier\"],null,{\"statements\":[[11,\"button\",[]],[15,\"class\",\"btn btn-primary\"],[13],[0,\"NOVI DOBAVLJAČ\"],[14]],\"locals\":[]},null],[0,\"\\n    \"],[6,[\"link-to\"],[\"all-suppliers\"],null,{\"statements\":[[11,\"button\",[]],[15,\"class\",\"btn btn-primary\"],[13],[0,\"SVI DOBAVLJAČI\"],[14]],\"locals\":[]},null],[0,\"\\n  \"],[14],[0,\"\\n\"],[14],[0,\"\\n\"]],\"locals\":[],\"named\":[],\"yields\":[],\"hasPartials\":false}", "meta": { "moduleName": "up-signal/templates/suppliers.hbs" } });
+  exports.default = Ember.HTMLBars.template({ "id": "zxJEBD/r", "block": "{\"statements\":[[11,\"div\",[]],[15,\"class\",\"body-grey\"],[13],[0,\"\\n  \"],[11,\"div\",[]],[15,\"class\",\"services-head col-md-12\"],[13],[0,\"\\n    \"],[11,\"p\",[]],[13],[0,\"Dobavljači:\"],[14],[0,\"\\n  \"],[14],[0,\"\\n  \"],[11,\"div\",[]],[15,\"class\",\"supplier-row-one col-md-4\"],[13],[0,\"\\n    \"],[11,\"img\",[]],[15,\"class\",\"service-row-image\"],[15,\"src\",\"/assets/images/supplier.png\"],[13],[14],[11,\"br\",[]],[13],[14],[0,\"\\n    \"],[11,\"h4\",[]],[13],[0,\" \"],[1,[28,[\"model\",\"0\",\"name\"]],false],[0,\" \"],[14],[0,\"\\n  \"],[14],[0,\"\\n  \"],[11,\"div\",[]],[15,\"class\",\"supplier-row-two col-md-4\"],[13],[0,\"\\n    \"],[11,\"img\",[]],[15,\"class\",\"service-row-image\"],[15,\"src\",\"/assets/images/supplier.png\"],[13],[14],[11,\"br\",[]],[13],[14],[0,\"\\n    \"],[11,\"h4\",[]],[13],[0,\" \"],[1,[28,[\"model\",\"1\",\"name\"]],false],[0,\" \"],[14],[0,\"\\n      \"],[14],[0,\"\\n     \"],[11,\"div\",[]],[15,\"class\",\"supplier-row-three col-md-4\"],[13],[0,\"\\n      \"],[11,\"img\",[]],[15,\"class\",\"service-row-image\"],[15,\"src\",\"/assets/images/supplier.png\"],[13],[14],[11,\"br\",[]],[13],[14],[0,\"\\n    \"],[11,\"h4\",[]],[13],[1,[28,[\"model\",\"2\",\"name\"]],false],[0,\" \"],[14],[0,\"\\n  \"],[14],[0,\"\\n\\n  \"],[11,\"div\",[]],[15,\"class\",\"col-md-12 button-services\"],[13],[0,\"\\n\"],[6,[\"if\"],[[28,[\"session\",\"isAuthenticated\"]]],null,{\"statements\":[[6,[\"if\"],[[33,[\"diff\"],[[28,[\"session\",\"data\",\"authenticated\",\"user\",\"role\",\"name\"]],\"SERVICER\"],null]],null,{\"statements\":[[0,\"        \"],[6,[\"link-to\"],[\"new-supplier\"],null,{\"statements\":[[11,\"button\",[]],[15,\"class\",\"btn btn-primary\"],[13],[0,\"NOVI DOBAVLJAČ\"],[14]],\"locals\":[]},null],[0,\"\\n\"]],\"locals\":[]},null]],\"locals\":[]},null],[0,\"    \"],[6,[\"link-to\"],[\"all-suppliers\"],null,{\"statements\":[[11,\"button\",[]],[15,\"class\",\"btn btn-primary\"],[13],[0,\"SVI DOBAVLJAČI\"],[14]],\"locals\":[]},null],[0,\"\\n  \"],[14],[0,\"\\n\"],[14],[0,\"\\n\"]],\"locals\":[],\"named\":[],\"yields\":[],\"hasPartials\":false}", "meta": { "moduleName": "up-signal/templates/suppliers.hbs" } });
 });
 
 
@@ -812,6 +2184,6 @@ catch(err) {
 });
 
 if (!runningTests) {
-  require("up-signal/app")["default"].create({"name":"up-signal","version":"0.0.0+a910b113"});
+  require("up-signal/app")["default"].create({"name":"up-signal","version":"0.0.0+c09346ad"});
 }
 //# sourceMappingURL=up-signal.map

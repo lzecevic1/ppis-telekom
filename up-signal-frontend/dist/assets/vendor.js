@@ -339,6 +339,676 @@ var runningTests = false;
     module.exports = { require: require, define: define };
   }
 })(this);
+;/**
+ * Copyright (c) 2014, Facebook, Inc.
+ * All rights reserved.
+ *
+ * This source code is licensed under the BSD-style license found in the
+ * https://raw.github.com/facebook/regenerator/master/LICENSE file. An
+ * additional grant of patent rights can be found in the PATENTS file in
+ * the same directory.
+ */
+
+!(function(global) {
+  "use strict";
+
+  var hasOwn = Object.prototype.hasOwnProperty;
+  var undefined; // More compressible than void 0.
+  var $Symbol = typeof Symbol === "function" ? Symbol : {};
+  var iteratorSymbol = $Symbol.iterator || "@@iterator";
+  var toStringTagSymbol = $Symbol.toStringTag || "@@toStringTag";
+
+  var inModule = typeof module === "object";
+  var runtime = global.regeneratorRuntime;
+  if (runtime) {
+    if (inModule) {
+      // If regeneratorRuntime is defined globally and we're in a module,
+      // make the exports object identical to regeneratorRuntime.
+      module.exports = runtime;
+    }
+    // Don't bother evaluating the rest of this file if the runtime was
+    // already defined globally.
+    return;
+  }
+
+  // Define the runtime globally (as expected by generated code) as either
+  // module.exports (if we're in a module) or a new, empty object.
+  runtime = global.regeneratorRuntime = inModule ? module.exports : {};
+
+  function wrap(innerFn, outerFn, self, tryLocsList) {
+    // If outerFn provided and outerFn.prototype is a Generator, then outerFn.prototype instanceof Generator.
+    var protoGenerator = outerFn && outerFn.prototype instanceof Generator ? outerFn : Generator;
+    var generator = Object.create(protoGenerator.prototype);
+    var context = new Context(tryLocsList || []);
+
+    // The ._invoke method unifies the implementations of the .next,
+    // .throw, and .return methods.
+    generator._invoke = makeInvokeMethod(innerFn, self, context);
+
+    return generator;
+  }
+  runtime.wrap = wrap;
+
+  // Try/catch helper to minimize deoptimizations. Returns a completion
+  // record like context.tryEntries[i].completion. This interface could
+  // have been (and was previously) designed to take a closure to be
+  // invoked without arguments, but in all the cases we care about we
+  // already have an existing method we want to call, so there's no need
+  // to create a new function object. We can even get away with assuming
+  // the method takes exactly one argument, since that happens to be true
+  // in every case, so we don't have to touch the arguments object. The
+  // only additional allocation required is the completion record, which
+  // has a stable shape and so hopefully should be cheap to allocate.
+  function tryCatch(fn, obj, arg) {
+    try {
+      return { type: "normal", arg: fn.call(obj, arg) };
+    } catch (err) {
+      return { type: "throw", arg: err };
+    }
+  }
+
+  var GenStateSuspendedStart = "suspendedStart";
+  var GenStateSuspendedYield = "suspendedYield";
+  var GenStateExecuting = "executing";
+  var GenStateCompleted = "completed";
+
+  // Returning this object from the innerFn has the same effect as
+  // breaking out of the dispatch switch statement.
+  var ContinueSentinel = {};
+
+  // Dummy constructor functions that we use as the .constructor and
+  // .constructor.prototype properties for functions that return Generator
+  // objects. For full spec compliance, you may wish to configure your
+  // minifier not to mangle the names of these two functions.
+  function Generator() {}
+  function GeneratorFunction() {}
+  function GeneratorFunctionPrototype() {}
+
+  var Gp = GeneratorFunctionPrototype.prototype = Generator.prototype;
+  GeneratorFunction.prototype = Gp.constructor = GeneratorFunctionPrototype;
+  GeneratorFunctionPrototype.constructor = GeneratorFunction;
+  GeneratorFunctionPrototype[toStringTagSymbol] = GeneratorFunction.displayName = "GeneratorFunction";
+
+  // Helper for defining the .next, .throw, and .return methods of the
+  // Iterator interface in terms of a single ._invoke method.
+  function defineIteratorMethods(prototype) {
+    ["next", "throw", "return"].forEach(function(method) {
+      prototype[method] = function(arg) {
+        return this._invoke(method, arg);
+      };
+    });
+  }
+
+  runtime.isGeneratorFunction = function(genFun) {
+    var ctor = typeof genFun === "function" && genFun.constructor;
+    return ctor
+      ? ctor === GeneratorFunction ||
+        // For the native GeneratorFunction constructor, the best we can
+        // do is to check its .name property.
+        (ctor.displayName || ctor.name) === "GeneratorFunction"
+      : false;
+  };
+
+  runtime.mark = function(genFun) {
+    if (Object.setPrototypeOf) {
+      Object.setPrototypeOf(genFun, GeneratorFunctionPrototype);
+    } else {
+      genFun.__proto__ = GeneratorFunctionPrototype;
+      if (!(toStringTagSymbol in genFun)) {
+        genFun[toStringTagSymbol] = "GeneratorFunction";
+      }
+    }
+    genFun.prototype = Object.create(Gp);
+    return genFun;
+  };
+
+  // Within the body of any async function, `await x` is transformed to
+  // `yield regeneratorRuntime.awrap(x)`, so that the runtime can test
+  // `value instanceof AwaitArgument` to determine if the yielded value is
+  // meant to be awaited. Some may consider the name of this method too
+  // cutesy, but they are curmudgeons.
+  runtime.awrap = function(arg) {
+    return new AwaitArgument(arg);
+  };
+
+  function AwaitArgument(arg) {
+    this.arg = arg;
+  }
+
+  function AsyncIterator(generator) {
+    function invoke(method, arg, resolve, reject) {
+      var record = tryCatch(generator[method], generator, arg);
+      if (record.type === "throw") {
+        reject(record.arg);
+      } else {
+        var result = record.arg;
+        var value = result.value;
+        if (value instanceof AwaitArgument) {
+          return Promise.resolve(value.arg).then(function(value) {
+            invoke("next", value, resolve, reject);
+          }, function(err) {
+            invoke("throw", err, resolve, reject);
+          });
+        }
+
+        return Promise.resolve(value).then(function(unwrapped) {
+          // When a yielded Promise is resolved, its final value becomes
+          // the .value of the Promise<{value,done}> result for the
+          // current iteration. If the Promise is rejected, however, the
+          // result for this iteration will be rejected with the same
+          // reason. Note that rejections of yielded Promises are not
+          // thrown back into the generator function, as is the case
+          // when an awaited Promise is rejected. This difference in
+          // behavior between yield and await is important, because it
+          // allows the consumer to decide what to do with the yielded
+          // rejection (swallow it and continue, manually .throw it back
+          // into the generator, abandon iteration, whatever). With
+          // await, by contrast, there is no opportunity to examine the
+          // rejection reason outside the generator function, so the
+          // only option is to throw it from the await expression, and
+          // let the generator function handle the exception.
+          result.value = unwrapped;
+          resolve(result);
+        }, reject);
+      }
+    }
+
+    if (typeof process === "object" && process.domain) {
+      invoke = process.domain.bind(invoke);
+    }
+
+    var previousPromise;
+
+    function enqueue(method, arg) {
+      function callInvokeWithMethodAndArg() {
+        return new Promise(function(resolve, reject) {
+          invoke(method, arg, resolve, reject);
+        });
+      }
+
+      return previousPromise =
+        // If enqueue has been called before, then we want to wait until
+        // all previous Promises have been resolved before calling invoke,
+        // so that results are always delivered in the correct order. If
+        // enqueue has not been called before, then it is important to
+        // call invoke immediately, without waiting on a callback to fire,
+        // so that the async generator function has the opportunity to do
+        // any necessary setup in a predictable way. This predictability
+        // is why the Promise constructor synchronously invokes its
+        // executor callback, and why async functions synchronously
+        // execute code before the first await. Since we implement simple
+        // async functions in terms of async generators, it is especially
+        // important to get this right, even though it requires care.
+        previousPromise ? previousPromise.then(
+          callInvokeWithMethodAndArg,
+          // Avoid propagating failures to Promises returned by later
+          // invocations of the iterator.
+          callInvokeWithMethodAndArg
+        ) : callInvokeWithMethodAndArg();
+    }
+
+    // Define the unified helper method that is used to implement .next,
+    // .throw, and .return (see defineIteratorMethods).
+    this._invoke = enqueue;
+  }
+
+  defineIteratorMethods(AsyncIterator.prototype);
+
+  // Note that simple async functions are implemented on top of
+  // AsyncIterator objects; they just return a Promise for the value of
+  // the final result produced by the iterator.
+  runtime.async = function(innerFn, outerFn, self, tryLocsList) {
+    var iter = new AsyncIterator(
+      wrap(innerFn, outerFn, self, tryLocsList)
+    );
+
+    return runtime.isGeneratorFunction(outerFn)
+      ? iter // If outerFn is a generator, return the full iterator.
+      : iter.next().then(function(result) {
+          return result.done ? result.value : iter.next();
+        });
+  };
+
+  function makeInvokeMethod(innerFn, self, context) {
+    var state = GenStateSuspendedStart;
+
+    return function invoke(method, arg) {
+      if (state === GenStateExecuting) {
+        throw new Error("Generator is already running");
+      }
+
+      if (state === GenStateCompleted) {
+        if (method === "throw") {
+          throw arg;
+        }
+
+        // Be forgiving, per 25.3.3.3.3 of the spec:
+        // https://people.mozilla.org/~jorendorff/es6-draft.html#sec-generatorresume
+        return doneResult();
+      }
+
+      while (true) {
+        var delegate = context.delegate;
+        if (delegate) {
+          if (method === "return" ||
+              (method === "throw" && delegate.iterator[method] === undefined)) {
+            // A return or throw (when the delegate iterator has no throw
+            // method) always terminates the yield* loop.
+            context.delegate = null;
+
+            // If the delegate iterator has a return method, give it a
+            // chance to clean up.
+            var returnMethod = delegate.iterator["return"];
+            if (returnMethod) {
+              var record = tryCatch(returnMethod, delegate.iterator, arg);
+              if (record.type === "throw") {
+                // If the return method threw an exception, let that
+                // exception prevail over the original return or throw.
+                method = "throw";
+                arg = record.arg;
+                continue;
+              }
+            }
+
+            if (method === "return") {
+              // Continue with the outer return, now that the delegate
+              // iterator has been terminated.
+              continue;
+            }
+          }
+
+          var record = tryCatch(
+            delegate.iterator[method],
+            delegate.iterator,
+            arg
+          );
+
+          if (record.type === "throw") {
+            context.delegate = null;
+
+            // Like returning generator.throw(uncaught), but without the
+            // overhead of an extra function call.
+            method = "throw";
+            arg = record.arg;
+            continue;
+          }
+
+          // Delegate generator ran and handled its own exceptions so
+          // regardless of what the method was, we continue as if it is
+          // "next" with an undefined arg.
+          method = "next";
+          arg = undefined;
+
+          var info = record.arg;
+          if (info.done) {
+            context[delegate.resultName] = info.value;
+            context.next = delegate.nextLoc;
+          } else {
+            state = GenStateSuspendedYield;
+            return info;
+          }
+
+          context.delegate = null;
+        }
+
+        if (method === "next") {
+          // Setting context._sent for legacy support of Babel's
+          // function.sent implementation.
+          context.sent = context._sent = arg;
+
+        } else if (method === "throw") {
+          if (state === GenStateSuspendedStart) {
+            state = GenStateCompleted;
+            throw arg;
+          }
+
+          if (context.dispatchException(arg)) {
+            // If the dispatched exception was caught by a catch block,
+            // then let that catch block handle the exception normally.
+            method = "next";
+            arg = undefined;
+          }
+
+        } else if (method === "return") {
+          context.abrupt("return", arg);
+        }
+
+        state = GenStateExecuting;
+
+        var record = tryCatch(innerFn, self, context);
+        if (record.type === "normal") {
+          // If an exception is thrown from innerFn, we leave state ===
+          // GenStateExecuting and loop back for another invocation.
+          state = context.done
+            ? GenStateCompleted
+            : GenStateSuspendedYield;
+
+          var info = {
+            value: record.arg,
+            done: context.done
+          };
+
+          if (record.arg === ContinueSentinel) {
+            if (context.delegate && method === "next") {
+              // Deliberately forget the last sent value so that we don't
+              // accidentally pass it on to the delegate.
+              arg = undefined;
+            }
+          } else {
+            return info;
+          }
+
+        } else if (record.type === "throw") {
+          state = GenStateCompleted;
+          // Dispatch the exception by looping back around to the
+          // context.dispatchException(arg) call above.
+          method = "throw";
+          arg = record.arg;
+        }
+      }
+    };
+  }
+
+  // Define Generator.prototype.{next,throw,return} in terms of the
+  // unified ._invoke helper method.
+  defineIteratorMethods(Gp);
+
+  Gp[iteratorSymbol] = function() {
+    return this;
+  };
+
+  Gp[toStringTagSymbol] = "Generator";
+
+  Gp.toString = function() {
+    return "[object Generator]";
+  };
+
+  function pushTryEntry(locs) {
+    var entry = { tryLoc: locs[0] };
+
+    if (1 in locs) {
+      entry.catchLoc = locs[1];
+    }
+
+    if (2 in locs) {
+      entry.finallyLoc = locs[2];
+      entry.afterLoc = locs[3];
+    }
+
+    this.tryEntries.push(entry);
+  }
+
+  function resetTryEntry(entry) {
+    var record = entry.completion || {};
+    record.type = "normal";
+    delete record.arg;
+    entry.completion = record;
+  }
+
+  function Context(tryLocsList) {
+    // The root entry object (effectively a try statement without a catch
+    // or a finally block) gives us a place to store values thrown from
+    // locations where there is no enclosing try statement.
+    this.tryEntries = [{ tryLoc: "root" }];
+    tryLocsList.forEach(pushTryEntry, this);
+    this.reset(true);
+  }
+
+  runtime.keys = function(object) {
+    var keys = [];
+    for (var key in object) {
+      keys.push(key);
+    }
+    keys.reverse();
+
+    // Rather than returning an object with a next method, we keep
+    // things simple and return the next function itself.
+    return function next() {
+      while (keys.length) {
+        var key = keys.pop();
+        if (key in object) {
+          next.value = key;
+          next.done = false;
+          return next;
+        }
+      }
+
+      // To avoid creating an additional object, we just hang the .value
+      // and .done properties off the next function object itself. This
+      // also ensures that the minifier will not anonymize the function.
+      next.done = true;
+      return next;
+    };
+  };
+
+  function values(iterable) {
+    if (iterable) {
+      var iteratorMethod = iterable[iteratorSymbol];
+      if (iteratorMethod) {
+        return iteratorMethod.call(iterable);
+      }
+
+      if (typeof iterable.next === "function") {
+        return iterable;
+      }
+
+      if (!isNaN(iterable.length)) {
+        var i = -1, next = function next() {
+          while (++i < iterable.length) {
+            if (hasOwn.call(iterable, i)) {
+              next.value = iterable[i];
+              next.done = false;
+              return next;
+            }
+          }
+
+          next.value = undefined;
+          next.done = true;
+
+          return next;
+        };
+
+        return next.next = next;
+      }
+    }
+
+    // Return an iterator with no values.
+    return { next: doneResult };
+  }
+  runtime.values = values;
+
+  function doneResult() {
+    return { value: undefined, done: true };
+  }
+
+  Context.prototype = {
+    constructor: Context,
+
+    reset: function(skipTempReset) {
+      this.prev = 0;
+      this.next = 0;
+      // Resetting context._sent for legacy support of Babel's
+      // function.sent implementation.
+      this.sent = this._sent = undefined;
+      this.done = false;
+      this.delegate = null;
+
+      this.tryEntries.forEach(resetTryEntry);
+
+      if (!skipTempReset) {
+        for (var name in this) {
+          // Not sure about the optimal order of these conditions:
+          if (name.charAt(0) === "t" &&
+              hasOwn.call(this, name) &&
+              !isNaN(+name.slice(1))) {
+            this[name] = undefined;
+          }
+        }
+      }
+    },
+
+    stop: function() {
+      this.done = true;
+
+      var rootEntry = this.tryEntries[0];
+      var rootRecord = rootEntry.completion;
+      if (rootRecord.type === "throw") {
+        throw rootRecord.arg;
+      }
+
+      return this.rval;
+    },
+
+    dispatchException: function(exception) {
+      if (this.done) {
+        throw exception;
+      }
+
+      var context = this;
+      function handle(loc, caught) {
+        record.type = "throw";
+        record.arg = exception;
+        context.next = loc;
+        return !!caught;
+      }
+
+      for (var i = this.tryEntries.length - 1; i >= 0; --i) {
+        var entry = this.tryEntries[i];
+        var record = entry.completion;
+
+        if (entry.tryLoc === "root") {
+          // Exception thrown outside of any try block that could handle
+          // it, so set the completion value of the entire function to
+          // throw the exception.
+          return handle("end");
+        }
+
+        if (entry.tryLoc <= this.prev) {
+          var hasCatch = hasOwn.call(entry, "catchLoc");
+          var hasFinally = hasOwn.call(entry, "finallyLoc");
+
+          if (hasCatch && hasFinally) {
+            if (this.prev < entry.catchLoc) {
+              return handle(entry.catchLoc, true);
+            } else if (this.prev < entry.finallyLoc) {
+              return handle(entry.finallyLoc);
+            }
+
+          } else if (hasCatch) {
+            if (this.prev < entry.catchLoc) {
+              return handle(entry.catchLoc, true);
+            }
+
+          } else if (hasFinally) {
+            if (this.prev < entry.finallyLoc) {
+              return handle(entry.finallyLoc);
+            }
+
+          } else {
+            throw new Error("try statement without catch or finally");
+          }
+        }
+      }
+    },
+
+    abrupt: function(type, arg) {
+      for (var i = this.tryEntries.length - 1; i >= 0; --i) {
+        var entry = this.tryEntries[i];
+        if (entry.tryLoc <= this.prev &&
+            hasOwn.call(entry, "finallyLoc") &&
+            this.prev < entry.finallyLoc) {
+          var finallyEntry = entry;
+          break;
+        }
+      }
+
+      if (finallyEntry &&
+          (type === "break" ||
+           type === "continue") &&
+          finallyEntry.tryLoc <= arg &&
+          arg <= finallyEntry.finallyLoc) {
+        // Ignore the finally entry if control is not jumping to a
+        // location outside the try/catch block.
+        finallyEntry = null;
+      }
+
+      var record = finallyEntry ? finallyEntry.completion : {};
+      record.type = type;
+      record.arg = arg;
+
+      if (finallyEntry) {
+        this.next = finallyEntry.finallyLoc;
+      } else {
+        this.complete(record);
+      }
+
+      return ContinueSentinel;
+    },
+
+    complete: function(record, afterLoc) {
+      if (record.type === "throw") {
+        throw record.arg;
+      }
+
+      if (record.type === "break" ||
+          record.type === "continue") {
+        this.next = record.arg;
+      } else if (record.type === "return") {
+        this.rval = record.arg;
+        this.next = "end";
+      } else if (record.type === "normal" && afterLoc) {
+        this.next = afterLoc;
+      }
+    },
+
+    finish: function(finallyLoc) {
+      for (var i = this.tryEntries.length - 1; i >= 0; --i) {
+        var entry = this.tryEntries[i];
+        if (entry.finallyLoc === finallyLoc) {
+          this.complete(entry.completion, entry.afterLoc);
+          resetTryEntry(entry);
+          return ContinueSentinel;
+        }
+      }
+    },
+
+    "catch": function(tryLoc) {
+      for (var i = this.tryEntries.length - 1; i >= 0; --i) {
+        var entry = this.tryEntries[i];
+        if (entry.tryLoc === tryLoc) {
+          var record = entry.completion;
+          if (record.type === "throw") {
+            var thrown = record.arg;
+            resetTryEntry(entry);
+          }
+          return thrown;
+        }
+      }
+
+      // The context.catch method must only be called with a location
+      // argument that corresponds to a known catch block.
+      throw new Error("illegal catch attempt");
+    },
+
+    delegateYield: function(iterable, resultName, nextLoc) {
+      this.delegate = {
+        iterator: values(iterable),
+        resultName: resultName,
+        nextLoc: nextLoc
+      };
+
+      return ContinueSentinel;
+    }
+  };
+})(
+  // Among the various tricks for obtaining a reference to the global
+  // object, this seems to be the most reliable technique that does not
+  // use indirect eval (which violates Content Security Policy).
+  typeof global === "object" ? global :
+  typeof window === "object" ? window :
+  typeof self === "object" ? self : this
+);
+
 ;/*!
  * jQuery JavaScript Library v3.3.1
  * https://jquery.com/
@@ -65511,6 +66181,2538 @@ requireModule('ember')
 
 }());
 
+;if (typeof FastBoot === 'undefined') {
+/**!
+ * @fileOverview Kickass library to create and place poppers near their reference elements.
+ * @version 1.14.3
+ * @license
+ * Copyright (c) 2016 Federico Zivolo and contributors
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ */
+(function (global, factory) {
+	typeof exports === 'object' && typeof module !== 'undefined' ? module.exports = factory() :
+	typeof define === 'function' && define.amd ? define(factory) :
+	(global.Popper = factory());
+}(this, (function () { 'use strict';
+
+var isBrowser = typeof window !== 'undefined' && typeof document !== 'undefined';
+
+var longerTimeoutBrowsers = ['Edge', 'Trident', 'Firefox'];
+var timeoutDuration = 0;
+for (var i = 0; i < longerTimeoutBrowsers.length; i += 1) {
+  if (isBrowser && navigator.userAgent.indexOf(longerTimeoutBrowsers[i]) >= 0) {
+    timeoutDuration = 1;
+    break;
+  }
+}
+
+function microtaskDebounce(fn) {
+  var called = false;
+  return function () {
+    if (called) {
+      return;
+    }
+    called = true;
+    window.Promise.resolve().then(function () {
+      called = false;
+      fn();
+    });
+  };
+}
+
+function taskDebounce(fn) {
+  var scheduled = false;
+  return function () {
+    if (!scheduled) {
+      scheduled = true;
+      setTimeout(function () {
+        scheduled = false;
+        fn();
+      }, timeoutDuration);
+    }
+  };
+}
+
+var supportsMicroTasks = isBrowser && window.Promise;
+
+/**
+* Create a debounced version of a method, that's asynchronously deferred
+* but called in the minimum time possible.
+*
+* @method
+* @memberof Popper.Utils
+* @argument {Function} fn
+* @returns {Function}
+*/
+var debounce = supportsMicroTasks ? microtaskDebounce : taskDebounce;
+
+/**
+ * Check if the given variable is a function
+ * @method
+ * @memberof Popper.Utils
+ * @argument {Any} functionToCheck - variable to check
+ * @returns {Boolean} answer to: is a function?
+ */
+function isFunction(functionToCheck) {
+  var getType = {};
+  return functionToCheck && getType.toString.call(functionToCheck) === '[object Function]';
+}
+
+/**
+ * Get CSS computed property of the given element
+ * @method
+ * @memberof Popper.Utils
+ * @argument {Eement} element
+ * @argument {String} property
+ */
+function getStyleComputedProperty(element, property) {
+  if (element.nodeType !== 1) {
+    return [];
+  }
+  // NOTE: 1 DOM access here
+  var css = getComputedStyle(element, null);
+  return property ? css[property] : css;
+}
+
+/**
+ * Returns the parentNode or the host of the element
+ * @method
+ * @memberof Popper.Utils
+ * @argument {Element} element
+ * @returns {Element} parent
+ */
+function getParentNode(element) {
+  if (element.nodeName === 'HTML') {
+    return element;
+  }
+  return element.parentNode || element.host;
+}
+
+/**
+ * Returns the scrolling parent of the given element
+ * @method
+ * @memberof Popper.Utils
+ * @argument {Element} element
+ * @returns {Element} scroll parent
+ */
+function getScrollParent(element) {
+  // Return body, `getScroll` will take care to get the correct `scrollTop` from it
+  if (!element) {
+    return document.body;
+  }
+
+  switch (element.nodeName) {
+    case 'HTML':
+    case 'BODY':
+      return element.ownerDocument.body;
+    case '#document':
+      return element.body;
+  }
+
+  // Firefox want us to check `-x` and `-y` variations as well
+
+  var _getStyleComputedProp = getStyleComputedProperty(element),
+      overflow = _getStyleComputedProp.overflow,
+      overflowX = _getStyleComputedProp.overflowX,
+      overflowY = _getStyleComputedProp.overflowY;
+
+  if (/(auto|scroll|overlay)/.test(overflow + overflowY + overflowX)) {
+    return element;
+  }
+
+  return getScrollParent(getParentNode(element));
+}
+
+var isIE11 = isBrowser && !!(window.MSInputMethodContext && document.documentMode);
+var isIE10 = isBrowser && /MSIE 10/.test(navigator.userAgent);
+
+/**
+ * Determines if the browser is Internet Explorer
+ * @method
+ * @memberof Popper.Utils
+ * @param {Number} version to check
+ * @returns {Boolean} isIE
+ */
+function isIE(version) {
+  if (version === 11) {
+    return isIE11;
+  }
+  if (version === 10) {
+    return isIE10;
+  }
+  return isIE11 || isIE10;
+}
+
+/**
+ * Returns the offset parent of the given element
+ * @method
+ * @memberof Popper.Utils
+ * @argument {Element} element
+ * @returns {Element} offset parent
+ */
+function getOffsetParent(element) {
+  if (!element) {
+    return document.documentElement;
+  }
+
+  var noOffsetParent = isIE(10) ? document.body : null;
+
+  // NOTE: 1 DOM access here
+  var offsetParent = element.offsetParent;
+  // Skip hidden elements which don't have an offsetParent
+  while (offsetParent === noOffsetParent && element.nextElementSibling) {
+    offsetParent = (element = element.nextElementSibling).offsetParent;
+  }
+
+  var nodeName = offsetParent && offsetParent.nodeName;
+
+  if (!nodeName || nodeName === 'BODY' || nodeName === 'HTML') {
+    return element ? element.ownerDocument.documentElement : document.documentElement;
+  }
+
+  // .offsetParent will return the closest TD or TABLE in case
+  // no offsetParent is present, I hate this job...
+  if (['TD', 'TABLE'].indexOf(offsetParent.nodeName) !== -1 && getStyleComputedProperty(offsetParent, 'position') === 'static') {
+    return getOffsetParent(offsetParent);
+  }
+
+  return offsetParent;
+}
+
+function isOffsetContainer(element) {
+  var nodeName = element.nodeName;
+
+  if (nodeName === 'BODY') {
+    return false;
+  }
+  return nodeName === 'HTML' || getOffsetParent(element.firstElementChild) === element;
+}
+
+/**
+ * Finds the root node (document, shadowDOM root) of the given element
+ * @method
+ * @memberof Popper.Utils
+ * @argument {Element} node
+ * @returns {Element} root node
+ */
+function getRoot(node) {
+  if (node.parentNode !== null) {
+    return getRoot(node.parentNode);
+  }
+
+  return node;
+}
+
+/**
+ * Finds the offset parent common to the two provided nodes
+ * @method
+ * @memberof Popper.Utils
+ * @argument {Element} element1
+ * @argument {Element} element2
+ * @returns {Element} common offset parent
+ */
+function findCommonOffsetParent(element1, element2) {
+  // This check is needed to avoid errors in case one of the elements isn't defined for any reason
+  if (!element1 || !element1.nodeType || !element2 || !element2.nodeType) {
+    return document.documentElement;
+  }
+
+  // Here we make sure to give as "start" the element that comes first in the DOM
+  var order = element1.compareDocumentPosition(element2) & Node.DOCUMENT_POSITION_FOLLOWING;
+  var start = order ? element1 : element2;
+  var end = order ? element2 : element1;
+
+  // Get common ancestor container
+  var range = document.createRange();
+  range.setStart(start, 0);
+  range.setEnd(end, 0);
+  var commonAncestorContainer = range.commonAncestorContainer;
+
+  // Both nodes are inside #document
+
+  if (element1 !== commonAncestorContainer && element2 !== commonAncestorContainer || start.contains(end)) {
+    if (isOffsetContainer(commonAncestorContainer)) {
+      return commonAncestorContainer;
+    }
+
+    return getOffsetParent(commonAncestorContainer);
+  }
+
+  // one of the nodes is inside shadowDOM, find which one
+  var element1root = getRoot(element1);
+  if (element1root.host) {
+    return findCommonOffsetParent(element1root.host, element2);
+  } else {
+    return findCommonOffsetParent(element1, getRoot(element2).host);
+  }
+}
+
+/**
+ * Gets the scroll value of the given element in the given side (top and left)
+ * @method
+ * @memberof Popper.Utils
+ * @argument {Element} element
+ * @argument {String} side `top` or `left`
+ * @returns {number} amount of scrolled pixels
+ */
+function getScroll(element) {
+  var side = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : 'top';
+
+  var upperSide = side === 'top' ? 'scrollTop' : 'scrollLeft';
+  var nodeName = element.nodeName;
+
+  if (nodeName === 'BODY' || nodeName === 'HTML') {
+    var html = element.ownerDocument.documentElement;
+    var scrollingElement = element.ownerDocument.scrollingElement || html;
+    return scrollingElement[upperSide];
+  }
+
+  return element[upperSide];
+}
+
+/*
+ * Sum or subtract the element scroll values (left and top) from a given rect object
+ * @method
+ * @memberof Popper.Utils
+ * @param {Object} rect - Rect object you want to change
+ * @param {HTMLElement} element - The element from the function reads the scroll values
+ * @param {Boolean} subtract - set to true if you want to subtract the scroll values
+ * @return {Object} rect - The modifier rect object
+ */
+function includeScroll(rect, element) {
+  var subtract = arguments.length > 2 && arguments[2] !== undefined ? arguments[2] : false;
+
+  var scrollTop = getScroll(element, 'top');
+  var scrollLeft = getScroll(element, 'left');
+  var modifier = subtract ? -1 : 1;
+  rect.top += scrollTop * modifier;
+  rect.bottom += scrollTop * modifier;
+  rect.left += scrollLeft * modifier;
+  rect.right += scrollLeft * modifier;
+  return rect;
+}
+
+/*
+ * Helper to detect borders of a given element
+ * @method
+ * @memberof Popper.Utils
+ * @param {CSSStyleDeclaration} styles
+ * Result of `getStyleComputedProperty` on the given element
+ * @param {String} axis - `x` or `y`
+ * @return {number} borders - The borders size of the given axis
+ */
+
+function getBordersSize(styles, axis) {
+  var sideA = axis === 'x' ? 'Left' : 'Top';
+  var sideB = sideA === 'Left' ? 'Right' : 'Bottom';
+
+  return parseFloat(styles['border' + sideA + 'Width'], 10) + parseFloat(styles['border' + sideB + 'Width'], 10);
+}
+
+function getSize(axis, body, html, computedStyle) {
+  return Math.max(body['offset' + axis], body['scroll' + axis], html['client' + axis], html['offset' + axis], html['scroll' + axis], isIE(10) ? html['offset' + axis] + computedStyle['margin' + (axis === 'Height' ? 'Top' : 'Left')] + computedStyle['margin' + (axis === 'Height' ? 'Bottom' : 'Right')] : 0);
+}
+
+function getWindowSizes() {
+  var body = document.body;
+  var html = document.documentElement;
+  var computedStyle = isIE(10) && getComputedStyle(html);
+
+  return {
+    height: getSize('Height', body, html, computedStyle),
+    width: getSize('Width', body, html, computedStyle)
+  };
+}
+
+var classCallCheck = function (instance, Constructor) {
+  if (!(instance instanceof Constructor)) {
+    throw new TypeError("Cannot call a class as a function");
+  }
+};
+
+var createClass = function () {
+  function defineProperties(target, props) {
+    for (var i = 0; i < props.length; i++) {
+      var descriptor = props[i];
+      descriptor.enumerable = descriptor.enumerable || false;
+      descriptor.configurable = true;
+      if ("value" in descriptor) descriptor.writable = true;
+      Object.defineProperty(target, descriptor.key, descriptor);
+    }
+  }
+
+  return function (Constructor, protoProps, staticProps) {
+    if (protoProps) defineProperties(Constructor.prototype, protoProps);
+    if (staticProps) defineProperties(Constructor, staticProps);
+    return Constructor;
+  };
+}();
+
+
+
+
+
+var defineProperty = function (obj, key, value) {
+  if (key in obj) {
+    Object.defineProperty(obj, key, {
+      value: value,
+      enumerable: true,
+      configurable: true,
+      writable: true
+    });
+  } else {
+    obj[key] = value;
+  }
+
+  return obj;
+};
+
+var _extends = Object.assign || function (target) {
+  for (var i = 1; i < arguments.length; i++) {
+    var source = arguments[i];
+
+    for (var key in source) {
+      if (Object.prototype.hasOwnProperty.call(source, key)) {
+        target[key] = source[key];
+      }
+    }
+  }
+
+  return target;
+};
+
+/**
+ * Given element offsets, generate an output similar to getBoundingClientRect
+ * @method
+ * @memberof Popper.Utils
+ * @argument {Object} offsets
+ * @returns {Object} ClientRect like output
+ */
+function getClientRect(offsets) {
+  return _extends({}, offsets, {
+    right: offsets.left + offsets.width,
+    bottom: offsets.top + offsets.height
+  });
+}
+
+/**
+ * Get bounding client rect of given element
+ * @method
+ * @memberof Popper.Utils
+ * @param {HTMLElement} element
+ * @return {Object} client rect
+ */
+function getBoundingClientRect(element) {
+  var rect = {};
+
+  // IE10 10 FIX: Please, don't ask, the element isn't
+  // considered in DOM in some circumstances...
+  // This isn't reproducible in IE10 compatibility mode of IE11
+  try {
+    if (isIE(10)) {
+      rect = element.getBoundingClientRect();
+      var scrollTop = getScroll(element, 'top');
+      var scrollLeft = getScroll(element, 'left');
+      rect.top += scrollTop;
+      rect.left += scrollLeft;
+      rect.bottom += scrollTop;
+      rect.right += scrollLeft;
+    } else {
+      rect = element.getBoundingClientRect();
+    }
+  } catch (e) {}
+
+  var result = {
+    left: rect.left,
+    top: rect.top,
+    width: rect.right - rect.left,
+    height: rect.bottom - rect.top
+  };
+
+  // subtract scrollbar size from sizes
+  var sizes = element.nodeName === 'HTML' ? getWindowSizes() : {};
+  var width = sizes.width || element.clientWidth || result.right - result.left;
+  var height = sizes.height || element.clientHeight || result.bottom - result.top;
+
+  var horizScrollbar = element.offsetWidth - width;
+  var vertScrollbar = element.offsetHeight - height;
+
+  // if an hypothetical scrollbar is detected, we must be sure it's not a `border`
+  // we make this check conditional for performance reasons
+  if (horizScrollbar || vertScrollbar) {
+    var styles = getStyleComputedProperty(element);
+    horizScrollbar -= getBordersSize(styles, 'x');
+    vertScrollbar -= getBordersSize(styles, 'y');
+
+    result.width -= horizScrollbar;
+    result.height -= vertScrollbar;
+  }
+
+  return getClientRect(result);
+}
+
+function getOffsetRectRelativeToArbitraryNode(children, parent) {
+  var fixedPosition = arguments.length > 2 && arguments[2] !== undefined ? arguments[2] : false;
+
+  var isIE10 = isIE(10);
+  var isHTML = parent.nodeName === 'HTML';
+  var childrenRect = getBoundingClientRect(children);
+  var parentRect = getBoundingClientRect(parent);
+  var scrollParent = getScrollParent(children);
+
+  var styles = getStyleComputedProperty(parent);
+  var borderTopWidth = parseFloat(styles.borderTopWidth, 10);
+  var borderLeftWidth = parseFloat(styles.borderLeftWidth, 10);
+
+  // In cases where the parent is fixed, we must ignore negative scroll in offset calc
+  if (fixedPosition && parent.nodeName === 'HTML') {
+    parentRect.top = Math.max(parentRect.top, 0);
+    parentRect.left = Math.max(parentRect.left, 0);
+  }
+  var offsets = getClientRect({
+    top: childrenRect.top - parentRect.top - borderTopWidth,
+    left: childrenRect.left - parentRect.left - borderLeftWidth,
+    width: childrenRect.width,
+    height: childrenRect.height
+  });
+  offsets.marginTop = 0;
+  offsets.marginLeft = 0;
+
+  // Subtract margins of documentElement in case it's being used as parent
+  // we do this only on HTML because it's the only element that behaves
+  // differently when margins are applied to it. The margins are included in
+  // the box of the documentElement, in the other cases not.
+  if (!isIE10 && isHTML) {
+    var marginTop = parseFloat(styles.marginTop, 10);
+    var marginLeft = parseFloat(styles.marginLeft, 10);
+
+    offsets.top -= borderTopWidth - marginTop;
+    offsets.bottom -= borderTopWidth - marginTop;
+    offsets.left -= borderLeftWidth - marginLeft;
+    offsets.right -= borderLeftWidth - marginLeft;
+
+    // Attach marginTop and marginLeft because in some circumstances we may need them
+    offsets.marginTop = marginTop;
+    offsets.marginLeft = marginLeft;
+  }
+
+  if (isIE10 && !fixedPosition ? parent.contains(scrollParent) : parent === scrollParent && scrollParent.nodeName !== 'BODY') {
+    offsets = includeScroll(offsets, parent);
+  }
+
+  return offsets;
+}
+
+function getViewportOffsetRectRelativeToArtbitraryNode(element) {
+  var excludeScroll = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : false;
+
+  var html = element.ownerDocument.documentElement;
+  var relativeOffset = getOffsetRectRelativeToArbitraryNode(element, html);
+  var width = Math.max(html.clientWidth, window.innerWidth || 0);
+  var height = Math.max(html.clientHeight, window.innerHeight || 0);
+
+  var scrollTop = !excludeScroll ? getScroll(html) : 0;
+  var scrollLeft = !excludeScroll ? getScroll(html, 'left') : 0;
+
+  var offset = {
+    top: scrollTop - relativeOffset.top + relativeOffset.marginTop,
+    left: scrollLeft - relativeOffset.left + relativeOffset.marginLeft,
+    width: width,
+    height: height
+  };
+
+  return getClientRect(offset);
+}
+
+/**
+ * Check if the given element is fixed or is inside a fixed parent
+ * @method
+ * @memberof Popper.Utils
+ * @argument {Element} element
+ * @argument {Element} customContainer
+ * @returns {Boolean} answer to "isFixed?"
+ */
+function isFixed(element) {
+  var nodeName = element.nodeName;
+  if (nodeName === 'BODY' || nodeName === 'HTML') {
+    return false;
+  }
+  if (getStyleComputedProperty(element, 'position') === 'fixed') {
+    return true;
+  }
+  return isFixed(getParentNode(element));
+}
+
+/**
+ * Finds the first parent of an element that has a transformed property defined
+ * @method
+ * @memberof Popper.Utils
+ * @argument {Element} element
+ * @returns {Element} first transformed parent or documentElement
+ */
+
+function getFixedPositionOffsetParent(element) {
+  // This check is needed to avoid errors in case one of the elements isn't defined for any reason
+  if (!element || !element.parentElement || isIE()) {
+    return document.documentElement;
+  }
+  var el = element.parentElement;
+  while (el && getStyleComputedProperty(el, 'transform') === 'none') {
+    el = el.parentElement;
+  }
+  return el || document.documentElement;
+}
+
+/**
+ * Computed the boundaries limits and return them
+ * @method
+ * @memberof Popper.Utils
+ * @param {HTMLElement} popper
+ * @param {HTMLElement} reference
+ * @param {number} padding
+ * @param {HTMLElement} boundariesElement - Element used to define the boundaries
+ * @param {Boolean} fixedPosition - Is in fixed position mode
+ * @returns {Object} Coordinates of the boundaries
+ */
+function getBoundaries(popper, reference, padding, boundariesElement) {
+  var fixedPosition = arguments.length > 4 && arguments[4] !== undefined ? arguments[4] : false;
+
+  // NOTE: 1 DOM access here
+
+  var boundaries = { top: 0, left: 0 };
+  var offsetParent = fixedPosition ? getFixedPositionOffsetParent(popper) : findCommonOffsetParent(popper, reference);
+
+  // Handle viewport case
+  if (boundariesElement === 'viewport') {
+    boundaries = getViewportOffsetRectRelativeToArtbitraryNode(offsetParent, fixedPosition);
+  } else {
+    // Handle other cases based on DOM element used as boundaries
+    var boundariesNode = void 0;
+    if (boundariesElement === 'scrollParent') {
+      boundariesNode = getScrollParent(getParentNode(reference));
+      if (boundariesNode.nodeName === 'BODY') {
+        boundariesNode = popper.ownerDocument.documentElement;
+      }
+    } else if (boundariesElement === 'window') {
+      boundariesNode = popper.ownerDocument.documentElement;
+    } else {
+      boundariesNode = boundariesElement;
+    }
+
+    var offsets = getOffsetRectRelativeToArbitraryNode(boundariesNode, offsetParent, fixedPosition);
+
+    // In case of HTML, we need a different computation
+    if (boundariesNode.nodeName === 'HTML' && !isFixed(offsetParent)) {
+      var _getWindowSizes = getWindowSizes(),
+          height = _getWindowSizes.height,
+          width = _getWindowSizes.width;
+
+      boundaries.top += offsets.top - offsets.marginTop;
+      boundaries.bottom = height + offsets.top;
+      boundaries.left += offsets.left - offsets.marginLeft;
+      boundaries.right = width + offsets.left;
+    } else {
+      // for all the other DOM elements, this one is good
+      boundaries = offsets;
+    }
+  }
+
+  // Add paddings
+  boundaries.left += padding;
+  boundaries.top += padding;
+  boundaries.right -= padding;
+  boundaries.bottom -= padding;
+
+  return boundaries;
+}
+
+function getArea(_ref) {
+  var width = _ref.width,
+      height = _ref.height;
+
+  return width * height;
+}
+
+/**
+ * Utility used to transform the `auto` placement to the placement with more
+ * available space.
+ * @method
+ * @memberof Popper.Utils
+ * @argument {Object} data - The data object generated by update method
+ * @argument {Object} options - Modifiers configuration and options
+ * @returns {Object} The data object, properly modified
+ */
+function computeAutoPlacement(placement, refRect, popper, reference, boundariesElement) {
+  var padding = arguments.length > 5 && arguments[5] !== undefined ? arguments[5] : 0;
+
+  if (placement.indexOf('auto') === -1) {
+    return placement;
+  }
+
+  var boundaries = getBoundaries(popper, reference, padding, boundariesElement);
+
+  var rects = {
+    top: {
+      width: boundaries.width,
+      height: refRect.top - boundaries.top
+    },
+    right: {
+      width: boundaries.right - refRect.right,
+      height: boundaries.height
+    },
+    bottom: {
+      width: boundaries.width,
+      height: boundaries.bottom - refRect.bottom
+    },
+    left: {
+      width: refRect.left - boundaries.left,
+      height: boundaries.height
+    }
+  };
+
+  var sortedAreas = Object.keys(rects).map(function (key) {
+    return _extends({
+      key: key
+    }, rects[key], {
+      area: getArea(rects[key])
+    });
+  }).sort(function (a, b) {
+    return b.area - a.area;
+  });
+
+  var filteredAreas = sortedAreas.filter(function (_ref2) {
+    var width = _ref2.width,
+        height = _ref2.height;
+    return width >= popper.clientWidth && height >= popper.clientHeight;
+  });
+
+  var computedPlacement = filteredAreas.length > 0 ? filteredAreas[0].key : sortedAreas[0].key;
+
+  var variation = placement.split('-')[1];
+
+  return computedPlacement + (variation ? '-' + variation : '');
+}
+
+/**
+ * Get offsets to the reference element
+ * @method
+ * @memberof Popper.Utils
+ * @param {Object} state
+ * @param {Element} popper - the popper element
+ * @param {Element} reference - the reference element (the popper will be relative to this)
+ * @param {Element} fixedPosition - is in fixed position mode
+ * @returns {Object} An object containing the offsets which will be applied to the popper
+ */
+function getReferenceOffsets(state, popper, reference) {
+  var fixedPosition = arguments.length > 3 && arguments[3] !== undefined ? arguments[3] : null;
+
+  var commonOffsetParent = fixedPosition ? getFixedPositionOffsetParent(popper) : findCommonOffsetParent(popper, reference);
+  return getOffsetRectRelativeToArbitraryNode(reference, commonOffsetParent, fixedPosition);
+}
+
+/**
+ * Get the outer sizes of the given element (offset size + margins)
+ * @method
+ * @memberof Popper.Utils
+ * @argument {Element} element
+ * @returns {Object} object containing width and height properties
+ */
+function getOuterSizes(element) {
+  var styles = getComputedStyle(element);
+  var x = parseFloat(styles.marginTop) + parseFloat(styles.marginBottom);
+  var y = parseFloat(styles.marginLeft) + parseFloat(styles.marginRight);
+  var result = {
+    width: element.offsetWidth + y,
+    height: element.offsetHeight + x
+  };
+  return result;
+}
+
+/**
+ * Get the opposite placement of the given one
+ * @method
+ * @memberof Popper.Utils
+ * @argument {String} placement
+ * @returns {String} flipped placement
+ */
+function getOppositePlacement(placement) {
+  var hash = { left: 'right', right: 'left', bottom: 'top', top: 'bottom' };
+  return placement.replace(/left|right|bottom|top/g, function (matched) {
+    return hash[matched];
+  });
+}
+
+/**
+ * Get offsets to the popper
+ * @method
+ * @memberof Popper.Utils
+ * @param {Object} position - CSS position the Popper will get applied
+ * @param {HTMLElement} popper - the popper element
+ * @param {Object} referenceOffsets - the reference offsets (the popper will be relative to this)
+ * @param {String} placement - one of the valid placement options
+ * @returns {Object} popperOffsets - An object containing the offsets which will be applied to the popper
+ */
+function getPopperOffsets(popper, referenceOffsets, placement) {
+  placement = placement.split('-')[0];
+
+  // Get popper node sizes
+  var popperRect = getOuterSizes(popper);
+
+  // Add position, width and height to our offsets object
+  var popperOffsets = {
+    width: popperRect.width,
+    height: popperRect.height
+  };
+
+  // depending by the popper placement we have to compute its offsets slightly differently
+  var isHoriz = ['right', 'left'].indexOf(placement) !== -1;
+  var mainSide = isHoriz ? 'top' : 'left';
+  var secondarySide = isHoriz ? 'left' : 'top';
+  var measurement = isHoriz ? 'height' : 'width';
+  var secondaryMeasurement = !isHoriz ? 'height' : 'width';
+
+  popperOffsets[mainSide] = referenceOffsets[mainSide] + referenceOffsets[measurement] / 2 - popperRect[measurement] / 2;
+  if (placement === secondarySide) {
+    popperOffsets[secondarySide] = referenceOffsets[secondarySide] - popperRect[secondaryMeasurement];
+  } else {
+    popperOffsets[secondarySide] = referenceOffsets[getOppositePlacement(secondarySide)];
+  }
+
+  return popperOffsets;
+}
+
+/**
+ * Mimics the `find` method of Array
+ * @method
+ * @memberof Popper.Utils
+ * @argument {Array} arr
+ * @argument prop
+ * @argument value
+ * @returns index or -1
+ */
+function find(arr, check) {
+  // use native find if supported
+  if (Array.prototype.find) {
+    return arr.find(check);
+  }
+
+  // use `filter` to obtain the same behavior of `find`
+  return arr.filter(check)[0];
+}
+
+/**
+ * Return the index of the matching object
+ * @method
+ * @memberof Popper.Utils
+ * @argument {Array} arr
+ * @argument prop
+ * @argument value
+ * @returns index or -1
+ */
+function findIndex(arr, prop, value) {
+  // use native findIndex if supported
+  if (Array.prototype.findIndex) {
+    return arr.findIndex(function (cur) {
+      return cur[prop] === value;
+    });
+  }
+
+  // use `find` + `indexOf` if `findIndex` isn't supported
+  var match = find(arr, function (obj) {
+    return obj[prop] === value;
+  });
+  return arr.indexOf(match);
+}
+
+/**
+ * Loop trough the list of modifiers and run them in order,
+ * each of them will then edit the data object.
+ * @method
+ * @memberof Popper.Utils
+ * @param {dataObject} data
+ * @param {Array} modifiers
+ * @param {String} ends - Optional modifier name used as stopper
+ * @returns {dataObject}
+ */
+function runModifiers(modifiers, data, ends) {
+  var modifiersToRun = ends === undefined ? modifiers : modifiers.slice(0, findIndex(modifiers, 'name', ends));
+
+  modifiersToRun.forEach(function (modifier) {
+    if (modifier['function']) {
+      // eslint-disable-line dot-notation
+      console.warn('`modifier.function` is deprecated, use `modifier.fn`!');
+    }
+    var fn = modifier['function'] || modifier.fn; // eslint-disable-line dot-notation
+    if (modifier.enabled && isFunction(fn)) {
+      // Add properties to offsets to make them a complete clientRect object
+      // we do this before each modifier to make sure the previous one doesn't
+      // mess with these values
+      data.offsets.popper = getClientRect(data.offsets.popper);
+      data.offsets.reference = getClientRect(data.offsets.reference);
+
+      data = fn(data, modifier);
+    }
+  });
+
+  return data;
+}
+
+/**
+ * Updates the position of the popper, computing the new offsets and applying
+ * the new style.<br />
+ * Prefer `scheduleUpdate` over `update` because of performance reasons.
+ * @method
+ * @memberof Popper
+ */
+function update() {
+  // if popper is destroyed, don't perform any further update
+  if (this.state.isDestroyed) {
+    return;
+  }
+
+  var data = {
+    instance: this,
+    styles: {},
+    arrowStyles: {},
+    attributes: {},
+    flipped: false,
+    offsets: {}
+  };
+
+  // compute reference element offsets
+  data.offsets.reference = getReferenceOffsets(this.state, this.popper, this.reference, this.options.positionFixed);
+
+  // compute auto placement, store placement inside the data object,
+  // modifiers will be able to edit `placement` if needed
+  // and refer to originalPlacement to know the original value
+  data.placement = computeAutoPlacement(this.options.placement, data.offsets.reference, this.popper, this.reference, this.options.modifiers.flip.boundariesElement, this.options.modifiers.flip.padding);
+
+  // store the computed placement inside `originalPlacement`
+  data.originalPlacement = data.placement;
+
+  data.positionFixed = this.options.positionFixed;
+
+  // compute the popper offsets
+  data.offsets.popper = getPopperOffsets(this.popper, data.offsets.reference, data.placement);
+
+  data.offsets.popper.position = this.options.positionFixed ? 'fixed' : 'absolute';
+
+  // run the modifiers
+  data = runModifiers(this.modifiers, data);
+
+  // the first `update` will call `onCreate` callback
+  // the other ones will call `onUpdate` callback
+  if (!this.state.isCreated) {
+    this.state.isCreated = true;
+    this.options.onCreate(data);
+  } else {
+    this.options.onUpdate(data);
+  }
+}
+
+/**
+ * Helper used to know if the given modifier is enabled.
+ * @method
+ * @memberof Popper.Utils
+ * @returns {Boolean}
+ */
+function isModifierEnabled(modifiers, modifierName) {
+  return modifiers.some(function (_ref) {
+    var name = _ref.name,
+        enabled = _ref.enabled;
+    return enabled && name === modifierName;
+  });
+}
+
+/**
+ * Get the prefixed supported property name
+ * @method
+ * @memberof Popper.Utils
+ * @argument {String} property (camelCase)
+ * @returns {String} prefixed property (camelCase or PascalCase, depending on the vendor prefix)
+ */
+function getSupportedPropertyName(property) {
+  var prefixes = [false, 'ms', 'Webkit', 'Moz', 'O'];
+  var upperProp = property.charAt(0).toUpperCase() + property.slice(1);
+
+  for (var i = 0; i < prefixes.length; i++) {
+    var prefix = prefixes[i];
+    var toCheck = prefix ? '' + prefix + upperProp : property;
+    if (typeof document.body.style[toCheck] !== 'undefined') {
+      return toCheck;
+    }
+  }
+  return null;
+}
+
+/**
+ * Destroy the popper
+ * @method
+ * @memberof Popper
+ */
+function destroy() {
+  this.state.isDestroyed = true;
+
+  // touch DOM only if `applyStyle` modifier is enabled
+  if (isModifierEnabled(this.modifiers, 'applyStyle')) {
+    this.popper.removeAttribute('x-placement');
+    this.popper.style.position = '';
+    this.popper.style.top = '';
+    this.popper.style.left = '';
+    this.popper.style.right = '';
+    this.popper.style.bottom = '';
+    this.popper.style.willChange = '';
+    this.popper.style[getSupportedPropertyName('transform')] = '';
+  }
+
+  this.disableEventListeners();
+
+  // remove the popper if user explicity asked for the deletion on destroy
+  // do not use `remove` because IE11 doesn't support it
+  if (this.options.removeOnDestroy) {
+    this.popper.parentNode.removeChild(this.popper);
+  }
+  return this;
+}
+
+/**
+ * Get the window associated with the element
+ * @argument {Element} element
+ * @returns {Window}
+ */
+function getWindow(element) {
+  var ownerDocument = element.ownerDocument;
+  return ownerDocument ? ownerDocument.defaultView : window;
+}
+
+function attachToScrollParents(scrollParent, event, callback, scrollParents) {
+  var isBody = scrollParent.nodeName === 'BODY';
+  var target = isBody ? scrollParent.ownerDocument.defaultView : scrollParent;
+  target.addEventListener(event, callback, { passive: true });
+
+  if (!isBody) {
+    attachToScrollParents(getScrollParent(target.parentNode), event, callback, scrollParents);
+  }
+  scrollParents.push(target);
+}
+
+/**
+ * Setup needed event listeners used to update the popper position
+ * @method
+ * @memberof Popper.Utils
+ * @private
+ */
+function setupEventListeners(reference, options, state, updateBound) {
+  // Resize event listener on window
+  state.updateBound = updateBound;
+  getWindow(reference).addEventListener('resize', state.updateBound, { passive: true });
+
+  // Scroll event listener on scroll parents
+  var scrollElement = getScrollParent(reference);
+  attachToScrollParents(scrollElement, 'scroll', state.updateBound, state.scrollParents);
+  state.scrollElement = scrollElement;
+  state.eventsEnabled = true;
+
+  return state;
+}
+
+/**
+ * It will add resize/scroll events and start recalculating
+ * position of the popper element when they are triggered.
+ * @method
+ * @memberof Popper
+ */
+function enableEventListeners() {
+  if (!this.state.eventsEnabled) {
+    this.state = setupEventListeners(this.reference, this.options, this.state, this.scheduleUpdate);
+  }
+}
+
+/**
+ * Remove event listeners used to update the popper position
+ * @method
+ * @memberof Popper.Utils
+ * @private
+ */
+function removeEventListeners(reference, state) {
+  // Remove resize event listener on window
+  getWindow(reference).removeEventListener('resize', state.updateBound);
+
+  // Remove scroll event listener on scroll parents
+  state.scrollParents.forEach(function (target) {
+    target.removeEventListener('scroll', state.updateBound);
+  });
+
+  // Reset state
+  state.updateBound = null;
+  state.scrollParents = [];
+  state.scrollElement = null;
+  state.eventsEnabled = false;
+  return state;
+}
+
+/**
+ * It will remove resize/scroll events and won't recalculate popper position
+ * when they are triggered. It also won't trigger onUpdate callback anymore,
+ * unless you call `update` method manually.
+ * @method
+ * @memberof Popper
+ */
+function disableEventListeners() {
+  if (this.state.eventsEnabled) {
+    cancelAnimationFrame(this.scheduleUpdate);
+    this.state = removeEventListeners(this.reference, this.state);
+  }
+}
+
+/**
+ * Tells if a given input is a number
+ * @method
+ * @memberof Popper.Utils
+ * @param {*} input to check
+ * @return {Boolean}
+ */
+function isNumeric(n) {
+  return n !== '' && !isNaN(parseFloat(n)) && isFinite(n);
+}
+
+/**
+ * Set the style to the given popper
+ * @method
+ * @memberof Popper.Utils
+ * @argument {Element} element - Element to apply the style to
+ * @argument {Object} styles
+ * Object with a list of properties and values which will be applied to the element
+ */
+function setStyles(element, styles) {
+  Object.keys(styles).forEach(function (prop) {
+    var unit = '';
+    // add unit if the value is numeric and is one of the following
+    if (['width', 'height', 'top', 'right', 'bottom', 'left'].indexOf(prop) !== -1 && isNumeric(styles[prop])) {
+      unit = 'px';
+    }
+    element.style[prop] = styles[prop] + unit;
+  });
+}
+
+/**
+ * Set the attributes to the given popper
+ * @method
+ * @memberof Popper.Utils
+ * @argument {Element} element - Element to apply the attributes to
+ * @argument {Object} styles
+ * Object with a list of properties and values which will be applied to the element
+ */
+function setAttributes(element, attributes) {
+  Object.keys(attributes).forEach(function (prop) {
+    var value = attributes[prop];
+    if (value !== false) {
+      element.setAttribute(prop, attributes[prop]);
+    } else {
+      element.removeAttribute(prop);
+    }
+  });
+}
+
+/**
+ * @function
+ * @memberof Modifiers
+ * @argument {Object} data - The data object generated by `update` method
+ * @argument {Object} data.styles - List of style properties - values to apply to popper element
+ * @argument {Object} data.attributes - List of attribute properties - values to apply to popper element
+ * @argument {Object} options - Modifiers configuration and options
+ * @returns {Object} The same data object
+ */
+function applyStyle(data) {
+  // any property present in `data.styles` will be applied to the popper,
+  // in this way we can make the 3rd party modifiers add custom styles to it
+  // Be aware, modifiers could override the properties defined in the previous
+  // lines of this modifier!
+  setStyles(data.instance.popper, data.styles);
+
+  // any property present in `data.attributes` will be applied to the popper,
+  // they will be set as HTML attributes of the element
+  setAttributes(data.instance.popper, data.attributes);
+
+  // if arrowElement is defined and arrowStyles has some properties
+  if (data.arrowElement && Object.keys(data.arrowStyles).length) {
+    setStyles(data.arrowElement, data.arrowStyles);
+  }
+
+  return data;
+}
+
+/**
+ * Set the x-placement attribute before everything else because it could be used
+ * to add margins to the popper margins needs to be calculated to get the
+ * correct popper offsets.
+ * @method
+ * @memberof Popper.modifiers
+ * @param {HTMLElement} reference - The reference element used to position the popper
+ * @param {HTMLElement} popper - The HTML element used as popper
+ * @param {Object} options - Popper.js options
+ */
+function applyStyleOnLoad(reference, popper, options, modifierOptions, state) {
+  // compute reference element offsets
+  var referenceOffsets = getReferenceOffsets(state, popper, reference, options.positionFixed);
+
+  // compute auto placement, store placement inside the data object,
+  // modifiers will be able to edit `placement` if needed
+  // and refer to originalPlacement to know the original value
+  var placement = computeAutoPlacement(options.placement, referenceOffsets, popper, reference, options.modifiers.flip.boundariesElement, options.modifiers.flip.padding);
+
+  popper.setAttribute('x-placement', placement);
+
+  // Apply `position` to popper before anything else because
+  // without the position applied we can't guarantee correct computations
+  setStyles(popper, { position: options.positionFixed ? 'fixed' : 'absolute' });
+
+  return options;
+}
+
+/**
+ * @function
+ * @memberof Modifiers
+ * @argument {Object} data - The data object generated by `update` method
+ * @argument {Object} options - Modifiers configuration and options
+ * @returns {Object} The data object, properly modified
+ */
+function computeStyle(data, options) {
+  var x = options.x,
+      y = options.y;
+  var popper = data.offsets.popper;
+
+  // Remove this legacy support in Popper.js v2
+
+  var legacyGpuAccelerationOption = find(data.instance.modifiers, function (modifier) {
+    return modifier.name === 'applyStyle';
+  }).gpuAcceleration;
+  if (legacyGpuAccelerationOption !== undefined) {
+    console.warn('WARNING: `gpuAcceleration` option moved to `computeStyle` modifier and will not be supported in future versions of Popper.js!');
+  }
+  var gpuAcceleration = legacyGpuAccelerationOption !== undefined ? legacyGpuAccelerationOption : options.gpuAcceleration;
+
+  var offsetParent = getOffsetParent(data.instance.popper);
+  var offsetParentRect = getBoundingClientRect(offsetParent);
+
+  // Styles
+  var styles = {
+    position: popper.position
+  };
+
+  // Avoid blurry text by using full pixel integers.
+  // For pixel-perfect positioning, top/bottom prefers rounded
+  // values, while left/right prefers floored values.
+  var offsets = {
+    left: Math.floor(popper.left),
+    top: Math.round(popper.top),
+    bottom: Math.round(popper.bottom),
+    right: Math.floor(popper.right)
+  };
+
+  var sideA = x === 'bottom' ? 'top' : 'bottom';
+  var sideB = y === 'right' ? 'left' : 'right';
+
+  // if gpuAcceleration is set to `true` and transform is supported,
+  //  we use `translate3d` to apply the position to the popper we
+  // automatically use the supported prefixed version if needed
+  var prefixedProperty = getSupportedPropertyName('transform');
+
+  // now, let's make a step back and look at this code closely (wtf?)
+  // If the content of the popper grows once it's been positioned, it
+  // may happen that the popper gets misplaced because of the new content
+  // overflowing its reference element
+  // To avoid this problem, we provide two options (x and y), which allow
+  // the consumer to define the offset origin.
+  // If we position a popper on top of a reference element, we can set
+  // `x` to `top` to make the popper grow towards its top instead of
+  // its bottom.
+  var left = void 0,
+      top = void 0;
+  if (sideA === 'bottom') {
+    top = -offsetParentRect.height + offsets.bottom;
+  } else {
+    top = offsets.top;
+  }
+  if (sideB === 'right') {
+    left = -offsetParentRect.width + offsets.right;
+  } else {
+    left = offsets.left;
+  }
+  if (gpuAcceleration && prefixedProperty) {
+    styles[prefixedProperty] = 'translate3d(' + left + 'px, ' + top + 'px, 0)';
+    styles[sideA] = 0;
+    styles[sideB] = 0;
+    styles.willChange = 'transform';
+  } else {
+    // othwerise, we use the standard `top`, `left`, `bottom` and `right` properties
+    var invertTop = sideA === 'bottom' ? -1 : 1;
+    var invertLeft = sideB === 'right' ? -1 : 1;
+    styles[sideA] = top * invertTop;
+    styles[sideB] = left * invertLeft;
+    styles.willChange = sideA + ', ' + sideB;
+  }
+
+  // Attributes
+  var attributes = {
+    'x-placement': data.placement
+  };
+
+  // Update `data` attributes, styles and arrowStyles
+  data.attributes = _extends({}, attributes, data.attributes);
+  data.styles = _extends({}, styles, data.styles);
+  data.arrowStyles = _extends({}, data.offsets.arrow, data.arrowStyles);
+
+  return data;
+}
+
+/**
+ * Helper used to know if the given modifier depends from another one.<br />
+ * It checks if the needed modifier is listed and enabled.
+ * @method
+ * @memberof Popper.Utils
+ * @param {Array} modifiers - list of modifiers
+ * @param {String} requestingName - name of requesting modifier
+ * @param {String} requestedName - name of requested modifier
+ * @returns {Boolean}
+ */
+function isModifierRequired(modifiers, requestingName, requestedName) {
+  var requesting = find(modifiers, function (_ref) {
+    var name = _ref.name;
+    return name === requestingName;
+  });
+
+  var isRequired = !!requesting && modifiers.some(function (modifier) {
+    return modifier.name === requestedName && modifier.enabled && modifier.order < requesting.order;
+  });
+
+  if (!isRequired) {
+    var _requesting = '`' + requestingName + '`';
+    var requested = '`' + requestedName + '`';
+    console.warn(requested + ' modifier is required by ' + _requesting + ' modifier in order to work, be sure to include it before ' + _requesting + '!');
+  }
+  return isRequired;
+}
+
+/**
+ * @function
+ * @memberof Modifiers
+ * @argument {Object} data - The data object generated by update method
+ * @argument {Object} options - Modifiers configuration and options
+ * @returns {Object} The data object, properly modified
+ */
+function arrow(data, options) {
+  var _data$offsets$arrow;
+
+  // arrow depends on keepTogether in order to work
+  if (!isModifierRequired(data.instance.modifiers, 'arrow', 'keepTogether')) {
+    return data;
+  }
+
+  var arrowElement = options.element;
+
+  // if arrowElement is a string, suppose it's a CSS selector
+  if (typeof arrowElement === 'string') {
+    arrowElement = data.instance.popper.querySelector(arrowElement);
+
+    // if arrowElement is not found, don't run the modifier
+    if (!arrowElement) {
+      return data;
+    }
+  } else {
+    // if the arrowElement isn't a query selector we must check that the
+    // provided DOM node is child of its popper node
+    if (!data.instance.popper.contains(arrowElement)) {
+      console.warn('WARNING: `arrow.element` must be child of its popper element!');
+      return data;
+    }
+  }
+
+  var placement = data.placement.split('-')[0];
+  var _data$offsets = data.offsets,
+      popper = _data$offsets.popper,
+      reference = _data$offsets.reference;
+
+  var isVertical = ['left', 'right'].indexOf(placement) !== -1;
+
+  var len = isVertical ? 'height' : 'width';
+  var sideCapitalized = isVertical ? 'Top' : 'Left';
+  var side = sideCapitalized.toLowerCase();
+  var altSide = isVertical ? 'left' : 'top';
+  var opSide = isVertical ? 'bottom' : 'right';
+  var arrowElementSize = getOuterSizes(arrowElement)[len];
+
+  //
+  // extends keepTogether behavior making sure the popper and its
+  // reference have enough pixels in conjuction
+  //
+
+  // top/left side
+  if (reference[opSide] - arrowElementSize < popper[side]) {
+    data.offsets.popper[side] -= popper[side] - (reference[opSide] - arrowElementSize);
+  }
+  // bottom/right side
+  if (reference[side] + arrowElementSize > popper[opSide]) {
+    data.offsets.popper[side] += reference[side] + arrowElementSize - popper[opSide];
+  }
+  data.offsets.popper = getClientRect(data.offsets.popper);
+
+  // compute center of the popper
+  var center = reference[side] + reference[len] / 2 - arrowElementSize / 2;
+
+  // Compute the sideValue using the updated popper offsets
+  // take popper margin in account because we don't have this info available
+  var css = getStyleComputedProperty(data.instance.popper);
+  var popperMarginSide = parseFloat(css['margin' + sideCapitalized], 10);
+  var popperBorderSide = parseFloat(css['border' + sideCapitalized + 'Width'], 10);
+  var sideValue = center - data.offsets.popper[side] - popperMarginSide - popperBorderSide;
+
+  // prevent arrowElement from being placed not contiguously to its popper
+  sideValue = Math.max(Math.min(popper[len] - arrowElementSize, sideValue), 0);
+
+  data.arrowElement = arrowElement;
+  data.offsets.arrow = (_data$offsets$arrow = {}, defineProperty(_data$offsets$arrow, side, Math.round(sideValue)), defineProperty(_data$offsets$arrow, altSide, ''), _data$offsets$arrow);
+
+  return data;
+}
+
+/**
+ * Get the opposite placement variation of the given one
+ * @method
+ * @memberof Popper.Utils
+ * @argument {String} placement variation
+ * @returns {String} flipped placement variation
+ */
+function getOppositeVariation(variation) {
+  if (variation === 'end') {
+    return 'start';
+  } else if (variation === 'start') {
+    return 'end';
+  }
+  return variation;
+}
+
+/**
+ * List of accepted placements to use as values of the `placement` option.<br />
+ * Valid placements are:
+ * - `auto`
+ * - `top`
+ * - `right`
+ * - `bottom`
+ * - `left`
+ *
+ * Each placement can have a variation from this list:
+ * - `-start`
+ * - `-end`
+ *
+ * Variations are interpreted easily if you think of them as the left to right
+ * written languages. Horizontally (`top` and `bottom`), `start` is left and `end`
+ * is right.<br />
+ * Vertically (`left` and `right`), `start` is top and `end` is bottom.
+ *
+ * Some valid examples are:
+ * - `top-end` (on top of reference, right aligned)
+ * - `right-start` (on right of reference, top aligned)
+ * - `bottom` (on bottom, centered)
+ * - `auto-right` (on the side with more space available, alignment depends by placement)
+ *
+ * @static
+ * @type {Array}
+ * @enum {String}
+ * @readonly
+ * @method placements
+ * @memberof Popper
+ */
+var placements = ['auto-start', 'auto', 'auto-end', 'top-start', 'top', 'top-end', 'right-start', 'right', 'right-end', 'bottom-end', 'bottom', 'bottom-start', 'left-end', 'left', 'left-start'];
+
+// Get rid of `auto` `auto-start` and `auto-end`
+var validPlacements = placements.slice(3);
+
+/**
+ * Given an initial placement, returns all the subsequent placements
+ * clockwise (or counter-clockwise).
+ *
+ * @method
+ * @memberof Popper.Utils
+ * @argument {String} placement - A valid placement (it accepts variations)
+ * @argument {Boolean} counter - Set to true to walk the placements counterclockwise
+ * @returns {Array} placements including their variations
+ */
+function clockwise(placement) {
+  var counter = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : false;
+
+  var index = validPlacements.indexOf(placement);
+  var arr = validPlacements.slice(index + 1).concat(validPlacements.slice(0, index));
+  return counter ? arr.reverse() : arr;
+}
+
+var BEHAVIORS = {
+  FLIP: 'flip',
+  CLOCKWISE: 'clockwise',
+  COUNTERCLOCKWISE: 'counterclockwise'
+};
+
+/**
+ * @function
+ * @memberof Modifiers
+ * @argument {Object} data - The data object generated by update method
+ * @argument {Object} options - Modifiers configuration and options
+ * @returns {Object} The data object, properly modified
+ */
+function flip(data, options) {
+  // if `inner` modifier is enabled, we can't use the `flip` modifier
+  if (isModifierEnabled(data.instance.modifiers, 'inner')) {
+    return data;
+  }
+
+  if (data.flipped && data.placement === data.originalPlacement) {
+    // seems like flip is trying to loop, probably there's not enough space on any of the flippable sides
+    return data;
+  }
+
+  var boundaries = getBoundaries(data.instance.popper, data.instance.reference, options.padding, options.boundariesElement, data.positionFixed);
+
+  var placement = data.placement.split('-')[0];
+  var placementOpposite = getOppositePlacement(placement);
+  var variation = data.placement.split('-')[1] || '';
+
+  var flipOrder = [];
+
+  switch (options.behavior) {
+    case BEHAVIORS.FLIP:
+      flipOrder = [placement, placementOpposite];
+      break;
+    case BEHAVIORS.CLOCKWISE:
+      flipOrder = clockwise(placement);
+      break;
+    case BEHAVIORS.COUNTERCLOCKWISE:
+      flipOrder = clockwise(placement, true);
+      break;
+    default:
+      flipOrder = options.behavior;
+  }
+
+  flipOrder.forEach(function (step, index) {
+    if (placement !== step || flipOrder.length === index + 1) {
+      return data;
+    }
+
+    placement = data.placement.split('-')[0];
+    placementOpposite = getOppositePlacement(placement);
+
+    var popperOffsets = data.offsets.popper;
+    var refOffsets = data.offsets.reference;
+
+    // using floor because the reference offsets may contain decimals we are not going to consider here
+    var floor = Math.floor;
+    var overlapsRef = placement === 'left' && floor(popperOffsets.right) > floor(refOffsets.left) || placement === 'right' && floor(popperOffsets.left) < floor(refOffsets.right) || placement === 'top' && floor(popperOffsets.bottom) > floor(refOffsets.top) || placement === 'bottom' && floor(popperOffsets.top) < floor(refOffsets.bottom);
+
+    var overflowsLeft = floor(popperOffsets.left) < floor(boundaries.left);
+    var overflowsRight = floor(popperOffsets.right) > floor(boundaries.right);
+    var overflowsTop = floor(popperOffsets.top) < floor(boundaries.top);
+    var overflowsBottom = floor(popperOffsets.bottom) > floor(boundaries.bottom);
+
+    var overflowsBoundaries = placement === 'left' && overflowsLeft || placement === 'right' && overflowsRight || placement === 'top' && overflowsTop || placement === 'bottom' && overflowsBottom;
+
+    // flip the variation if required
+    var isVertical = ['top', 'bottom'].indexOf(placement) !== -1;
+    var flippedVariation = !!options.flipVariations && (isVertical && variation === 'start' && overflowsLeft || isVertical && variation === 'end' && overflowsRight || !isVertical && variation === 'start' && overflowsTop || !isVertical && variation === 'end' && overflowsBottom);
+
+    if (overlapsRef || overflowsBoundaries || flippedVariation) {
+      // this boolean to detect any flip loop
+      data.flipped = true;
+
+      if (overlapsRef || overflowsBoundaries) {
+        placement = flipOrder[index + 1];
+      }
+
+      if (flippedVariation) {
+        variation = getOppositeVariation(variation);
+      }
+
+      data.placement = placement + (variation ? '-' + variation : '');
+
+      // this object contains `position`, we want to preserve it along with
+      // any additional property we may add in the future
+      data.offsets.popper = _extends({}, data.offsets.popper, getPopperOffsets(data.instance.popper, data.offsets.reference, data.placement));
+
+      data = runModifiers(data.instance.modifiers, data, 'flip');
+    }
+  });
+  return data;
+}
+
+/**
+ * @function
+ * @memberof Modifiers
+ * @argument {Object} data - The data object generated by update method
+ * @argument {Object} options - Modifiers configuration and options
+ * @returns {Object} The data object, properly modified
+ */
+function keepTogether(data) {
+  var _data$offsets = data.offsets,
+      popper = _data$offsets.popper,
+      reference = _data$offsets.reference;
+
+  var placement = data.placement.split('-')[0];
+  var floor = Math.floor;
+  var isVertical = ['top', 'bottom'].indexOf(placement) !== -1;
+  var side = isVertical ? 'right' : 'bottom';
+  var opSide = isVertical ? 'left' : 'top';
+  var measurement = isVertical ? 'width' : 'height';
+
+  if (popper[side] < floor(reference[opSide])) {
+    data.offsets.popper[opSide] = floor(reference[opSide]) - popper[measurement];
+  }
+  if (popper[opSide] > floor(reference[side])) {
+    data.offsets.popper[opSide] = floor(reference[side]);
+  }
+
+  return data;
+}
+
+/**
+ * Converts a string containing value + unit into a px value number
+ * @function
+ * @memberof {modifiers~offset}
+ * @private
+ * @argument {String} str - Value + unit string
+ * @argument {String} measurement - `height` or `width`
+ * @argument {Object} popperOffsets
+ * @argument {Object} referenceOffsets
+ * @returns {Number|String}
+ * Value in pixels, or original string if no values were extracted
+ */
+function toValue(str, measurement, popperOffsets, referenceOffsets) {
+  // separate value from unit
+  var split = str.match(/((?:\-|\+)?\d*\.?\d*)(.*)/);
+  var value = +split[1];
+  var unit = split[2];
+
+  // If it's not a number it's an operator, I guess
+  if (!value) {
+    return str;
+  }
+
+  if (unit.indexOf('%') === 0) {
+    var element = void 0;
+    switch (unit) {
+      case '%p':
+        element = popperOffsets;
+        break;
+      case '%':
+      case '%r':
+      default:
+        element = referenceOffsets;
+    }
+
+    var rect = getClientRect(element);
+    return rect[measurement] / 100 * value;
+  } else if (unit === 'vh' || unit === 'vw') {
+    // if is a vh or vw, we calculate the size based on the viewport
+    var size = void 0;
+    if (unit === 'vh') {
+      size = Math.max(document.documentElement.clientHeight, window.innerHeight || 0);
+    } else {
+      size = Math.max(document.documentElement.clientWidth, window.innerWidth || 0);
+    }
+    return size / 100 * value;
+  } else {
+    // if is an explicit pixel unit, we get rid of the unit and keep the value
+    // if is an implicit unit, it's px, and we return just the value
+    return value;
+  }
+}
+
+/**
+ * Parse an `offset` string to extrapolate `x` and `y` numeric offsets.
+ * @function
+ * @memberof {modifiers~offset}
+ * @private
+ * @argument {String} offset
+ * @argument {Object} popperOffsets
+ * @argument {Object} referenceOffsets
+ * @argument {String} basePlacement
+ * @returns {Array} a two cells array with x and y offsets in numbers
+ */
+function parseOffset(offset, popperOffsets, referenceOffsets, basePlacement) {
+  var offsets = [0, 0];
+
+  // Use height if placement is left or right and index is 0 otherwise use width
+  // in this way the first offset will use an axis and the second one
+  // will use the other one
+  var useHeight = ['right', 'left'].indexOf(basePlacement) !== -1;
+
+  // Split the offset string to obtain a list of values and operands
+  // The regex addresses values with the plus or minus sign in front (+10, -20, etc)
+  var fragments = offset.split(/(\+|\-)/).map(function (frag) {
+    return frag.trim();
+  });
+
+  // Detect if the offset string contains a pair of values or a single one
+  // they could be separated by comma or space
+  var divider = fragments.indexOf(find(fragments, function (frag) {
+    return frag.search(/,|\s/) !== -1;
+  }));
+
+  if (fragments[divider] && fragments[divider].indexOf(',') === -1) {
+    console.warn('Offsets separated by white space(s) are deprecated, use a comma (,) instead.');
+  }
+
+  // If divider is found, we divide the list of values and operands to divide
+  // them by ofset X and Y.
+  var splitRegex = /\s*,\s*|\s+/;
+  var ops = divider !== -1 ? [fragments.slice(0, divider).concat([fragments[divider].split(splitRegex)[0]]), [fragments[divider].split(splitRegex)[1]].concat(fragments.slice(divider + 1))] : [fragments];
+
+  // Convert the values with units to absolute pixels to allow our computations
+  ops = ops.map(function (op, index) {
+    // Most of the units rely on the orientation of the popper
+    var measurement = (index === 1 ? !useHeight : useHeight) ? 'height' : 'width';
+    var mergeWithPrevious = false;
+    return op
+    // This aggregates any `+` or `-` sign that aren't considered operators
+    // e.g.: 10 + +5 => [10, +, +5]
+    .reduce(function (a, b) {
+      if (a[a.length - 1] === '' && ['+', '-'].indexOf(b) !== -1) {
+        a[a.length - 1] = b;
+        mergeWithPrevious = true;
+        return a;
+      } else if (mergeWithPrevious) {
+        a[a.length - 1] += b;
+        mergeWithPrevious = false;
+        return a;
+      } else {
+        return a.concat(b);
+      }
+    }, [])
+    // Here we convert the string values into number values (in px)
+    .map(function (str) {
+      return toValue(str, measurement, popperOffsets, referenceOffsets);
+    });
+  });
+
+  // Loop trough the offsets arrays and execute the operations
+  ops.forEach(function (op, index) {
+    op.forEach(function (frag, index2) {
+      if (isNumeric(frag)) {
+        offsets[index] += frag * (op[index2 - 1] === '-' ? -1 : 1);
+      }
+    });
+  });
+  return offsets;
+}
+
+/**
+ * @function
+ * @memberof Modifiers
+ * @argument {Object} data - The data object generated by update method
+ * @argument {Object} options - Modifiers configuration and options
+ * @argument {Number|String} options.offset=0
+ * The offset value as described in the modifier description
+ * @returns {Object} The data object, properly modified
+ */
+function offset(data, _ref) {
+  var offset = _ref.offset;
+  var placement = data.placement,
+      _data$offsets = data.offsets,
+      popper = _data$offsets.popper,
+      reference = _data$offsets.reference;
+
+  var basePlacement = placement.split('-')[0];
+
+  var offsets = void 0;
+  if (isNumeric(+offset)) {
+    offsets = [+offset, 0];
+  } else {
+    offsets = parseOffset(offset, popper, reference, basePlacement);
+  }
+
+  if (basePlacement === 'left') {
+    popper.top += offsets[0];
+    popper.left -= offsets[1];
+  } else if (basePlacement === 'right') {
+    popper.top += offsets[0];
+    popper.left += offsets[1];
+  } else if (basePlacement === 'top') {
+    popper.left += offsets[0];
+    popper.top -= offsets[1];
+  } else if (basePlacement === 'bottom') {
+    popper.left += offsets[0];
+    popper.top += offsets[1];
+  }
+
+  data.popper = popper;
+  return data;
+}
+
+/**
+ * @function
+ * @memberof Modifiers
+ * @argument {Object} data - The data object generated by `update` method
+ * @argument {Object} options - Modifiers configuration and options
+ * @returns {Object} The data object, properly modified
+ */
+function preventOverflow(data, options) {
+  var boundariesElement = options.boundariesElement || getOffsetParent(data.instance.popper);
+
+  // If offsetParent is the reference element, we really want to
+  // go one step up and use the next offsetParent as reference to
+  // avoid to make this modifier completely useless and look like broken
+  if (data.instance.reference === boundariesElement) {
+    boundariesElement = getOffsetParent(boundariesElement);
+  }
+
+  // NOTE: DOM access here
+  // resets the popper's position so that the document size can be calculated excluding
+  // the size of the popper element itself
+  var transformProp = getSupportedPropertyName('transform');
+  var popperStyles = data.instance.popper.style; // assignment to help minification
+  var top = popperStyles.top,
+      left = popperStyles.left,
+      transform = popperStyles[transformProp];
+
+  popperStyles.top = '';
+  popperStyles.left = '';
+  popperStyles[transformProp] = '';
+
+  var boundaries = getBoundaries(data.instance.popper, data.instance.reference, options.padding, boundariesElement, data.positionFixed);
+
+  // NOTE: DOM access here
+  // restores the original style properties after the offsets have been computed
+  popperStyles.top = top;
+  popperStyles.left = left;
+  popperStyles[transformProp] = transform;
+
+  options.boundaries = boundaries;
+
+  var order = options.priority;
+  var popper = data.offsets.popper;
+
+  var check = {
+    primary: function primary(placement) {
+      var value = popper[placement];
+      if (popper[placement] < boundaries[placement] && !options.escapeWithReference) {
+        value = Math.max(popper[placement], boundaries[placement]);
+      }
+      return defineProperty({}, placement, value);
+    },
+    secondary: function secondary(placement) {
+      var mainSide = placement === 'right' ? 'left' : 'top';
+      var value = popper[mainSide];
+      if (popper[placement] > boundaries[placement] && !options.escapeWithReference) {
+        value = Math.min(popper[mainSide], boundaries[placement] - (placement === 'right' ? popper.width : popper.height));
+      }
+      return defineProperty({}, mainSide, value);
+    }
+  };
+
+  order.forEach(function (placement) {
+    var side = ['left', 'top'].indexOf(placement) !== -1 ? 'primary' : 'secondary';
+    popper = _extends({}, popper, check[side](placement));
+  });
+
+  data.offsets.popper = popper;
+
+  return data;
+}
+
+/**
+ * @function
+ * @memberof Modifiers
+ * @argument {Object} data - The data object generated by `update` method
+ * @argument {Object} options - Modifiers configuration and options
+ * @returns {Object} The data object, properly modified
+ */
+function shift(data) {
+  var placement = data.placement;
+  var basePlacement = placement.split('-')[0];
+  var shiftvariation = placement.split('-')[1];
+
+  // if shift shiftvariation is specified, run the modifier
+  if (shiftvariation) {
+    var _data$offsets = data.offsets,
+        reference = _data$offsets.reference,
+        popper = _data$offsets.popper;
+
+    var isVertical = ['bottom', 'top'].indexOf(basePlacement) !== -1;
+    var side = isVertical ? 'left' : 'top';
+    var measurement = isVertical ? 'width' : 'height';
+
+    var shiftOffsets = {
+      start: defineProperty({}, side, reference[side]),
+      end: defineProperty({}, side, reference[side] + reference[measurement] - popper[measurement])
+    };
+
+    data.offsets.popper = _extends({}, popper, shiftOffsets[shiftvariation]);
+  }
+
+  return data;
+}
+
+/**
+ * @function
+ * @memberof Modifiers
+ * @argument {Object} data - The data object generated by update method
+ * @argument {Object} options - Modifiers configuration and options
+ * @returns {Object} The data object, properly modified
+ */
+function hide(data) {
+  if (!isModifierRequired(data.instance.modifiers, 'hide', 'preventOverflow')) {
+    return data;
+  }
+
+  var refRect = data.offsets.reference;
+  var bound = find(data.instance.modifiers, function (modifier) {
+    return modifier.name === 'preventOverflow';
+  }).boundaries;
+
+  if (refRect.bottom < bound.top || refRect.left > bound.right || refRect.top > bound.bottom || refRect.right < bound.left) {
+    // Avoid unnecessary DOM access if visibility hasn't changed
+    if (data.hide === true) {
+      return data;
+    }
+
+    data.hide = true;
+    data.attributes['x-out-of-boundaries'] = '';
+  } else {
+    // Avoid unnecessary DOM access if visibility hasn't changed
+    if (data.hide === false) {
+      return data;
+    }
+
+    data.hide = false;
+    data.attributes['x-out-of-boundaries'] = false;
+  }
+
+  return data;
+}
+
+/**
+ * @function
+ * @memberof Modifiers
+ * @argument {Object} data - The data object generated by `update` method
+ * @argument {Object} options - Modifiers configuration and options
+ * @returns {Object} The data object, properly modified
+ */
+function inner(data) {
+  var placement = data.placement;
+  var basePlacement = placement.split('-')[0];
+  var _data$offsets = data.offsets,
+      popper = _data$offsets.popper,
+      reference = _data$offsets.reference;
+
+  var isHoriz = ['left', 'right'].indexOf(basePlacement) !== -1;
+
+  var subtractLength = ['top', 'left'].indexOf(basePlacement) === -1;
+
+  popper[isHoriz ? 'left' : 'top'] = reference[basePlacement] - (subtractLength ? popper[isHoriz ? 'width' : 'height'] : 0);
+
+  data.placement = getOppositePlacement(placement);
+  data.offsets.popper = getClientRect(popper);
+
+  return data;
+}
+
+/**
+ * Modifier function, each modifier can have a function of this type assigned
+ * to its `fn` property.<br />
+ * These functions will be called on each update, this means that you must
+ * make sure they are performant enough to avoid performance bottlenecks.
+ *
+ * @function ModifierFn
+ * @argument {dataObject} data - The data object generated by `update` method
+ * @argument {Object} options - Modifiers configuration and options
+ * @returns {dataObject} The data object, properly modified
+ */
+
+/**
+ * Modifiers are plugins used to alter the behavior of your poppers.<br />
+ * Popper.js uses a set of 9 modifiers to provide all the basic functionalities
+ * needed by the library.
+ *
+ * Usually you don't want to override the `order`, `fn` and `onLoad` props.
+ * All the other properties are configurations that could be tweaked.
+ * @namespace modifiers
+ */
+var modifiers = {
+  /**
+   * Modifier used to shift the popper on the start or end of its reference
+   * element.<br />
+   * It will read the variation of the `placement` property.<br />
+   * It can be one either `-end` or `-start`.
+   * @memberof modifiers
+   * @inner
+   */
+  shift: {
+    /** @prop {number} order=100 - Index used to define the order of execution */
+    order: 100,
+    /** @prop {Boolean} enabled=true - Whether the modifier is enabled or not */
+    enabled: true,
+    /** @prop {ModifierFn} */
+    fn: shift
+  },
+
+  /**
+   * The `offset` modifier can shift your popper on both its axis.
+   *
+   * It accepts the following units:
+   * - `px` or unitless, interpreted as pixels
+   * - `%` or `%r`, percentage relative to the length of the reference element
+   * - `%p`, percentage relative to the length of the popper element
+   * - `vw`, CSS viewport width unit
+   * - `vh`, CSS viewport height unit
+   *
+   * For length is intended the main axis relative to the placement of the popper.<br />
+   * This means that if the placement is `top` or `bottom`, the length will be the
+   * `width`. In case of `left` or `right`, it will be the height.
+   *
+   * You can provide a single value (as `Number` or `String`), or a pair of values
+   * as `String` divided by a comma or one (or more) white spaces.<br />
+   * The latter is a deprecated method because it leads to confusion and will be
+   * removed in v2.<br />
+   * Additionally, it accepts additions and subtractions between different units.
+   * Note that multiplications and divisions aren't supported.
+   *
+   * Valid examples are:
+   * ```
+   * 10
+   * '10%'
+   * '10, 10'
+   * '10%, 10'
+   * '10 + 10%'
+   * '10 - 5vh + 3%'
+   * '-10px + 5vh, 5px - 6%'
+   * ```
+   * > **NB**: If you desire to apply offsets to your poppers in a way that may make them overlap
+   * > with their reference element, unfortunately, you will have to disable the `flip` modifier.
+   * > More on this [reading this issue](https://github.com/FezVrasta/popper.js/issues/373)
+   *
+   * @memberof modifiers
+   * @inner
+   */
+  offset: {
+    /** @prop {number} order=200 - Index used to define the order of execution */
+    order: 200,
+    /** @prop {Boolean} enabled=true - Whether the modifier is enabled or not */
+    enabled: true,
+    /** @prop {ModifierFn} */
+    fn: offset,
+    /** @prop {Number|String} offset=0
+     * The offset value as described in the modifier description
+     */
+    offset: 0
+  },
+
+  /**
+   * Modifier used to prevent the popper from being positioned outside the boundary.
+   *
+   * An scenario exists where the reference itself is not within the boundaries.<br />
+   * We can say it has "escaped the boundaries" — or just "escaped".<br />
+   * In this case we need to decide whether the popper should either:
+   *
+   * - detach from the reference and remain "trapped" in the boundaries, or
+   * - if it should ignore the boundary and "escape with its reference"
+   *
+   * When `escapeWithReference` is set to`true` and reference is completely
+   * outside its boundaries, the popper will overflow (or completely leave)
+   * the boundaries in order to remain attached to the edge of the reference.
+   *
+   * @memberof modifiers
+   * @inner
+   */
+  preventOverflow: {
+    /** @prop {number} order=300 - Index used to define the order of execution */
+    order: 300,
+    /** @prop {Boolean} enabled=true - Whether the modifier is enabled or not */
+    enabled: true,
+    /** @prop {ModifierFn} */
+    fn: preventOverflow,
+    /**
+     * @prop {Array} [priority=['left','right','top','bottom']]
+     * Popper will try to prevent overflow following these priorities by default,
+     * then, it could overflow on the left and on top of the `boundariesElement`
+     */
+    priority: ['left', 'right', 'top', 'bottom'],
+    /**
+     * @prop {number} padding=5
+     * Amount of pixel used to define a minimum distance between the boundaries
+     * and the popper this makes sure the popper has always a little padding
+     * between the edges of its container
+     */
+    padding: 5,
+    /**
+     * @prop {String|HTMLElement} boundariesElement='scrollParent'
+     * Boundaries used by the modifier, can be `scrollParent`, `window`,
+     * `viewport` or any DOM element.
+     */
+    boundariesElement: 'scrollParent'
+  },
+
+  /**
+   * Modifier used to make sure the reference and its popper stay near eachothers
+   * without leaving any gap between the two. Expecially useful when the arrow is
+   * enabled and you want to assure it to point to its reference element.
+   * It cares only about the first axis, you can still have poppers with margin
+   * between the popper and its reference element.
+   * @memberof modifiers
+   * @inner
+   */
+  keepTogether: {
+    /** @prop {number} order=400 - Index used to define the order of execution */
+    order: 400,
+    /** @prop {Boolean} enabled=true - Whether the modifier is enabled or not */
+    enabled: true,
+    /** @prop {ModifierFn} */
+    fn: keepTogether
+  },
+
+  /**
+   * This modifier is used to move the `arrowElement` of the popper to make
+   * sure it is positioned between the reference element and its popper element.
+   * It will read the outer size of the `arrowElement` node to detect how many
+   * pixels of conjuction are needed.
+   *
+   * It has no effect if no `arrowElement` is provided.
+   * @memberof modifiers
+   * @inner
+   */
+  arrow: {
+    /** @prop {number} order=500 - Index used to define the order of execution */
+    order: 500,
+    /** @prop {Boolean} enabled=true - Whether the modifier is enabled or not */
+    enabled: true,
+    /** @prop {ModifierFn} */
+    fn: arrow,
+    /** @prop {String|HTMLElement} element='[x-arrow]' - Selector or node used as arrow */
+    element: '[x-arrow]'
+  },
+
+  /**
+   * Modifier used to flip the popper's placement when it starts to overlap its
+   * reference element.
+   *
+   * Requires the `preventOverflow` modifier before it in order to work.
+   *
+   * **NOTE:** this modifier will interrupt the current update cycle and will
+   * restart it if it detects the need to flip the placement.
+   * @memberof modifiers
+   * @inner
+   */
+  flip: {
+    /** @prop {number} order=600 - Index used to define the order of execution */
+    order: 600,
+    /** @prop {Boolean} enabled=true - Whether the modifier is enabled or not */
+    enabled: true,
+    /** @prop {ModifierFn} */
+    fn: flip,
+    /**
+     * @prop {String|Array} behavior='flip'
+     * The behavior used to change the popper's placement. It can be one of
+     * `flip`, `clockwise`, `counterclockwise` or an array with a list of valid
+     * placements (with optional variations).
+     */
+    behavior: 'flip',
+    /**
+     * @prop {number} padding=5
+     * The popper will flip if it hits the edges of the `boundariesElement`
+     */
+    padding: 5,
+    /**
+     * @prop {String|HTMLElement} boundariesElement='viewport'
+     * The element which will define the boundaries of the popper position,
+     * the popper will never be placed outside of the defined boundaries
+     * (except if keepTogether is enabled)
+     */
+    boundariesElement: 'viewport'
+  },
+
+  /**
+   * Modifier used to make the popper flow toward the inner of the reference element.
+   * By default, when this modifier is disabled, the popper will be placed outside
+   * the reference element.
+   * @memberof modifiers
+   * @inner
+   */
+  inner: {
+    /** @prop {number} order=700 - Index used to define the order of execution */
+    order: 700,
+    /** @prop {Boolean} enabled=false - Whether the modifier is enabled or not */
+    enabled: false,
+    /** @prop {ModifierFn} */
+    fn: inner
+  },
+
+  /**
+   * Modifier used to hide the popper when its reference element is outside of the
+   * popper boundaries. It will set a `x-out-of-boundaries` attribute which can
+   * be used to hide with a CSS selector the popper when its reference is
+   * out of boundaries.
+   *
+   * Requires the `preventOverflow` modifier before it in order to work.
+   * @memberof modifiers
+   * @inner
+   */
+  hide: {
+    /** @prop {number} order=800 - Index used to define the order of execution */
+    order: 800,
+    /** @prop {Boolean} enabled=true - Whether the modifier is enabled or not */
+    enabled: true,
+    /** @prop {ModifierFn} */
+    fn: hide
+  },
+
+  /**
+   * Computes the style that will be applied to the popper element to gets
+   * properly positioned.
+   *
+   * Note that this modifier will not touch the DOM, it just prepares the styles
+   * so that `applyStyle` modifier can apply it. This separation is useful
+   * in case you need to replace `applyStyle` with a custom implementation.
+   *
+   * This modifier has `850` as `order` value to maintain backward compatibility
+   * with previous versions of Popper.js. Expect the modifiers ordering method
+   * to change in future major versions of the library.
+   *
+   * @memberof modifiers
+   * @inner
+   */
+  computeStyle: {
+    /** @prop {number} order=850 - Index used to define the order of execution */
+    order: 850,
+    /** @prop {Boolean} enabled=true - Whether the modifier is enabled or not */
+    enabled: true,
+    /** @prop {ModifierFn} */
+    fn: computeStyle,
+    /**
+     * @prop {Boolean} gpuAcceleration=true
+     * If true, it uses the CSS 3d transformation to position the popper.
+     * Otherwise, it will use the `top` and `left` properties.
+     */
+    gpuAcceleration: true,
+    /**
+     * @prop {string} [x='bottom']
+     * Where to anchor the X axis (`bottom` or `top`). AKA X offset origin.
+     * Change this if your popper should grow in a direction different from `bottom`
+     */
+    x: 'bottom',
+    /**
+     * @prop {string} [x='left']
+     * Where to anchor the Y axis (`left` or `right`). AKA Y offset origin.
+     * Change this if your popper should grow in a direction different from `right`
+     */
+    y: 'right'
+  },
+
+  /**
+   * Applies the computed styles to the popper element.
+   *
+   * All the DOM manipulations are limited to this modifier. This is useful in case
+   * you want to integrate Popper.js inside a framework or view library and you
+   * want to delegate all the DOM manipulations to it.
+   *
+   * Note that if you disable this modifier, you must make sure the popper element
+   * has its position set to `absolute` before Popper.js can do its work!
+   *
+   * Just disable this modifier and define you own to achieve the desired effect.
+   *
+   * @memberof modifiers
+   * @inner
+   */
+  applyStyle: {
+    /** @prop {number} order=900 - Index used to define the order of execution */
+    order: 900,
+    /** @prop {Boolean} enabled=true - Whether the modifier is enabled or not */
+    enabled: true,
+    /** @prop {ModifierFn} */
+    fn: applyStyle,
+    /** @prop {Function} */
+    onLoad: applyStyleOnLoad,
+    /**
+     * @deprecated since version 1.10.0, the property moved to `computeStyle` modifier
+     * @prop {Boolean} gpuAcceleration=true
+     * If true, it uses the CSS 3d transformation to position the popper.
+     * Otherwise, it will use the `top` and `left` properties.
+     */
+    gpuAcceleration: undefined
+  }
+};
+
+/**
+ * The `dataObject` is an object containing all the informations used by Popper.js
+ * this object get passed to modifiers and to the `onCreate` and `onUpdate` callbacks.
+ * @name dataObject
+ * @property {Object} data.instance The Popper.js instance
+ * @property {String} data.placement Placement applied to popper
+ * @property {String} data.originalPlacement Placement originally defined on init
+ * @property {Boolean} data.flipped True if popper has been flipped by flip modifier
+ * @property {Boolean} data.hide True if the reference element is out of boundaries, useful to know when to hide the popper.
+ * @property {HTMLElement} data.arrowElement Node used as arrow by arrow modifier
+ * @property {Object} data.styles Any CSS property defined here will be applied to the popper, it expects the JavaScript nomenclature (eg. `marginBottom`)
+ * @property {Object} data.arrowStyles Any CSS property defined here will be applied to the popper arrow, it expects the JavaScript nomenclature (eg. `marginBottom`)
+ * @property {Object} data.boundaries Offsets of the popper boundaries
+ * @property {Object} data.offsets The measurements of popper, reference and arrow elements.
+ * @property {Object} data.offsets.popper `top`, `left`, `width`, `height` values
+ * @property {Object} data.offsets.reference `top`, `left`, `width`, `height` values
+ * @property {Object} data.offsets.arrow] `top` and `left` offsets, only one of them will be different from 0
+ */
+
+/**
+ * Default options provided to Popper.js constructor.<br />
+ * These can be overriden using the `options` argument of Popper.js.<br />
+ * To override an option, simply pass as 3rd argument an object with the same
+ * structure of this object, example:
+ * ```
+ * new Popper(ref, pop, {
+ *   modifiers: {
+ *     preventOverflow: { enabled: false }
+ *   }
+ * })
+ * ```
+ * @type {Object}
+ * @static
+ * @memberof Popper
+ */
+var Defaults = {
+  /**
+   * Popper's placement
+   * @prop {Popper.placements} placement='bottom'
+   */
+  placement: 'bottom',
+
+  /**
+   * Set this to true if you want popper to position it self in 'fixed' mode
+   * @prop {Boolean} positionFixed=false
+   */
+  positionFixed: false,
+
+  /**
+   * Whether events (resize, scroll) are initially enabled
+   * @prop {Boolean} eventsEnabled=true
+   */
+  eventsEnabled: true,
+
+  /**
+   * Set to true if you want to automatically remove the popper when
+   * you call the `destroy` method.
+   * @prop {Boolean} removeOnDestroy=false
+   */
+  removeOnDestroy: false,
+
+  /**
+   * Callback called when the popper is created.<br />
+   * By default, is set to no-op.<br />
+   * Access Popper.js instance with `data.instance`.
+   * @prop {onCreate}
+   */
+  onCreate: function onCreate() {},
+
+  /**
+   * Callback called when the popper is updated, this callback is not called
+   * on the initialization/creation of the popper, but only on subsequent
+   * updates.<br />
+   * By default, is set to no-op.<br />
+   * Access Popper.js instance with `data.instance`.
+   * @prop {onUpdate}
+   */
+  onUpdate: function onUpdate() {},
+
+  /**
+   * List of modifiers used to modify the offsets before they are applied to the popper.
+   * They provide most of the functionalities of Popper.js
+   * @prop {modifiers}
+   */
+  modifiers: modifiers
+};
+
+/**
+ * @callback onCreate
+ * @param {dataObject} data
+ */
+
+/**
+ * @callback onUpdate
+ * @param {dataObject} data
+ */
+
+// Utils
+// Methods
+var Popper = function () {
+  /**
+   * Create a new Popper.js instance
+   * @class Popper
+   * @param {HTMLElement|referenceObject} reference - The reference element used to position the popper
+   * @param {HTMLElement} popper - The HTML element used as popper.
+   * @param {Object} options - Your custom options to override the ones defined in [Defaults](#defaults)
+   * @return {Object} instance - The generated Popper.js instance
+   */
+  function Popper(reference, popper) {
+    var _this = this;
+
+    var options = arguments.length > 2 && arguments[2] !== undefined ? arguments[2] : {};
+    classCallCheck(this, Popper);
+
+    this.scheduleUpdate = function () {
+      return requestAnimationFrame(_this.update);
+    };
+
+    // make update() debounced, so that it only runs at most once-per-tick
+    this.update = debounce(this.update.bind(this));
+
+    // with {} we create a new object with the options inside it
+    this.options = _extends({}, Popper.Defaults, options);
+
+    // init state
+    this.state = {
+      isDestroyed: false,
+      isCreated: false,
+      scrollParents: []
+    };
+
+    // get reference and popper elements (allow jQuery wrappers)
+    this.reference = reference && reference.jquery ? reference[0] : reference;
+    this.popper = popper && popper.jquery ? popper[0] : popper;
+
+    // Deep merge modifiers options
+    this.options.modifiers = {};
+    Object.keys(_extends({}, Popper.Defaults.modifiers, options.modifiers)).forEach(function (name) {
+      _this.options.modifiers[name] = _extends({}, Popper.Defaults.modifiers[name] || {}, options.modifiers ? options.modifiers[name] : {});
+    });
+
+    // Refactoring modifiers' list (Object => Array)
+    this.modifiers = Object.keys(this.options.modifiers).map(function (name) {
+      return _extends({
+        name: name
+      }, _this.options.modifiers[name]);
+    })
+    // sort the modifiers by order
+    .sort(function (a, b) {
+      return a.order - b.order;
+    });
+
+    // modifiers have the ability to execute arbitrary code when Popper.js get inited
+    // such code is executed in the same order of its modifier
+    // they could add new properties to their options configuration
+    // BE AWARE: don't add options to `options.modifiers.name` but to `modifierOptions`!
+    this.modifiers.forEach(function (modifierOptions) {
+      if (modifierOptions.enabled && isFunction(modifierOptions.onLoad)) {
+        modifierOptions.onLoad(_this.reference, _this.popper, _this.options, modifierOptions, _this.state);
+      }
+    });
+
+    // fire the first update to position the popper in the right place
+    this.update();
+
+    var eventsEnabled = this.options.eventsEnabled;
+    if (eventsEnabled) {
+      // setup event listeners, they will take care of update the position in specific situations
+      this.enableEventListeners();
+    }
+
+    this.state.eventsEnabled = eventsEnabled;
+  }
+
+  // We can't use class properties because they don't get listed in the
+  // class prototype and break stuff like Sinon stubs
+
+
+  createClass(Popper, [{
+    key: 'update',
+    value: function update$$1() {
+      return update.call(this);
+    }
+  }, {
+    key: 'destroy',
+    value: function destroy$$1() {
+      return destroy.call(this);
+    }
+  }, {
+    key: 'enableEventListeners',
+    value: function enableEventListeners$$1() {
+      return enableEventListeners.call(this);
+    }
+  }, {
+    key: 'disableEventListeners',
+    value: function disableEventListeners$$1() {
+      return disableEventListeners.call(this);
+    }
+
+    /**
+     * Schedule an update, it will run on the next UI update available
+     * @method scheduleUpdate
+     * @memberof Popper
+     */
+
+
+    /**
+     * Collection of utilities useful when writing custom modifiers.
+     * Starting from version 1.7, this method is available only if you
+     * include `popper-utils.js` before `popper.js`.
+     *
+     * **DEPRECATION**: This way to access PopperUtils is deprecated
+     * and will be removed in v2! Use the PopperUtils module directly instead.
+     * Due to the high instability of the methods contained in Utils, we can't
+     * guarantee them to follow semver. Use them at your own risk!
+     * @static
+     * @private
+     * @type {Object}
+     * @deprecated since version 1.8
+     * @member Utils
+     * @memberof Popper
+     */
+
+  }]);
+  return Popper;
+}();
+
+/**
+ * The `referenceObject` is an object that provides an interface compatible with Popper.js
+ * and lets you use it as replacement of a real DOM node.<br />
+ * You can use this method to position a popper relatively to a set of coordinates
+ * in case you don't have a DOM node to use as reference.
+ *
+ * ```
+ * new Popper(referenceObject, popperNode);
+ * ```
+ *
+ * NB: This feature isn't supported in Internet Explorer 10
+ * @name referenceObject
+ * @property {Function} data.getBoundingClientRect
+ * A function that returns a set of coordinates compatible with the native `getBoundingClientRect` method.
+ * @property {number} data.clientWidth
+ * An ES6 getter that will return the width of the virtual reference element.
+ * @property {number} data.clientHeight
+ * An ES6 getter that will return the height of the virtual reference element.
+ */
+
+
+Popper.Utils = (typeof window !== 'undefined' ? window : global).PopperUtils;
+Popper.placements = placements;
+Popper.Defaults = Defaults;
+
+return Popper;
+
+})));
+
+
+}
+;Ember.libraries.register('Ember Bootstrap', '1.2.2');
 ;if (typeof FastBoot === 'undefined') { /* ========================================================================
  * Bootstrap: tooltip.js v3.3.7
  * http://getbootstrap.com/javascript/#tooltip
@@ -70356,6 +73558,3659 @@ function createDeprecatedModule(moduleId) {
 createDeprecatedModule('ember/resolver');
 createDeprecatedModule('resolver');
 
+;if (typeof FastBoot === 'undefined') { (function (global) {
+  define('fetch', ['exports'], function(self) {
+    'use strict';
+    var Promise = global.Ember.RSVP.Promise;
+    if (global.FormData) {
+      self.FormData = global.FormData;
+    }
+    if (global.FileReader) {
+      self.FileReader = global.FileReader;
+    }
+    if (global.Blob) {
+      self.Blob = global.Blob;
+    }
+    if (global.ArrayBuffer) {
+      self.ArrayBuffer = global.ArrayBuffer;
+    }
+    if (global.Symbol) {
+      self.Symbol = global.Symbol;
+    }
+
+    (function(self) {
+  'use strict';
+
+  if (self.fetch) {
+    return
+  }
+
+  var support = {
+    searchParams: 'URLSearchParams' in self,
+    iterable: 'Symbol' in self && 'iterator' in Symbol,
+    blob: 'FileReader' in self && 'Blob' in self && (function() {
+      try {
+        new Blob()
+        return true
+      } catch(e) {
+        return false
+      }
+    })(),
+    formData: 'FormData' in self,
+    arrayBuffer: 'ArrayBuffer' in self
+  }
+
+  if (support.arrayBuffer) {
+    var viewClasses = [
+      '[object Int8Array]',
+      '[object Uint8Array]',
+      '[object Uint8ClampedArray]',
+      '[object Int16Array]',
+      '[object Uint16Array]',
+      '[object Int32Array]',
+      '[object Uint32Array]',
+      '[object Float32Array]',
+      '[object Float64Array]'
+    ]
+
+    var isDataView = function(obj) {
+      return obj && DataView.prototype.isPrototypeOf(obj)
+    }
+
+    var isArrayBufferView = ArrayBuffer.isView || function(obj) {
+      return obj && viewClasses.indexOf(Object.prototype.toString.call(obj)) > -1
+    }
+  }
+
+  function normalizeName(name) {
+    if (typeof name !== 'string') {
+      name = String(name)
+    }
+    if (/[^a-z0-9\-#$%&'*+.\^_`|~]/i.test(name)) {
+      throw new TypeError('Invalid character in header field name')
+    }
+    return name.toLowerCase()
+  }
+
+  function normalizeValue(value) {
+    if (typeof value !== 'string') {
+      value = String(value)
+    }
+    return value
+  }
+
+  // Build a destructive iterator for the value list
+  function iteratorFor(items) {
+    var iterator = {
+      next: function() {
+        var value = items.shift()
+        return {done: value === undefined, value: value}
+      }
+    }
+
+    if (support.iterable) {
+      iterator[Symbol.iterator] = function() {
+        return iterator
+      }
+    }
+
+    return iterator
+  }
+
+  function Headers(headers) {
+    this.map = {}
+
+    if (headers instanceof Headers) {
+      headers.forEach(function(value, name) {
+        this.append(name, value)
+      }, this)
+    } else if (Array.isArray(headers)) {
+      headers.forEach(function(header) {
+        this.append(header[0], header[1])
+      }, this)
+    } else if (headers) {
+      Object.getOwnPropertyNames(headers).forEach(function(name) {
+        this.append(name, headers[name])
+      }, this)
+    }
+  }
+
+  Headers.prototype.append = function(name, value) {
+    name = normalizeName(name)
+    value = normalizeValue(value)
+    var oldValue = this.map[name]
+    this.map[name] = oldValue ? oldValue+','+value : value
+  }
+
+  Headers.prototype['delete'] = function(name) {
+    delete this.map[normalizeName(name)]
+  }
+
+  Headers.prototype.get = function(name) {
+    name = normalizeName(name)
+    return this.has(name) ? this.map[name] : null
+  }
+
+  Headers.prototype.has = function(name) {
+    return this.map.hasOwnProperty(normalizeName(name))
+  }
+
+  Headers.prototype.set = function(name, value) {
+    this.map[normalizeName(name)] = normalizeValue(value)
+  }
+
+  Headers.prototype.forEach = function(callback, thisArg) {
+    for (var name in this.map) {
+      if (this.map.hasOwnProperty(name)) {
+        callback.call(thisArg, this.map[name], name, this)
+      }
+    }
+  }
+
+  Headers.prototype.keys = function() {
+    var items = []
+    this.forEach(function(value, name) { items.push(name) })
+    return iteratorFor(items)
+  }
+
+  Headers.prototype.values = function() {
+    var items = []
+    this.forEach(function(value) { items.push(value) })
+    return iteratorFor(items)
+  }
+
+  Headers.prototype.entries = function() {
+    var items = []
+    this.forEach(function(value, name) { items.push([name, value]) })
+    return iteratorFor(items)
+  }
+
+  if (support.iterable) {
+    Headers.prototype[Symbol.iterator] = Headers.prototype.entries
+  }
+
+  function consumed(body) {
+    if (body.bodyUsed) {
+      return Promise.reject(new TypeError('Already read'))
+    }
+    body.bodyUsed = true
+  }
+
+  function fileReaderReady(reader) {
+    return new Promise(function(resolve, reject) {
+      reader.onload = function() {
+        resolve(reader.result)
+      }
+      reader.onerror = function() {
+        reject(reader.error)
+      }
+    })
+  }
+
+  function readBlobAsArrayBuffer(blob) {
+    var reader = new FileReader()
+    var promise = fileReaderReady(reader)
+    reader.readAsArrayBuffer(blob)
+    return promise
+  }
+
+  function readBlobAsText(blob) {
+    var reader = new FileReader()
+    var promise = fileReaderReady(reader)
+    reader.readAsText(blob)
+    return promise
+  }
+
+  function readArrayBufferAsText(buf) {
+    var view = new Uint8Array(buf)
+    var chars = new Array(view.length)
+
+    for (var i = 0; i < view.length; i++) {
+      chars[i] = String.fromCharCode(view[i])
+    }
+    return chars.join('')
+  }
+
+  function bufferClone(buf) {
+    if (buf.slice) {
+      return buf.slice(0)
+    } else {
+      var view = new Uint8Array(buf.byteLength)
+      view.set(new Uint8Array(buf))
+      return view.buffer
+    }
+  }
+
+  function Body() {
+    this.bodyUsed = false
+
+    this._initBody = function(body) {
+      this._bodyInit = body
+      if (!body) {
+        this._bodyText = ''
+      } else if (typeof body === 'string') {
+        this._bodyText = body
+      } else if (support.blob && Blob.prototype.isPrototypeOf(body)) {
+        this._bodyBlob = body
+      } else if (support.formData && FormData.prototype.isPrototypeOf(body)) {
+        this._bodyFormData = body
+      } else if (support.searchParams && URLSearchParams.prototype.isPrototypeOf(body)) {
+        this._bodyText = body.toString()
+      } else if (support.arrayBuffer && support.blob && isDataView(body)) {
+        this._bodyArrayBuffer = bufferClone(body.buffer)
+        // IE 10-11 can't handle a DataView body.
+        this._bodyInit = new Blob([this._bodyArrayBuffer])
+      } else if (support.arrayBuffer && (ArrayBuffer.prototype.isPrototypeOf(body) || isArrayBufferView(body))) {
+        this._bodyArrayBuffer = bufferClone(body)
+      } else {
+        throw new Error('unsupported BodyInit type')
+      }
+
+      if (!this.headers.get('content-type')) {
+        if (typeof body === 'string') {
+          this.headers.set('content-type', 'text/plain;charset=UTF-8')
+        } else if (this._bodyBlob && this._bodyBlob.type) {
+          this.headers.set('content-type', this._bodyBlob.type)
+        } else if (support.searchParams && URLSearchParams.prototype.isPrototypeOf(body)) {
+          this.headers.set('content-type', 'application/x-www-form-urlencoded;charset=UTF-8')
+        }
+      }
+    }
+
+    if (support.blob) {
+      this.blob = function() {
+        var rejected = consumed(this)
+        if (rejected) {
+          return rejected
+        }
+
+        if (this._bodyBlob) {
+          return Promise.resolve(this._bodyBlob)
+        } else if (this._bodyArrayBuffer) {
+          return Promise.resolve(new Blob([this._bodyArrayBuffer]))
+        } else if (this._bodyFormData) {
+          throw new Error('could not read FormData body as blob')
+        } else {
+          return Promise.resolve(new Blob([this._bodyText]))
+        }
+      }
+
+      this.arrayBuffer = function() {
+        if (this._bodyArrayBuffer) {
+          return consumed(this) || Promise.resolve(this._bodyArrayBuffer)
+        } else {
+          return this.blob().then(readBlobAsArrayBuffer)
+        }
+      }
+    }
+
+    this.text = function() {
+      var rejected = consumed(this)
+      if (rejected) {
+        return rejected
+      }
+
+      if (this._bodyBlob) {
+        return readBlobAsText(this._bodyBlob)
+      } else if (this._bodyArrayBuffer) {
+        return Promise.resolve(readArrayBufferAsText(this._bodyArrayBuffer))
+      } else if (this._bodyFormData) {
+        throw new Error('could not read FormData body as text')
+      } else {
+        return Promise.resolve(this._bodyText)
+      }
+    }
+
+    if (support.formData) {
+      this.formData = function() {
+        return this.text().then(decode)
+      }
+    }
+
+    this.json = function() {
+      return this.text().then(JSON.parse)
+    }
+
+    return this
+  }
+
+  // HTTP methods whose capitalization should be normalized
+  var methods = ['DELETE', 'GET', 'HEAD', 'OPTIONS', 'POST', 'PUT']
+
+  function normalizeMethod(method) {
+    var upcased = method.toUpperCase()
+    return (methods.indexOf(upcased) > -1) ? upcased : method
+  }
+
+  function Request(input, options) {
+    options = options || {}
+    var body = options.body
+
+    if (input instanceof Request) {
+      if (input.bodyUsed) {
+        throw new TypeError('Already read')
+      }
+      this.url = input.url
+      this.credentials = input.credentials
+      if (!options.headers) {
+        this.headers = new Headers(input.headers)
+      }
+      this.method = input.method
+      this.mode = input.mode
+      if (!body && input._bodyInit != null) {
+        body = input._bodyInit
+        input.bodyUsed = true
+      }
+    } else {
+      this.url = String(input)
+    }
+
+    this.credentials = options.credentials || this.credentials || 'omit'
+    if (options.headers || !this.headers) {
+      this.headers = new Headers(options.headers)
+    }
+    this.method = normalizeMethod(options.method || this.method || 'GET')
+    this.mode = options.mode || this.mode || null
+    this.referrer = null
+
+    if ((this.method === 'GET' || this.method === 'HEAD') && body) {
+      throw new TypeError('Body not allowed for GET or HEAD requests')
+    }
+    this._initBody(body)
+  }
+
+  Request.prototype.clone = function() {
+    return new Request(this, { body: this._bodyInit })
+  }
+
+  function decode(body) {
+    var form = new FormData()
+    body.trim().split('&').forEach(function(bytes) {
+      if (bytes) {
+        var split = bytes.split('=')
+        var name = split.shift().replace(/\+/g, ' ')
+        var value = split.join('=').replace(/\+/g, ' ')
+        form.append(decodeURIComponent(name), decodeURIComponent(value))
+      }
+    })
+    return form
+  }
+
+  function parseHeaders(rawHeaders) {
+    var headers = new Headers()
+    // Replace instances of \r\n and \n followed by at least one space or horizontal tab with a space
+    // https://tools.ietf.org/html/rfc7230#section-3.2
+    var preProcessedHeaders = rawHeaders.replace(/\r?\n[\t ]+/g, ' ')
+    preProcessedHeaders.split(/\r?\n/).forEach(function(line) {
+      var parts = line.split(':')
+      var key = parts.shift().trim()
+      if (key) {
+        var value = parts.join(':').trim()
+        headers.append(key, value)
+      }
+    })
+    return headers
+  }
+
+  Body.call(Request.prototype)
+
+  function Response(bodyInit, options) {
+    if (!options) {
+      options = {}
+    }
+
+    this.type = 'default'
+    this.status = options.status === undefined ? 200 : options.status
+    this.ok = this.status >= 200 && this.status < 300
+    this.statusText = 'statusText' in options ? options.statusText : 'OK'
+    this.headers = new Headers(options.headers)
+    this.url = options.url || ''
+    this._initBody(bodyInit)
+  }
+
+  Body.call(Response.prototype)
+
+  Response.prototype.clone = function() {
+    return new Response(this._bodyInit, {
+      status: this.status,
+      statusText: this.statusText,
+      headers: new Headers(this.headers),
+      url: this.url
+    })
+  }
+
+  Response.error = function() {
+    var response = new Response(null, {status: 0, statusText: ''})
+    response.type = 'error'
+    return response
+  }
+
+  var redirectStatuses = [301, 302, 303, 307, 308]
+
+  Response.redirect = function(url, status) {
+    if (redirectStatuses.indexOf(status) === -1) {
+      throw new RangeError('Invalid status code')
+    }
+
+    return new Response(null, {status: status, headers: {location: url}})
+  }
+
+  self.Headers = Headers
+  self.Request = Request
+  self.Response = Response
+
+  self.fetch = function(input, init) {
+    return new Promise(function(resolve, reject) {
+      var request = new Request(input, init)
+      var xhr = new XMLHttpRequest()
+
+      xhr.onload = function() {
+        var options = {
+          status: xhr.status,
+          statusText: xhr.statusText,
+          headers: parseHeaders(xhr.getAllResponseHeaders() || '')
+        }
+        options.url = 'responseURL' in xhr ? xhr.responseURL : options.headers.get('X-Request-URL')
+        var body = 'response' in xhr ? xhr.response : xhr.responseText
+        resolve(new Response(body, options))
+      }
+
+      xhr.onerror = function() {
+        reject(new TypeError('Network request failed'))
+      }
+
+      xhr.ontimeout = function() {
+        reject(new TypeError('Network request failed'))
+      }
+
+      xhr.open(request.method, request.url, true)
+
+      if (request.credentials === 'include') {
+        xhr.withCredentials = true
+      } else if (request.credentials === 'omit') {
+        xhr.withCredentials = false
+      }
+
+      if ('responseType' in xhr && support.blob) {
+        xhr.responseType = 'blob'
+      }
+
+      request.headers.forEach(function(value, name) {
+        xhr.setRequestHeader(name, value)
+      })
+
+      xhr.send(typeof request._bodyInit === 'undefined' ? null : request._bodyInit)
+    })
+  }
+  self.fetch.polyfill = true
+})(typeof self !== 'undefined' ? self : this);
+
+
+    var pending = 0;
+    function decrement(result) {
+      pending--;
+      return result;
+    }
+
+    if (global.Ember.Test) {
+      global.Ember.Test.registerWaiter(function() {
+        return pending === 0;
+      });
+
+      self['default'] = function() {
+        pending++;
+
+        return self.fetch.apply(self, arguments).then(function(response){
+          response.clone().blob().then(decrement, decrement);
+          return response;
+        }, function(reason) {
+          decrement(reason);
+          throw reason;
+        });
+      };
+    } else {
+      self['default'] = self.fetch;
+    }
+
+    self['Headers'] = self.Headers;
+    self['Request'] = self.Request;
+    self['Response'] = self.Response;
+  });
+
+  define('fetch/ajax', ['exports'], function() {
+    throw new Error('You included `fetch/ajax` but it was renamed to `ember-fetch/ajax`');
+  });
+}(typeof window !== 'undefined' ? window : typeof global !== 'undefined' ? global : typeof self !== 'undefined' ? self : this));
+ }
+;Ember.libraries.register('Ember Simple Auth', '1.6.0');
+;/*! http://mths.be/base64 v0.1.0 by @mathias | MIT license */
+;(function(root) {
+
+	// Detect free variables `exports`.
+	var freeExports = typeof exports == 'object' && exports;
+
+	// Detect free variable `module`.
+	var freeModule = typeof module == 'object' && module &&
+		module.exports == freeExports && module;
+
+	// Detect free variable `global`, from Node.js or Browserified code, and use
+	// it as `root`.
+	var freeGlobal = typeof global == 'object' && global;
+	if (freeGlobal.global === freeGlobal || freeGlobal.window === freeGlobal) {
+		root = freeGlobal;
+	}
+
+	/*--------------------------------------------------------------------------*/
+
+	var InvalidCharacterError = function(message) {
+		this.message = message;
+	};
+	InvalidCharacterError.prototype = new Error;
+	InvalidCharacterError.prototype.name = 'InvalidCharacterError';
+
+	var error = function(message) {
+		// Note: the error messages used throughout this file match those used by
+		// the native `atob`/`btoa` implementation in Chromium.
+		throw new InvalidCharacterError(message);
+	};
+
+	var TABLE = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+	// http://whatwg.org/html/common-microsyntaxes.html#space-character
+	var REGEX_SPACE_CHARACTERS = /[\t\n\f\r ]/g;
+
+	// `decode` is designed to be fully compatible with `atob` as described in the
+	// HTML Standard. http://whatwg.org/html/webappapis.html#dom-windowbase64-atob
+	// The optimized base64-decoding algorithm used is based on @atk’s excellent
+	// implementation. https://gist.github.com/atk/1020396
+	var decode = function(input) {
+		input = String(input)
+			.replace(REGEX_SPACE_CHARACTERS, '');
+		var length = input.length;
+		if (length % 4 == 0) {
+			input = input.replace(/==?$/, '');
+			length = input.length;
+		}
+		if (
+			length % 4 == 1 ||
+			// http://whatwg.org/C#alphanumeric-ascii-characters
+			/[^+a-zA-Z0-9/]/.test(input)
+		) {
+			error(
+				'Invalid character: the string to be decoded is not correctly encoded.'
+			);
+		}
+		var bitCounter = 0;
+		var bitStorage;
+		var buffer;
+		var output = '';
+		var position = -1;
+		while (++position < length) {
+			buffer = TABLE.indexOf(input.charAt(position));
+			bitStorage = bitCounter % 4 ? bitStorage * 64 + buffer : buffer;
+			// Unless this is the first of a group of 4 characters…
+			if (bitCounter++ % 4) {
+				// …convert the first 8 bits to a single ASCII character.
+				output += String.fromCharCode(
+					0xFF & bitStorage >> (-2 * bitCounter & 6)
+				);
+			}
+		}
+		return output;
+	};
+
+	// `encode` is designed to be fully compatible with `btoa` as described in the
+	// HTML Standard: http://whatwg.org/html/webappapis.html#dom-windowbase64-btoa
+	var encode = function(input) {
+		input = String(input);
+		if (/[^\0-\xFF]/.test(input)) {
+			// Note: no need to special-case astral symbols here, as surrogates are
+			// matched, and the input is supposed to only contain ASCII anyway.
+			error(
+				'The string to be encoded contains characters outside of the ' +
+				'Latin1 range.'
+			);
+		}
+		var padding = input.length % 3;
+		var output = '';
+		var position = -1;
+		var a;
+		var b;
+		var c;
+		var d;
+		var buffer;
+		// Make sure any padding is handled outside of the loop.
+		var length = input.length - padding;
+
+		while (++position < length) {
+			// Read three bytes, i.e. 24 bits.
+			a = input.charCodeAt(position) << 16;
+			b = input.charCodeAt(++position) << 8;
+			c = input.charCodeAt(++position);
+			buffer = a + b + c;
+			// Turn the 24 bits into four chunks of 6 bits each, and append the
+			// matching character for each of them to the output.
+			output += (
+				TABLE.charAt(buffer >> 18 & 0x3F) +
+				TABLE.charAt(buffer >> 12 & 0x3F) +
+				TABLE.charAt(buffer >> 6 & 0x3F) +
+				TABLE.charAt(buffer & 0x3F)
+			);
+		}
+
+		if (padding == 2) {
+			a = input.charCodeAt(position) << 8;
+			b = input.charCodeAt(++position);
+			buffer = a + b;
+			output += (
+				TABLE.charAt(buffer >> 10) +
+				TABLE.charAt((buffer >> 4) & 0x3F) +
+				TABLE.charAt((buffer << 2) & 0x3F) +
+				'='
+			);
+		} else if (padding == 1) {
+			buffer = input.charCodeAt(position);
+			output += (
+				TABLE.charAt(buffer >> 2) +
+				TABLE.charAt((buffer << 4) & 0x3F) +
+				'=='
+			);
+		}
+
+		return output;
+	};
+
+	var base64 = {
+		'encode': encode,
+		'decode': decode,
+		'version': '0.1.0'
+	};
+
+	// Some AMD build optimizers, like r.js, check for specific condition patterns
+	// like the following:
+	if (
+		typeof define == 'function' &&
+		typeof define.amd == 'object' &&
+		define.amd
+	) {
+		define(function() {
+			return base64;
+		});
+	}	else if (freeExports && !freeExports.nodeType) {
+		if (freeModule) { // in Node.js or RingoJS v0.8.0+
+			freeModule.exports = base64;
+		} else { // in Narwhal or RingoJS v0.7.0-
+			for (var key in base64) {
+				base64.hasOwnProperty(key) && (freeExports[key] = base64[key]);
+			}
+		}
+	} else { // in Rhino or a web browser
+		root.base64 = base64;
+	}
+
+}(this));
+
+;define('@ember-decorators/argument/-debug/decorators/immutable', ['exports', '@ember-decorators/argument/-debug/utils/validation-decorator'], function (exports, _validationDecorator) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+
+
+  var immutable = (0, _validationDecorator.default)(function (target, key, desc, options, validations) {
+    validations.isImmutable = true;
+  });
+
+  exports.default = immutable;
+});
+;define('@ember-decorators/argument/-debug/decorators/required', ['exports', '@ember-decorators/argument/-debug/utils/validation-decorator'], function (exports, _validationDecorator) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+
+
+  var required = (0, _validationDecorator.default)(function (target, key, desc, options, validations) {
+    validations.isRequired = true;
+  });
+
+  exports.default = required;
+});
+;define('@ember-decorators/argument/-debug/decorators/type', ['exports', '@ember-decorators/argument/-debug/utils/validation-decorator', '@ember-decorators/argument/-debug/utils/validators'], function (exports, _validationDecorator, _validators) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = type;
+  function type(type) {
+    (true && !(arguments.length === 1) && Ember.assert('The @type decorator can only receive one type, but instead received ' + arguments.length + '. Use the \'unionOf\' helper to create a union type.', arguments.length === 1));
+
+
+    var validator = (0, _validators.resolveValidator)(type);
+
+    return (0, _validationDecorator.default)(function (target, key, desc, options, validations) {
+      validations.typeValidators.push(validator);
+    });
+  }
+});
+;define("@ember-decorators/argument/-debug/errors", ["exports"], function (exports) {
+  "use strict";
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+
+  function _classCallCheck(instance, Constructor) {
+    if (!(instance instanceof Constructor)) {
+      throw new TypeError("Cannot call a class as a function");
+    }
+  }
+
+  function _possibleConstructorReturn(self, call) {
+    if (!self) {
+      throw new ReferenceError("this hasn't been initialised - super() hasn't been called");
+    }
+
+    return call && (typeof call === "object" || typeof call === "function") ? call : self;
+  }
+
+  function _inherits(subClass, superClass) {
+    if (typeof superClass !== "function" && superClass !== null) {
+      throw new TypeError("Super expression must either be null or a function, not " + typeof superClass);
+    }
+
+    subClass.prototype = Object.create(superClass && superClass.prototype, {
+      constructor: {
+        value: subClass,
+        enumerable: false,
+        writable: true,
+        configurable: true
+      }
+    });
+    if (superClass) Object.setPrototypeOf ? Object.setPrototypeOf(subClass, superClass) : subClass.__proto__ = superClass;
+  }
+
+  var MutabilityError = exports.MutabilityError = function (_Error) {
+    _inherits(MutabilityError, _Error);
+
+    function MutabilityError() {
+      _classCallCheck(this, MutabilityError);
+
+      return _possibleConstructorReturn(this, _Error.apply(this, arguments));
+    }
+
+    return MutabilityError;
+  }(Error);
+
+  var RequiredFieldError = exports.RequiredFieldError = function (_Error2) {
+    _inherits(RequiredFieldError, _Error2);
+
+    function RequiredFieldError() {
+      _classCallCheck(this, RequiredFieldError);
+
+      return _possibleConstructorReturn(this, _Error2.apply(this, arguments));
+    }
+
+    return RequiredFieldError;
+  }(Error);
+
+  var TypeError = exports.TypeError = function (_Error3) {
+    _inherits(TypeError, _Error3);
+
+    function TypeError() {
+      _classCallCheck(this, TypeError);
+
+      return _possibleConstructorReturn(this, _Error3.apply(this, arguments));
+    }
+
+    return TypeError;
+  }(Error);
+});
+;define('@ember-decorators/argument/-debug/helpers/array-of', ['exports', '@ember-decorators/argument/-debug/utils/validators'], function (exports, _validators) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = arrayOf;
+  function arrayOf(type) {
+    (true && !(arguments.length === 1) && Ember.assert('The \'arrayOf\' helper must receive exactly one type. Use the \'unionOf\' helper to create a union type.', arguments.length === 1));
+
+
+    var validator = (0, _validators.resolveValidator)(type);
+
+    return (0, _validators.makeValidator)('arrayOf(' + validator + ')', function (value) {
+      return Array.isArray(value) && value.every(validator);
+    });
+  }
+});
+;define('@ember-decorators/argument/-debug/helpers/one-of', ['exports', '@ember-decorators/argument/-debug/utils/validators'], function (exports, _validators) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = oneOf;
+  function oneOf() {
+    for (var _len = arguments.length, list = Array(_len), _key = 0; _key < _len; _key++) {
+      list[_key] = arguments[_key];
+    }
+
+    (true && !(arguments.length >= 1) && Ember.assert('The \'oneOf\' helper must receive at least one argument', arguments.length >= 1));
+    (true && !(list.every(function (item) {
+      return typeof item === 'string';
+    })) && Ember.assert('The \'oneOf\' helper must receive arguments of strings, received: ' + list, list.every(function (item) {
+      return typeof item === 'string';
+    })));
+
+
+    return (0, _validators.makeValidator)('oneOf(' + list.join() + ')', function (value) {
+      return list.includes(value);
+    });
+  }
+});
+;define('@ember-decorators/argument/-debug/helpers/optional', ['exports', '@ember-decorators/argument/-debug/utils/validators'], function (exports, _validators) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = optional;
+
+
+  var nullValidator = (0, _validators.resolveValidator)(null);
+  var undefinedValidator = (0, _validators.resolveValidator)(undefined);
+
+  function optional(type) {
+    (true && !(arguments.length === 1) && Ember.assert('The \'optional\' helper must receive exactly one type. Use the \'unionOf\' helper to create a union type.', arguments.length === 1));
+
+
+    var validator = (0, _validators.resolveValidator)(type);
+    var validatorDesc = validator.toString();
+
+    (true && !(validatorDesc !== 'null') && Ember.assert('Passsing \'null\' to the \'optional\' helper does not make sense.', validatorDesc !== 'null'));
+    (true && !(validatorDesc !== 'undefined') && Ember.assert('Passsing \'undefined\' to the \'optional\' helper does not make sense.', validatorDesc !== 'undefined'));
+
+
+    return (0, _validators.makeValidator)('optional(' + validator + ')', function (value) {
+      return validator(value) || nullValidator(value) || undefinedValidator(value);
+    });
+  }
+});
+;define('@ember-decorators/argument/-debug/helpers/shape-of', ['exports', '@ember-decorators/argument/-debug/utils/validators'], function (exports, _validators) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = shapeOf;
+
+  var _typeof = typeof Symbol === "function" && typeof Symbol.iterator === "symbol" ? function (obj) {
+    return typeof obj;
+  } : function (obj) {
+    return obj && typeof Symbol === "function" && obj.constructor === Symbol && obj !== Symbol.prototype ? "symbol" : typeof obj;
+  };
+
+  function shapeOf(shape) {
+    (true && !(arguments.length === 1) && Ember.assert('The \'shapeOf\' helper must receive exactly one shape', arguments.length === 1));
+    (true && !((typeof shape === 'undefined' ? 'undefined' : _typeof(shape)) === 'object') && Ember.assert('The \'shapeOf\' helper must receive an object to match the shape to, received: ' + shape, (typeof shape === 'undefined' ? 'undefined' : _typeof(shape)) === 'object'));
+    (true && !(Object.keys(shape).length > 0) && Ember.assert('The object passed to the \'shapeOf\' helper must have at least one key:type pair', Object.keys(shape).length > 0));
+
+
+    var typeDesc = [];
+
+    for (var key in shape) {
+      shape[key] = (0, _validators.resolveValidator)(shape[key]);
+
+      typeDesc.push(key + ':' + shape[key]);
+    }
+
+    return (0, _validators.makeValidator)('shapeOf({' + typeDesc.join() + '})', function (value) {
+      for (var _key in shape) {
+        if (shape[_key](Ember.get(value, _key)) !== true) {
+          return false;
+        }
+      }
+
+      return true;
+    });
+  }
+});
+;define('@ember-decorators/argument/-debug/helpers/union-of', ['exports', '@ember-decorators/argument/-debug/utils/validators'], function (exports, _validators) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = unionOf;
+  function unionOf() {
+    for (var _len = arguments.length, types = Array(_len), _key = 0; _key < _len; _key++) {
+      types[_key] = arguments[_key];
+    }
+
+    (true && !(arguments.length > 1) && Ember.assert('The \'unionOf\' helper must receive more than one type', arguments.length > 1));
+
+
+    var validators = types.map(_validators.resolveValidator);
+
+    return (0, _validators.makeValidator)('unionOf(' + validators.join() + ')', function (value) {
+      return validators.some(function (validator) {
+        return validator(value);
+      });
+    });
+  }
+});
+;define('@ember-decorators/argument/-debug/index', ['exports', '@ember-decorators/argument/-debug/decorators/immutable', '@ember-decorators/argument/-debug/decorators/required', '@ember-decorators/argument/-debug/decorators/type', '@ember-decorators/argument/-debug/helpers/array-of', '@ember-decorators/argument/-debug/helpers/shape-of', '@ember-decorators/argument/-debug/helpers/union-of', '@ember-decorators/argument/-debug/helpers/optional', '@ember-decorators/argument/-debug/helpers/one-of', '@ember-decorators/argument/-debug/errors', '@ember-decorators/argument/-debug/utils/validations-for'], function (exports, _immutable, _required, _type, _arrayOf, _shapeOf, _unionOf, _optional, _oneOf, _errors, _validationsFor) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  Object.defineProperty(exports, 'immutable', {
+    enumerable: true,
+    get: function () {
+      return _immutable.default;
+    }
+  });
+  Object.defineProperty(exports, 'required', {
+    enumerable: true,
+    get: function () {
+      return _required.default;
+    }
+  });
+  Object.defineProperty(exports, 'type', {
+    enumerable: true,
+    get: function () {
+      return _type.default;
+    }
+  });
+  Object.defineProperty(exports, 'arrayOf', {
+    enumerable: true,
+    get: function () {
+      return _arrayOf.default;
+    }
+  });
+  Object.defineProperty(exports, 'shapeOf', {
+    enumerable: true,
+    get: function () {
+      return _shapeOf.default;
+    }
+  });
+  Object.defineProperty(exports, 'unionOf', {
+    enumerable: true,
+    get: function () {
+      return _unionOf.default;
+    }
+  });
+  Object.defineProperty(exports, 'optional', {
+    enumerable: true,
+    get: function () {
+      return _optional.default;
+    }
+  });
+  Object.defineProperty(exports, 'oneOf', {
+    enumerable: true,
+    get: function () {
+      return _oneOf.default;
+    }
+  });
+  Object.defineProperty(exports, 'MutabilityError', {
+    enumerable: true,
+    get: function () {
+      return _errors.MutabilityError;
+    }
+  });
+  Object.defineProperty(exports, 'RequiredFieldError', {
+    enumerable: true,
+    get: function () {
+      return _errors.RequiredFieldError;
+    }
+  });
+  Object.defineProperty(exports, 'TypeError', {
+    enumerable: true,
+    get: function () {
+      return _errors.TypeError;
+    }
+  });
+  Object.defineProperty(exports, 'getValidationsForKey', {
+    enumerable: true,
+    get: function () {
+      return _validationsFor.getValidationsForKey;
+    }
+  });
+});
+;define('@ember-decorators/argument/-debug/utils/computed', ['exports'], function (exports) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.isMandatorySetter = isMandatorySetter;
+  exports.isDescriptor = isDescriptor;
+  exports.isDescriptorTrap = isDescriptorTrap;
+
+  var _typeof = typeof Symbol === "function" && typeof Symbol.iterator === "symbol" ? function (obj) {
+    return typeof obj;
+  } : function (obj) {
+    return obj && typeof Symbol === "function" && obj.constructor === Symbol && obj !== Symbol.prototype ? "symbol" : typeof obj;
+  };
+
+  function isMandatorySetter(setter) {
+    return setter && setter.toString().match('You must use .*set()') !== null;
+  }
+
+  function isDescriptor(maybeDesc) {
+    return maybeDesc !== null && (typeof maybeDesc === 'undefined' ? 'undefined' : _typeof(maybeDesc)) === 'object' && maybeDesc.isDescriptor;
+  }
+
+  function isDescriptorTrap(maybeDesc) {
+    return maybeDesc !== null && (typeof maybeDesc === 'undefined' ? 'undefined' : _typeof(maybeDesc)) === 'object' && !!maybeDesc.__DESCRIPTOR__;
+  }
+});
+;define("@ember-decorators/argument/-debug/utils/object", ["exports"], function (exports) {
+  "use strict";
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.getPropertyDescriptor = getPropertyDescriptor;
+  function getPropertyDescriptor(object, key) {
+    if (object === undefined) return;
+
+    return Object.getOwnPropertyDescriptor(object, key) || getPropertyDescriptor(Object.getPrototypeOf(object), key);
+  }
+});
+;define('@ember-decorators/argument/-debug/utils/validation-decorator', ['exports', '@ember-decorators/argument/-debug/utils/computed', '@ember-decorators/argument/-debug/utils/object', '@ember-decorators/argument/-debug/utils/validations-for', '@ember-decorators/argument/-debug/errors'], function (exports, _computed, _object, _validationsFor, _errors) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = validationDecorator;
+
+  var _typeof = typeof Symbol === "function" && typeof Symbol.iterator === "symbol" ? function (obj) {
+    return typeof obj;
+  } : function (obj) {
+    return obj && typeof Symbol === "function" && obj.constructor === Symbol && obj !== Symbol.prototype ? "symbol" : typeof obj;
+  };
+
+  function _possibleConstructorReturn(self, call) {
+    if (!self) {
+      throw new ReferenceError("this hasn't been initialised - super() hasn't been called");
+    }
+
+    return call && (typeof call === "object" || typeof call === "function") ? call : self;
+  }
+
+  function _inherits(subClass, superClass) {
+    if (typeof superClass !== "function" && superClass !== null) {
+      throw new _errors.TypeError("Super expression must either be null or a function, not " + typeof superClass);
+    }
+
+    subClass.prototype = Object.create(superClass && superClass.prototype, {
+      constructor: {
+        value: subClass,
+        enumerable: false,
+        writable: true,
+        configurable: true
+      }
+    });
+    if (superClass) Object.setPrototypeOf ? Object.setPrototypeOf(subClass, superClass) : subClass.__proto__ = superClass;
+  }
+
+  function _classCallCheck(instance, Constructor) {
+    if (!(instance instanceof Constructor)) {
+      throw new _errors.TypeError("Cannot call a class as a function");
+    }
+  }
+
+  var notifyPropertyChange = Ember.notifyPropertyChange || Ember.propertyDidChange;
+
+  function guardBind(fn) {
+    if (typeof fn === 'function') {
+      for (var _len = arguments.length, args = Array(_len > 1 ? _len - 1 : 0), _key = 1; _key < _len; _key++) {
+        args[_key - 1] = arguments[_key];
+      }
+
+      return fn.bind.apply(fn, args);
+    }
+  }
+
+  var ValidatedProperty = function () {
+    function ValidatedProperty(_ref2) {
+      var originalValue = _ref2.originalValue,
+          klass = _ref2.klass,
+          keyName = _ref2.keyName,
+          isImmutable = _ref2.isImmutable,
+          typeValidators = _ref2.typeValidators;
+
+      _classCallCheck(this, ValidatedProperty);
+
+      this.isDescriptor = true;
+
+      this.klass = klass;
+      this.originalValue = originalValue;
+      this.isImmutable = isImmutable;
+      this.typeValidators = typeValidators;
+
+      runValidators(typeValidators, klass, keyName, originalValue, 'init');
+    }
+
+    ValidatedProperty.prototype.get = function get(obj, keyName) {
+      var klass = this.klass,
+          originalValue = this.originalValue,
+          isImmutable = this.isImmutable,
+          typeValidators = this.typeValidators;
+
+
+      var newValue = this._get(obj, keyName);
+
+      if (isImmutable && newValue !== originalValue) {
+        throw new _errors.MutabilityError('Immutable value ' + klass.name + '#' + keyName + ' changed by underlying computed, original value: ' + originalValue + ', new value: ' + newValue);
+      }
+
+      if (typeValidators.length > 0) {
+        runValidators(typeValidators, klass, keyName, newValue, 'get');
+      }
+
+      return newValue;
+    };
+
+    ValidatedProperty.prototype.set = function set(obj, keyName, value) {
+      var klass = this.klass,
+          isImmutable = this.isImmutable,
+          typeValidators = this.typeValidators;
+
+
+      if (isImmutable) {
+        throw new _errors.MutabilityError('Attempted to set ' + klass.name + '#' + keyName + ' to the value ' + value + ' but the field is immutable');
+      }
+
+      var newValue = this._set(obj, keyName, value);
+
+      if (typeValidators.length > 0) {
+        runValidators(typeValidators, klass, keyName, newValue, 'set');
+      }
+
+      return newValue;
+    };
+
+    return ValidatedProperty;
+  }();
+
+  var StandardValidatedProperty = function (_ValidatedProperty) {
+    _inherits(StandardValidatedProperty, _ValidatedProperty);
+
+    function StandardValidatedProperty(_ref3) {
+      var originalValue = _ref3.originalValue;
+
+      _classCallCheck(this, StandardValidatedProperty);
+
+      var _this = _possibleConstructorReturn(this, _ValidatedProperty.apply(this, arguments));
+
+      _this.cachedValue = originalValue;
+      return _this;
+    }
+
+    StandardValidatedProperty.prototype._get = function _get() {
+      return this.cachedValue;
+    };
+
+    StandardValidatedProperty.prototype._set = function _set(obj, keyName, value) {
+      if (value === this.cachedValue) return value;
+
+      this.cachedValue = value;
+
+      notifyPropertyChange(obj, keyName);
+
+      return this.cachedValue;
+    };
+
+    return StandardValidatedProperty;
+  }(ValidatedProperty);
+
+  var NativeComputedValidatedProperty = function (_ValidatedProperty2) {
+    _inherits(NativeComputedValidatedProperty, _ValidatedProperty2);
+
+    function NativeComputedValidatedProperty(_ref4) {
+      var desc = _ref4.desc;
+
+      _classCallCheck(this, NativeComputedValidatedProperty);
+
+      var _this2 = _possibleConstructorReturn(this, _ValidatedProperty2.apply(this, arguments));
+
+      _this2.desc = desc;
+      return _this2;
+    }
+
+    NativeComputedValidatedProperty.prototype._get = function _get(obj) {
+      return this.desc.get.call(obj);
+    };
+
+    NativeComputedValidatedProperty.prototype._set = function _set(obj, keyName, value) {
+      // By default Ember.get will check to see if the value has changed before setting
+      // and calling propertyDidChange. In order to not change behavior, we must do the same
+      var currentValue = this._get(obj);
+
+      if (value === currentValue) return value;
+
+      this.desc.set.call(obj, value);
+
+      notifyPropertyChange(obj, keyName);
+
+      return this._get(obj);
+    };
+
+    return NativeComputedValidatedProperty;
+  }(ValidatedProperty);
+
+  var ComputedValidatedProperty = function (_ValidatedProperty3) {
+    _inherits(ComputedValidatedProperty, _ValidatedProperty3);
+
+    function ComputedValidatedProperty(_ref5) {
+      var desc = _ref5.desc;
+
+      _classCallCheck(this, ComputedValidatedProperty);
+
+      var _this3 = _possibleConstructorReturn(this, _ValidatedProperty3.apply(this, arguments));
+
+      _this3.desc = desc;
+
+      _this3.setup = guardBind(desc.setup, desc);
+      _this3.teardown = guardBind(desc.teardown, desc);
+      _this3.willChange = guardBind(desc.willChange, desc);
+      _this3.didChange = guardBind(desc.didChange, desc);
+      _this3.willWatch = guardBind(desc.willWatch, desc);
+      _this3.didUnwatch = guardBind(desc.didUnwatch, desc);
+      return _this3;
+    }
+
+    ComputedValidatedProperty.prototype._get = function _get(obj, keyName) {
+      return this.desc.get(obj, keyName);
+    };
+
+    ComputedValidatedProperty.prototype._set = function _set(obj, keyName, value) {
+      if (true) {
+        return this.desc.set(obj, keyName, value);
+      }
+
+      this.desc.set(obj, keyName, value);
+
+      var _Ember$meta = Ember.meta(obj),
+          cache = _Ember$meta.cache;
+
+      return (typeof cache === 'undefined' ? 'undefined' : _typeof(cache)) === 'object' ? cache[keyName] : value;
+    };
+
+    return ComputedValidatedProperty;
+  }(ValidatedProperty);
+
+  function runValidators(validators, klass, key, value, phase) {
+    validators.forEach(function (validator) {
+      if (validator(value) === false) {
+        var formattedValue = typeof value === 'string' ? '\'' + value + '\'' : value;
+        throw new _errors.TypeError(klass.name + '#' + key + ' expected value of type ' + validator + ' during \'' + phase + '\', but received: ' + formattedValue);
+      }
+    });
+  }
+
+  function wrapField(klass, instance, validations, keyName) {
+    var _validations$keyName = validations[keyName],
+        isImmutable = _validations$keyName.isImmutable,
+        isRequired = _validations$keyName.isRequired,
+        typeValidators = _validations$keyName.typeValidators,
+        typeRequired = _validations$keyName.typeRequired;
+
+
+    if (isRequired && instance[keyName] === undefined && !instance.hasOwnProperty(keyName)) {
+      throw new _errors.RequiredFieldError(klass.name + '#' + keyName + ' is a required value, but was not provided. You can provide it as an argument, as a class field, or in the constructor');
+    }
+
+    // opt out early if no further validations
+    if (!isImmutable && typeValidators.length === 0) {
+      if (typeValidators.length === 0 && typeRequired) {
+        throw new _errors.TypeError(klass.name + '#' + keyName + ' requires a type, add one using the @type decorator');
+      }
+
+      return;
+    }
+
+    var originalValue = instance[keyName];
+    var meta = Ember.meta(instance);
+
+    if (false) {
+      var possibleDesc = meta.peekDescriptors(keyName);
+
+      if (possibleDesc !== undefined) {
+        originalValue = possibleDesc;
+      }
+    }
+
+    if ((0, _computed.isDescriptorTrap)(originalValue)) {
+      originalValue = originalValue.__DESCRIPTOR__;
+    }
+
+    var validatedProperty = void 0;
+
+    if ((0, _computed.isDescriptor)(originalValue)) {
+      var desc = originalValue;
+
+      originalValue = desc.get(instance, keyName);
+
+      validatedProperty = new ComputedValidatedProperty({
+        desc: desc, isImmutable: isImmutable, keyName: keyName, klass: klass, originalValue: originalValue, typeValidators: typeValidators
+      });
+    } else {
+      var _desc = (0, _object.getPropertyDescriptor)(instance, keyName);
+
+      if ((typeof _desc.get === 'function' || typeof _desc.set === 'function') && !(0, _computed.isMandatorySetter)(_desc.set)) {
+        validatedProperty = new NativeComputedValidatedProperty({
+          desc: _desc, isImmutable: isImmutable, keyName: keyName, klass: klass, originalValue: originalValue, typeValidators: typeValidators
+        });
+      } else {
+        validatedProperty = new StandardValidatedProperty({
+          isImmutable: isImmutable, keyName: keyName, klass: klass, originalValue: originalValue, typeValidators: typeValidators
+        });
+      }
+    }
+
+    if (false) {
+      // We're trying to fly under the radar here, so don't use Ember.defineProperty.
+      // Ember should think the property is completely unchanged.
+      Object.defineProperty(instance, keyName, {
+        configurable: true,
+        enumerable: true,
+        get: function get() {
+          return validatedProperty.get(this, keyName);
+        }
+      });
+
+      meta.writeDescriptors(keyName, validatedProperty);
+    } else {
+      // We're trying to fly under the radar here, so don't use Ember.defineProperty.
+      // Ember should think the property is completely unchanged.
+      Object.defineProperty(instance, keyName, {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: validatedProperty
+      });
+    }
+  }
+
+  var ValidatingCreateMixin = Ember.Mixin.create({
+    create: function create() {
+      var instance = this._super.apply(this, arguments);
+
+      var klass = this;
+      var prototype = Object.getPrototypeOf(instance);
+      var validations = (0, _validationsFor.getValidationsFor)(prototype);
+
+      if (!validations) {
+        return instance;
+      }
+
+      for (var key in validations) {
+        wrapField(klass, instance, validations, key);
+      }
+
+      return instance;
+    }
+  });
+
+  Ember.Object.reopenClass(ValidatingCreateMixin);
+
+  // Reopening a parent class does not apply the mixin to existing child classes,
+  // so we need to apply it directly
+  ValidatingCreateMixin.apply(Ember.Component);
+  ValidatingCreateMixin.apply(Ember.Service);
+  ValidatingCreateMixin.apply(Ember.Controller);
+
+  if (requireModule.has('ember-data')) {
+    var DS = requireModule('ember-data').default;
+
+    if (DS.Model) {
+      ValidatingCreateMixin.apply(DS.Model);
+    }
+  }
+
+  function validationDecorator(fn) {
+    return function (target, key, desc, options) {
+      var validations = (0, _validationsFor.getValidationsForKey)(target, key);
+
+      fn(target, key, desc, options, validations);
+
+      if (!desc.get && !desc.set) {
+        // always ensure the property is writeable, doesn't make sense otherwise (babel bug?)
+        desc.writable = true;
+        desc.configurable = true;
+      }
+
+      if (desc.initializer === null) {
+        desc.initializer = undefined;
+      }
+    };
+  }
+});
+;define("@ember-decorators/argument/-debug/utils/validations-for", ["exports"], function (exports) {
+  "use strict";
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.getValidationsFor = getValidationsFor;
+  exports.getOrCreateValidationsFor = getOrCreateValidationsFor;
+  exports.getValidationsForKey = getValidationsForKey;
+
+  function _classCallCheck(instance, Constructor) {
+    if (!(instance instanceof Constructor)) {
+      throw new TypeError("Cannot call a class as a function");
+    }
+  }
+
+  var validationMetaMap = new WeakMap();
+
+  var FieldValidations = function FieldValidations() {
+    var parentValidations = arguments.length > 0 && arguments[0] !== undefined ? arguments[0] : null;
+
+    _classCallCheck(this, FieldValidations);
+
+    if (parentValidations === null) {
+      this.isRequired = false;
+      this.isImmutable = false;
+      this.isArgument = false;
+      this.typeRequired = false;
+
+      this.typeValidators = [];
+    } else {
+      var isRequired = parentValidations.isRequired,
+          isImmutable = parentValidations.isImmutable,
+          isArgument = parentValidations.isArgument,
+          typeRequired = parentValidations.typeRequired,
+          typeValidators = parentValidations.typeValidators;
+
+
+      this.isRequired = isRequired;
+      this.isImmutable = isImmutable;
+      this.isArgument = isArgument;
+      this.typeRequired = typeRequired;
+
+      this.typeValidators = typeValidators.slice();
+    }
+  };
+
+  function getValidationsFor(target) {
+    // Reached the root of the prototype chain
+    if (target === null) return;
+
+    return validationMetaMap.get(target) || getValidationsFor(Object.getPrototypeOf(target));
+  }
+
+  function getOrCreateValidationsFor(target) {
+    if (!validationMetaMap.has(target)) {
+      var parentMeta = getValidationsFor(Object.getPrototypeOf(target));
+      validationMetaMap.set(target, Object.create(parentMeta || null));
+    }
+
+    return validationMetaMap.get(target);
+  }
+
+  function getValidationsForKey(target, key) {
+    var validations = getOrCreateValidationsFor(target);
+
+    if (!Object.hasOwnProperty.call(validations, key)) {
+      var parentValidations = validations[key];
+      validations[key] = new FieldValidations(parentValidations);
+    }
+
+    return validations[key];
+  }
+});
+;define('@ember-decorators/argument/-debug/utils/validators', ['exports'], function (exports) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.makeValidator = makeValidator;
+  exports.resolveValidator = resolveValidator;
+
+  var _typeof = typeof Symbol === "function" && typeof Symbol.iterator === "symbol" ? function (obj) {
+    return typeof obj;
+  } : function (obj) {
+    return obj && typeof Symbol === "function" && obj.constructor === Symbol && obj !== Symbol.prototype ? "symbol" : typeof obj;
+  };
+
+  function instanceOf(type) {
+    return makeValidator(type.toString(), function (value) {
+      return value instanceof type;
+    });
+  }
+
+  var primitiveTypeValidators = {
+    any: makeValidator('any', function () {
+      return true;
+    }),
+    object: makeValidator('object', function (value) {
+      return typeof value !== 'boolean' && typeof value !== 'number' && typeof value !== 'string' && (typeof value === 'undefined' ? 'undefined' : _typeof(value)) !== 'symbol' && value !== null && value !== undefined;
+    }),
+
+    boolean: makeValidator('boolean', function (value) {
+      return typeof value === 'boolean';
+    }),
+    number: makeValidator('number', function (value) {
+      return typeof value === 'number';
+    }),
+    string: makeValidator('string', function (value) {
+      return typeof value === 'string';
+    }),
+    symbol: makeValidator('symbol', function (value) {
+      return (typeof value === 'undefined' ? 'undefined' : _typeof(value)) === 'symbol';
+    }),
+
+    null: makeValidator('null', function (value) {
+      return value === null;
+    }),
+    undefined: makeValidator('undefined', function (value) {
+      return value === undefined;
+    })
+  };
+
+  function makeValidator(desc, fn) {
+    fn.isValidator = true;
+    fn.toString = function () {
+      return desc;
+    };
+    return fn;
+  }
+
+  function resolveValidator(type) {
+    if (type === null || type === undefined) {
+      return type === null ? primitiveTypeValidators.null : primitiveTypeValidators.undefined;
+    } else if (type.isValidator === true) {
+      return type;
+    } else if (typeof type === 'function' || (typeof type === 'undefined' ? 'undefined' : _typeof(type)) === 'object') {
+      // We allow objects for certain classes in IE, like Element, which have typeof 'object' for some reason
+      return instanceOf(type);
+    } else if (typeof type === 'string') {
+      (true && !(primitiveTypeValidators[type] !== undefined) && Ember.assert('Unknown primitive type received: ' + type, primitiveTypeValidators[type] !== undefined));
+
+
+      return primitiveTypeValidators[type];
+    } else {
+      (true && !(false) && Ember.assert('Types must either be a primitive type string, class, validator, or null or undefined, received: ' + type, false));
+    }
+  }
+});
+;define('@ember-decorators/argument/-debug/validated-component', ['exports', 'ember-get-config', '@ember-decorators/argument/-debug/utils/validations-for', '@ember-decorators/argument/-debug/utils/validation-decorator'], function (exports, _emberGetConfig, _validationsFor) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+
+
+  var validatedComponent = void 0;
+
+  var whitelist = {
+    ariaRole: true,
+    class: true,
+    classNames: true,
+    id: true,
+    isVisible: true,
+    tagName: true
+  };
+
+  if (true) {
+    validatedComponent = Ember.Component.extend();
+
+    validatedComponent.reopenClass({
+      create: function create(props) {
+        // First create the instance to realize any dynamically added bindings or fields
+        var instance = this._super.apply(this, arguments);
+
+        var prototype = Object.getPrototypeOf(instance);
+        var validations = (0, _validationsFor.getValidationsFor)(prototype) || {};
+        if (Ember.getWithDefault(_emberGetConfig.default, '@ember-decorators/argument.ignoreComponentsWithoutValidations', false) && Object.keys(validations).length === 0) {
+          return instance;
+        }
+
+        var attributes = instance.attributeBindings || [];
+        var classNames = (instance.classNameBindings || []).map(function (binding) {
+          return binding.split(':')[0];
+        });
+
+        for (var key in props.attrs) {
+          var isValidArgOrAttr = key in validations && validations[key].isArgument || key in whitelist || attributes.indexOf(key) !== -1 || classNames.indexOf(key) !== -1;
+
+          (true && !(isValidArgOrAttr) && Ember.assert('Attempted to assign the argument \'' + key + '\' on an instance of ' + (this.name || this) + ', but no argument was defined for that key. Use the @argument helper on the class field to define an argument for that class.', isValidArgOrAttr));
+        }
+
+        return instance;
+      }
+    });
+  } else {
+    validatedComponent = Ember.Component;
+  }
+
+  exports.default = validatedComponent;
+});
+;define('@ember-decorators/argument/errors', ['exports', '@ember-decorators/argument/-debug'], function (exports, _debug) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  Object.defineProperty(exports, 'MutabilityError', {
+    enumerable: true,
+    get: function () {
+      return _debug.MutabilityError;
+    }
+  });
+  Object.defineProperty(exports, 'RequiredFieldError', {
+    enumerable: true,
+    get: function () {
+      return _debug.RequiredFieldError;
+    }
+  });
+  Object.defineProperty(exports, 'TypeError', {
+    enumerable: true,
+    get: function () {
+      return _debug.TypeError;
+    }
+  });
+});
+;define('@ember-decorators/argument/index', ['exports', 'ember-get-config', '@ember-decorators/argument/utils/make-computed', '@ember-decorators/argument/-debug'], function (exports, _emberGetConfig, _makeComputed, _debug) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.argument = argument;
+
+  var _typeof = typeof Symbol === "function" && typeof Symbol.iterator === "symbol" ? function (obj) {
+    return typeof obj;
+  } : function (obj) {
+    return obj && typeof Symbol === "function" && obj.constructor === Symbol && obj !== Symbol.prototype ? "symbol" : typeof obj;
+  };
+
+  var valueMap = new WeakMap();
+
+  function valuesFor(obj) {
+    if (!valueMap.has(obj)) {
+      valueMap.set(obj, Object.create(null));
+    }
+
+    return valueMap.get(obj);
+  }
+
+  var internalArgumentDecorator = function internalArgumentDecorator(target, key, desc, options) {
+    if (true) {
+      var validations = (0, _debug.getValidationsForKey)(target, key);
+      validations.isArgument = true;
+      validations.typeRequired = Ember.getWithDefault(_emberGetConfig.default, '@ember-decorators/argument.typeRequired', false);
+    }
+
+    // always ensure the property is writeable, doesn't make sense otherwise (babel bug?)
+    desc.writable = true;
+    desc.configurable = true;
+
+    if (desc.initializer === null || desc.initializer === undefined) {
+      desc.initializer = undefined;
+      return;
+    }
+
+    var initializer = desc.initializer;
+
+    var get = function get() {
+      var values = valuesFor(this);
+
+      if (!Object.hasOwnProperty.call(values, key)) {
+        values[key] = initializer.call(this);
+      }
+
+      return values[key];
+    };
+
+    if (options.defaultIfNullish === true || options.defaultIfUndefined === true) {
+      var defaultIf = void 0;
+
+      if (options.defaultIfNullish === true) {
+        defaultIf = function defaultIf(v) {
+          return v === undefined || v === null;
+        };
+      } else {
+        defaultIf = function defaultIf(v) {
+          return v === undefined;
+        };
+      }
+
+      if (false) {
+        return {
+          get: get,
+          set: function set(value) {
+            if (defaultIf(value)) {
+              valuesFor(this)[key] = initializer.call(this);
+            } else {
+              valuesFor(this)[key] = value;
+            }
+          }
+        };
+      }
+
+      var descriptor = (0, _makeComputed.default)({
+        get: get,
+        set: function set(keyName, value) {
+          if (defaultIf(value)) {
+            return valuesFor(this)[key] = initializer.call(this);
+          } else {
+            return valuesFor(this)[key] = value;
+          }
+        }
+      });
+
+      // Decorators spec doesn't allow us to make a computed directly on
+      // the prototype, so we need to wrap the descriptor in a getter
+      return {
+        get: function get() {
+          return descriptor;
+        }
+      };
+    } else {
+      return {
+        get: get,
+        set: function set(value) {
+          valuesFor(this)[key] = value;
+        }
+      };
+    }
+  };
+
+  function argument(maybeOptions, maybeKey, maybeDesc) {
+    if (typeof maybeKey === 'string' && (typeof maybeDesc === 'undefined' ? 'undefined' : _typeof(maybeDesc)) === 'object') {
+      return internalArgumentDecorator(maybeOptions, maybeKey, maybeDesc, { defaultIfUndefined: false });
+    }
+
+    return function (target, key, desc) {
+      return internalArgumentDecorator(target, key, desc, maybeOptions);
+    };
+  }
+});
+;define('@ember-decorators/argument/type', ['exports', '@ember-decorators/argument/-debug'], function (exports, _debug) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  Object.defineProperty(exports, 'type', {
+    enumerable: true,
+    get: function () {
+      return _debug.type;
+    }
+  });
+  Object.defineProperty(exports, 'arrayOf', {
+    enumerable: true,
+    get: function () {
+      return _debug.arrayOf;
+    }
+  });
+  Object.defineProperty(exports, 'shapeOf', {
+    enumerable: true,
+    get: function () {
+      return _debug.shapeOf;
+    }
+  });
+  Object.defineProperty(exports, 'unionOf', {
+    enumerable: true,
+    get: function () {
+      return _debug.unionOf;
+    }
+  });
+  Object.defineProperty(exports, 'optional', {
+    enumerable: true,
+    get: function () {
+      return _debug.optional;
+    }
+  });
+  Object.defineProperty(exports, 'oneOf', {
+    enumerable: true,
+    get: function () {
+      return _debug.oneOf;
+    }
+  });
+});
+;define('@ember-decorators/argument/types', ['exports', '@ember-decorators/argument/-debug'], function (exports, _debug) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.Node = exports.Element = exports.ClosureAction = exports.Action = undefined;
+
+  function _classCallCheck(instance, Constructor) {
+    if (!(instance instanceof Constructor)) {
+      throw new TypeError("Cannot call a class as a function");
+    }
+  }
+
+  /**
+   * Action type, covers both string actions and closure actions
+   */
+  var Action = exports.Action = (0, _debug.unionOf)('string', Function);
+
+  /**
+   * Action type, covers both string actions and closure actions
+   */
+  var ClosureAction = exports.ClosureAction = Function;
+
+  /**
+   * Element type polyfill for fastboot
+   */
+  var Element = exports.Element = window ? window.Element : function Element() {
+    _classCallCheck(this, Element);
+  };
+
+  /**
+   * Node type polyfill for fastboot
+   */
+  var Node = exports.Node = window ? window.Node : function Node() {
+    _classCallCheck(this, Node);
+  };
+});
+;define('@ember-decorators/argument/utils/make-computed', ['exports'], function (exports) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = makeComputed;
+  function makeComputed(desc) {
+    if (true) {
+      return Ember.computed(desc);
+    } else {
+      var get = desc.get,
+          set = desc.set;
+
+
+      return Ember.computed(function (key, value) {
+        if (arguments.length > 1) {
+          return set.call(this, key, value);
+        }
+
+        return get.call(this);
+      });
+    }
+  }
+});
+;define('@ember-decorators/argument/validation', ['exports', '@ember-decorators/argument/-debug'], function (exports, _debug) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  Object.defineProperty(exports, 'immutable', {
+    enumerable: true,
+    get: function () {
+      return _debug.immutable;
+    }
+  });
+  Object.defineProperty(exports, 'required', {
+    enumerable: true,
+    get: function () {
+      return _debug.required;
+    }
+  });
+});
+;define('@ember-decorators/component/index', ['exports', '@ember-decorators/utils/collapse-proto', '@ember-decorators/utils/decorator'], function (exports, _collapseProto, _decorator) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.className = exports.attribute = undefined;
+  exports.classNames = classNames;
+  exports.tagName = tagName;
+
+  function _toConsumableArray(arr) {
+    if (Array.isArray(arr)) {
+      for (var i = 0, arr2 = Array(arr.length); i < arr.length; i++) {
+        arr2[i] = arr[i];
+      }
+
+      return arr2;
+    } else {
+      return Array.from(arr);
+    }
+  }
+
+  /**
+   * Decorator which indicates that the field or computed should be bound
+   * to an attribute value on the component. This replaces `attributeBindings`
+   * by directly allowing you to specify which properties should be bound.
+   *
+   * ```js
+   * import Component from '@ember/component';
+   * import { attribute } from 'ember-decorators/component';
+   * import { computed } from 'ember-decorators/object';
+   *
+   * export default class AttributeDemoComponent extends Component {
+   *   @attribute role = 'button';
+   *
+   *   // With provided attribute name
+   *   @attribute('data-foo') foo = 'lol';
+   *
+   *   @attribute
+   *   @computed
+   *   get id() {
+   *     // return generated id
+   *   }
+   * }
+   * ```
+   *
+   * @function
+   */
+  var attribute = exports.attribute = (0, _decorator.decoratorWithParams)(function (target, key, desc, params) {
+    (true && !(params.length <= 1) && Ember.assert('The @attribute decorator may take up to one parameter, the bound attribute name. Received: ' + params.length, params.length <= 1));
+    (true && !(params.every(function (s) {
+      return typeof s === 'string';
+    })) && Ember.assert('The @attribute decorator may only receive strings as parameters. Received: ' + params, params.every(function (s) {
+      return typeof s === 'string';
+    })));
+
+
+    (0, _collapseProto.default)(target);
+
+    if (!target.hasOwnProperty('attributeBindings')) {
+      var parentValue = target.attributeBindings;
+      target.attributeBindings = Array.isArray(parentValue) ? parentValue.slice() : [];
+    }
+
+    var binding = params[0] ? key + ':' + params[0] : key;
+
+    target.attributeBindings.push(binding);
+
+    if (desc) {
+      // Decorated fields are currently not configurable in Babel for some reason, so ensure
+      // that the field becomes configurable (else it messes with things)
+      desc.configurable = true;
+    }
+
+    return desc;
+  });
+
+  /**
+   * Decorator which indicates that the field or computed should be bound to
+   * the component class names. This replaces `classNameBindings` by directly
+   * allowing you to specify which properties should be bound.
+   *
+   * ```js
+   * import Component from '@ember/component';
+   * import { className } from 'ember-decorators/component';
+   * import { computed } from 'ember-decorators/object';
+   *
+   * export default class ClassNameDemoComponent extends Component {
+   *   @className boundField = 'default-class';
+   *
+   *   // With provided true/false class names
+   *   @className('active', 'inactive') isActive = true;
+   *
+   *   @className
+   *   @computed
+   *   get boundComputed() {
+   *     // return generated class
+   *   }
+   * }
+   * ```
+   *
+   * @function
+   */
+  var className = exports.className = (0, _decorator.decoratorWithParams)(function (target, key, desc, params) {
+    (true && !(params.length <= 2) && Ember.assert('The @className decorator may take up to two parameters, the truthy class and falsy class for the class binding. Received: ' + params.length, params.length <= 2));
+    (true && !(params.every(function (s) {
+      return typeof s === 'string';
+    })) && Ember.assert('The @className decorator may only receive strings as parameters. Received: ' + params, params.every(function (s) {
+      return typeof s === 'string';
+    })));
+
+
+    (0, _collapseProto.default)(target);
+
+    if (!target.hasOwnProperty('classNameBindings')) {
+      var parentValue = target.classNameBindings;
+      target.classNameBindings = Array.isArray(parentValue) ? parentValue.slice() : [];
+    }
+
+    var binding = params.length > 0 ? key + ':' + params.join(':') : key;
+
+    target.classNameBindings.push(binding);
+
+    if (desc) {
+      // Decorated fields are currently not configurable in Babel for some reason, so ensure
+      // that the field becomes configurable (else it messes with things)
+      desc.configurable = true;
+    }
+
+    return desc;
+  });
+
+  /**
+   * Class decorator which specifies the class names to be applied to a component.
+   * This replaces the `classNames` property on components in the traditional Ember
+   * object model.
+   *
+   * ```js
+   * import Component from '@ember/component';
+   * import { classNames } from 'ember-decorators/component';
+   *
+   * @classNames('a-static-class', 'another-static-class')
+   * export default class ClassNamesDemoComponent extends Component {}
+   * ```
+   *
+   * @param {...String} classNames - The list of classes to be applied to the component
+   */
+  function classNames() {
+    for (var _len = arguments.length, classNames = Array(_len), _key = 0; _key < _len; _key++) {
+      classNames[_key] = arguments[_key];
+    }
+
+    (true && !(classNames.reduce(function (allStrings, name) {
+      return allStrings && typeof name === 'string';
+    }, true)) && Ember.assert('The @classNames decorator must be provided strings, received: ' + classNames, classNames.reduce(function (allStrings, name) {
+      return allStrings && typeof name === 'string';
+    }, true)));
+
+
+    return function (klass) {
+      var prototype = klass.prototype;
+
+
+      (0, _collapseProto.default)(prototype);
+
+      if ('classNames' in prototype) {
+        var parentClasses = prototype.classNames;
+        classNames.unshift.apply(classNames, _toConsumableArray(parentClasses));
+      }
+
+      prototype.classNames = classNames;
+
+      return klass;
+    };
+  }
+
+  /**
+   * Class decorator which specifies the tag name of the component. This replaces
+   * the `tagName` property on components in the traditional Ember object model.
+   *
+   * ```js
+   * import Component from '@ember/component';
+   * import { tagName } from 'ember-decorators/component';
+   *
+   * @tagName('button')
+   * export default class TagNameDemoComponent extends Component {}
+   * ```
+   *
+   * @param {String} tagName - The HTML tag to be used for the component
+   */
+  function tagName(tagName) {
+    (true && !(arguments.length === 1) && Ember.assert('The @tagName decorator must be provided exactly one argument, received: ' + tagName, arguments.length === 1));
+    (true && !(typeof tagName === 'string') && Ember.assert('The @tagName decorator must be provided a string, received: ' + tagName, typeof tagName === 'string'));
+
+
+    return function (klass) {
+      klass.prototype.tagName = tagName;
+      return klass;
+    };
+  }
+});
+;define('@ember-decorators/controller/index', ['exports', '@ember-decorators/utils/computed'], function (exports, _computed) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.controller = undefined;
+
+  function _toConsumableArray(arr) {
+    if (Array.isArray(arr)) {
+      for (var i = 0, arr2 = Array(arr.length); i < arr.length; i++) {
+        arr2[i] = arr[i];
+      }
+
+      return arr2;
+    } else {
+      return Array.from(arr);
+    }
+  }
+
+  /**
+   * Decorator that wraps `Ember.inject.controller`
+   *
+   * Injects a controller into a Controller as the decorated property
+   *
+   *  ```javascript
+   * import Controller from '@ember/controller';
+   * import { controller } from 'ember-decorators/controller';
+   *
+   * export default class IndexController extends Controller {
+   *   @controller application;
+   * }
+   * ```
+   *
+   * @function
+   * @param {String} [controllerName] - The name of the controller to inject. If not provided, the property name will be used
+   */
+  var controller = exports.controller = (0, _computed.computedDecoratorWithParams)(function (target, key, desc, params) {
+    return params.length > 0 ? Ember.inject.controller.apply(undefined, _toConsumableArray(params)) : Ember.inject.controller(key);
+  });
+});
+;define('@ember-decorators/data/index', ['exports', 'ember-data', '@ember-decorators/utils/computed'], function (exports, _emberData, _computed) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.belongsTo = exports.hasMany = exports.attr = undefined;
+
+  function _toConsumableArray(arr) {
+    if (Array.isArray(arr)) {
+      for (var i = 0, arr2 = Array(arr.length); i < arr.length; i++) {
+        arr2[i] = arr[i];
+      }
+
+      return arr2;
+    } else {
+      return Array.from(arr);
+    }
+  }
+
+  function computedDecoratorWithKeyReflection(fn) {
+    return (0, _computed.computedDecoratorWithParams)(function (target, keyName, desc, params) {
+      var key = void 0;
+
+      if (typeof params[0] === 'string') {
+        key = params.shift();
+      } else {
+        key = keyName;
+      }
+
+      return fn.apply(undefined, [key].concat(_toConsumableArray(params)));
+    });
+  }
+
+  /**
+   * Decorator that turns the property into an Ember Data attribute
+   *
+   * ```javascript
+   * import Model from 'ember-data/model';
+   * import { attr } from 'ember-decorators/data';
+   *
+   * export default Model.extend({
+   *   @attr firstName: null
+   * });
+   * ```
+   *
+   * @function
+   * @param {String} [type] - Type of the attribute
+   */
+  var attr = exports.attr = (0, _computed.computedDecoratorWithParams)(function (target, key, desc, params) {
+    return _emberData.default.attr.apply(_emberData.default, _toConsumableArray(params));
+  });
+
+  /**
+   * Decorator that turns the property into an Ember Data `hasMany` relationship
+   *
+   * ```javascript
+   * import Model from 'ember-data/model';
+   * import { hasMany } from 'ember-decorators/data';
+   *
+   * export default Model.extend({
+   *   @hasMany users: null
+   * });
+   * ```
+   *
+   * @function
+   * @param {String} [type] - Type of the `hasMany` relationship
+   */
+  var hasMany = exports.hasMany = computedDecoratorWithKeyReflection(_emberData.default.hasMany);
+
+  /**
+   * Decorator that turns the property into an Ember Data `belongsTo` relationship
+   *
+   * ```javascript
+   * import Model from 'ember-data/model';
+   * import { belongsTo } from 'ember-decorators/data';
+   *
+   * export default Model.extend({
+   *   @belongsTo user: null
+   * });
+   * ```
+   * @function
+   * @param {String} [type] - Type of the `belongsTo` relationship
+   */
+  var belongsTo = exports.belongsTo = computedDecoratorWithKeyReflection(_emberData.default.belongsTo);
+});
+;define('@ember-decorators/object/computed', ['exports', '@ember-decorators/utils/computed'], function (exports, _computed) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.uniqBy = exports.uniq = exports.union = exports.sum = exports.sort = exports.setDiff = exports.readOnly = exports.reads = exports.or = exports.oneWay = exports.notEmpty = exports.not = exports.none = exports.min = exports.max = exports.match = exports.mapBy = exports.map = exports.lte = exports.lt = exports.intersect = exports.gte = exports.gt = exports.filterBy = exports.filter = exports.equal = exports.empty = exports.deprecatingAlias = exports.collect = exports.bool = exports.and = exports.alias = undefined;
+
+  function _toConsumableArray(arr) {
+    if (Array.isArray(arr)) {
+      for (var i = 0, arr2 = Array(arr.length); i < arr.length; i++) {
+        arr2[i] = arr[i];
+      }
+
+      return arr2;
+    } else {
+      return Array.from(arr);
+    }
+  }
+
+  function legacyMacro(fn) {
+    return (0, _computed.computedDecoratorWithRequiredParams)(function (target, key, desc, params) {
+      if (desc !== undefined && desc.value !== undefined) {
+        return fn.apply(undefined, _toConsumableArray(params).concat([desc.value]));
+      }
+
+      return fn.apply(undefined, _toConsumableArray(params));
+    });
+  }
+
+  function legacyMacroWithRequiredMethod(fn) {
+    return (0, _computed.computedDecoratorWithRequiredParams)(function (target, key, desc, params) {
+      var method = desc !== undefined && typeof desc.value === 'function' ? desc.value : params.pop();
+
+      (true && !(typeof method === 'function') && Ember.assert('The @' + fn.name + ' decorator must be used to decorate a method', typeof method === 'function'));
+
+
+      return fn.apply(undefined, _toConsumableArray(params).concat([method]));
+    });
+  }
+
+  /**
+   * Decorator that wraps [Ember.computed.alias](http://emberjs.com/api/classes/Ember.computed.html#method_alias)
+   *
+   * Creates a new property that is an alias for another property on an object.
+   * Calls to get or set this property behave as though they were called on
+   * the original property.
+   *
+   * ```javascript
+   * import Component from '@ember/component';
+   * import { alias } from 'ember-decorators/object/computed';
+   *
+   * export default class UserProfileComponent extends Component {
+   *   person = {
+   *     first: 'Joe'
+   *   };
+   *
+   *   @alias('person.first') firstName;
+   * }
+   * ```
+   *
+   * @function
+   * @param {String} dependentKey - Key for the aliased property
+   */
+  var alias = exports.alias = legacyMacro(Ember.computed.alias);
+
+  /**
+   * Decorator that wraps [Ember.computed.and](http://emberjs.com/api/classes/Ember.computed.html#method_and)
+   *
+   * A computed property that performs a logical and on the original values
+   * for the provided dependent properties.
+   *
+   * ```javascript
+   * import Component from '@ember/component';
+   * import { and } from 'ember-decorators/object/computed';
+   *
+   * export default class UserProfileComponent extends Component {
+   *   person = {
+   *     first: 'Joe'
+   *   };
+   *
+   *   @and('person.{first,last}') hasFullName; // false
+   * }
+   * ```
+   *
+   * @function
+   * @param {...String} dependentKeys - Keys for properties to `and`
+   */
+  var and = exports.and = legacyMacro(Ember.computed.and);
+
+  /**
+   * Decorator that wraps [Ember.computed.bool](http://emberjs.com/api/classes/Ember.computed.html#method_bool)
+   *
+   * A computed property that converts the provided dependent property into a
+   * boolean value.
+   *
+   * ```javascript
+   * import Component from '@ember/component';
+   * import { bool } from 'ember-decorators/object/computed';
+   *
+   * export default class MessagesNotificationComponent extends Component {
+   *   messageCount = 1;
+   *
+   *   @bool('messageCount') hasMessages; // true
+   * }
+   * ```
+   *
+   * @function
+   * @param {String} dependentKey - Key for the property to convert
+   */
+  var bool = exports.bool = legacyMacro(Ember.computed.bool);
+
+  /**
+   * Decorator that wraps [Ember.computed.collect](http://emberjs.com/api/classes/Ember.computed.html#method_collect)
+   *
+   * A computed property that returns the array of values for the provided
+   * dependent properties.
+   *
+   * ```javascript
+   * import Component from '@ember/component';
+   * import { collect } from 'ember-decorators/object/computed';
+   *
+   * export default class CameraEquipmentComponent extends Component {
+   *   light = 'strobe';
+   *   lens = '35mm prime';
+   *
+   *   @collect('light', 'lens') equipment; // ['strobe', '35mm prime']
+   * }
+   * ```
+   *
+   * @function
+   * @param {...String} dependentKeys - Keys for the properties to collect
+   */
+  var collect = exports.collect = legacyMacro(Ember.computed.collect);
+
+  /**
+   * Decorator that wraps [Ember.computed.deprecatingAlias](http://emberjs.com/api/classes/Ember.computed.html#method_deprecatingAlias)
+   *
+   * Creates a new property that is an alias for another property on an object.
+   * Calls to get or set this property behave as though they were called on
+   * the original property, but will also trigger a deprecation warning.
+   *
+   * ```javascript
+   * import Component from '@ember/component';
+   * import { deprecatingAlias } from 'ember-decorators/object/computed';
+   *
+   * export default class UserProfileComponent extends {
+   *   person = {
+   *     first: 'Joe'
+   *   };
+   *
+   *   @deprecatingAlias('person.first', {
+   *     id: 'user-profile.firstName',
+   *     until: '3.0.0',
+   *     url: 'https://example.com/deprecations/user-profile.firstName'
+   *   }) firstName;
+   * }
+   * ```
+   *
+   * @function
+   * @param {String} dependentKey - Key for the property to alias
+   * @param {Object} options
+   */
+  var deprecatingAlias = exports.deprecatingAlias = legacyMacro(Ember.computed.deprecatingAlias);
+
+  /**
+   * Decorator that wraps [Ember.computed.empty](http://emberjs.com/api/classes/Ember.computed.html#method_empty)
+   *
+   * A computed property that returns `true` if the value of the dependent
+   * property is null, an empty string, empty array, or empty function.
+   *
+   * ```javascript
+   * import Component from '@ember/component';
+   * import { A } from '@ember/array';
+   * import { empty } from 'ember-decorators/object/computed';
+   *
+   * export default class FoodItemsComponent extends Component {
+   *   items = A(['taco', 'burrito']);
+   *
+   *   @empty('items') isEmpty; // false
+   * }
+   * ```
+   *
+   * @function
+   * @param {String} dependentKey - Key of the property to check emptiness of
+   */
+  var empty = exports.empty = legacyMacro(Ember.computed.empty);
+
+  /**
+   * Decorator that wraps [Ember.computed.equal](http://emberjs.com/api/classes/Ember.computed.html#method_equal)
+   *
+   * A computed property that returns true if the dependent properties are equal.
+   *
+   * ```javascript
+   * import Component from '@ember/component';
+   * import { equal } from 'ember-decorators/object/computed';
+   *
+   * export default class NapTimeComponent extends Component {
+   *   state = 'sleepy';
+   *
+   *   @equal('state', 'sleepy') napTime; // true
+   * }
+   * ```
+   *
+   * @function
+   * @param {String} dependentKey - Key for the property to check
+   * @param {Any} value - Value to compare the dependent property to
+   */
+  var equal = exports.equal = legacyMacro(Ember.computed.equal);
+
+  /**
+   * Decorator that wraps [Ember.computed.filter](http://emberjs.com/api/classes/Ember.computed.html#method_filter)
+   *
+   * Filters the items in the array by the provided callback.
+   *
+   * ```javascript
+   * import Component from '@ember/component';
+   * import { A } from '@ember/array';
+   * import { filter } from 'ember-decorators/object/computed';
+   *
+   * export default class ChoresListComponent extends Component {
+   *   chores = A([
+   *     { name: 'cook', done: true },
+   *     { name: 'clean', done: true },
+   *     { name: 'write more unit tests', done: false }
+   *   ]);
+   *
+   *   @filter('chores')
+   *   remainingChores(chore, index, array) {
+   *     return !chore.done;
+   *   } // [{name: 'write more unit tests', done: false}]
+   *
+   *   // alternative syntax:
+   *
+   *   @filter('chores', function(chore, index, array) {
+   *     return !chore.done;
+   *   }) remainingChores; // [{name: 'write more unit tests', done: false}]
+   * }
+   * ```
+   *
+   * @function
+   * @param {String} dependentKey - Key for the array to filter
+   * @param {Function(item: Any, index: Number, array: Array<Any>): Boolean} callback - The function to filter with
+   */
+  var filter = exports.filter = legacyMacroWithRequiredMethod(Ember.computed.filter);
+
+  /**
+   * Decorator that wraps [Ember.computed.filterBy](http://emberjs.com/api/classes/Ember.computed.html#method_filterBy)
+   *
+   * Filters the array by the property and value.
+   *
+   * ```javascript
+   * import Component from '@ember/component';
+   * import { A } from '@ember/array';
+   * import { filterBy } from 'ember-decorators/object/computed';
+   *
+   * export default class ChoresListComponent extends Component {
+   *   chores = A([
+   *     { name: 'cook', done: true },
+   *     { name: 'clean', done: true },
+   *     { name: 'write more unit tests', done: false }
+   *   ]);
+   *
+   *   @filterBy('chores', 'done', false) remainingChores; // [{name: 'write more unit tests', done: false}]
+   * }
+   * ```
+   *
+   * @function
+   * @param {String} dependentKey - Key for the array to filter
+   * @param {String} propertyKey - Property of the array items to filter by
+   * @param {Any} value - Value to filter by
+   */
+  var filterBy = exports.filterBy = legacyMacro(Ember.computed.filterBy);
+
+  /**
+   * Decorator that wraps [Ember.computed.gt](http://emberjs.com/api/classes/Ember.computed.html#method_gt)
+   *
+   * A computed property that returns `true` if the provided dependent property
+   * is greater than the provided value.
+   *
+   * ```javascript
+   * import Component from '@ember/component';
+   * import { gt } from 'ember-decorators/object/computed';
+   *
+   * export default class CatPartyComponent extends Component {
+   *   totalCats = 11;
+   *
+   *   @gt('totalCats', 10) isCatParty; // true
+   * }
+   * ```
+   *
+   * @function
+   * @param {String} dependentKey - Key for the property to compare
+   * @param {Number} value - Value to compare against
+   */
+  var gt = exports.gt = legacyMacro(Ember.computed.gt);
+
+  /**
+   * Decorator that wraps [Ember.computed.gte](http://emberjs.com/api/classes/Ember.computed.html#method_gte)
+   *
+   * A computed property that returns `true` if the provided dependent property
+   * is greater than or equal to the provided value.
+   *
+   * ```javascript
+   * import Component from '@ember/component';
+   * import { gte } from 'ember-decorators/object/computed';
+   *
+   * export default class PlayerListComponent extends Component {
+   *   totalPlayers = 14;
+   *
+   *   @gte('totalPlayers', 14) hasEnoughPlayers; // true
+   * }
+   * ```
+   *
+   * @function
+   * @param {String} dependentKey - Key for the property to compare
+   * @param {Number} value - Value to compare against
+   */
+  var gte = exports.gte = legacyMacro(Ember.computed.gte);
+
+  /**
+   * Decorator that wraps [Ember.computed.intersect](http://emberjs.com/api/classes/Ember.computed.html#method_intersect)
+   *
+   * A computed property which returns a new array with all the duplicated
+   * elements from two or more dependent arrays.
+   *
+   * ```javascript
+   * import Component from '@ember/component';
+   * import { A } from '@ember/array';
+   * import { intersect } from 'ember-decorators/object/computed';
+   *
+   * export default class FoodListComponent extends Component {
+   *   likes = A([ 'tacos', 'puppies', 'pizza' ]);
+   *   foods = A(['tacos', 'pizza']);
+   *
+   *   @intersect('likes', 'foods') favoriteFoods; // ['tacos', 'pizza']
+   * }
+   * ```
+   *
+   * @function
+   * @param {...String} dependentKeys - Keys of the arrays to intersect
+   */
+  var intersect = exports.intersect = legacyMacro(Ember.computed.intersect);
+
+  /**
+   * Decorator that wraps [Ember.computed.lt](http://emberjs.com/api/classes/Ember.computed.html#method_lt)
+   *
+   * A computed property that returns `true` if the provided dependent property
+   * is less than the provided value.
+   *
+   * ```javascript
+   * import Component from '@ember/component';
+   * import { lt } from 'ember-decorators/object/computed';
+   *
+   * export default class DogPartyComponent extends Component {
+   *   totalDogs = 3;
+   *
+   *   @lt('totalDogs', 10) isDogParty; // true
+   * }
+   * ```
+   *
+   * @function
+   * @param {String} dependentKey - Key for the property to compare
+   * @param {Number} value - Value to compare against
+   */
+  var lt = exports.lt = legacyMacro(Ember.computed.lt);
+
+  /**
+   * Decorator that wraps [Ember.computed.lte](http://emberjs.com/api/classes/Ember.computed.html#method_lte)
+   *
+   * A computed property that returns `true` if the provided dependent property
+   * is less than or equal to the provided value.
+   *
+   * ```javascript
+   * import Component from '@ember/component';
+   * import { lte } from 'ember-decorators/object/computed';
+   *
+   * export default class PlayerListComponent extends Component {
+   *   totalPlayers = 14;
+   *
+   *   @lte('totalPlayers', 14) hasEnoughPlayers; // true
+   * }
+   * ```
+   *
+   * @function
+   * @param {String} dependentKey - Key for the property to compare
+   * @param {Number} value - Value to compare against
+   */
+  var lte = exports.lte = legacyMacro(Ember.computed.lte);
+
+  /**
+   * Decorator that wraps [Ember.computed.map](http://emberjs.com/api/classes/Ember.computed.html#method_map)
+   *
+   * Returns an array mapped via the callback
+   *
+   * ```javascript
+   * import Component from '@ember/component';
+   * import { A } from '@ember/array';
+   * import { map } from 'ember-decorators/object/computed';
+   *
+   * export default class ChoresListComponent extends Component {
+   *   chores = A(['clean', 'write more unit tests']);
+   *
+   *   @map('chores')
+   *   loudChores(chore, index) {
+   *     return chore.toUpperCase() + '!';
+   *   } // ['CLEAN!', 'WRITE MORE UNIT TESTS!']
+   *
+   *   // alternative syntax:
+   *
+   *   @map('chores', function(chore, index) {
+   *     return chore.toUpperCase() + '!';
+   *   }) loudChores; // ['CLEAN!', 'WRITE MORE UNIT TESTS!']
+   * }
+   * ```
+   *
+   * @function
+   * @param {String} dependentKey - Key for the array to map over
+   * @param {Function(item: Any, index: Number): Any} callback - Function to map over the array
+   */
+  var map = exports.map = legacyMacroWithRequiredMethod(Ember.computed.map);
+
+  /**
+   * Decorator that wraps [Ember.computed.mapBy](http://emberjs.com/api/classes/Ember.computed.html#method_mapBy)
+   *
+   * Returns an array mapped to the specified key.
+   *
+   * ```javascript
+   * import Component from '@ember/component';
+   * import { A } from '@ember/array';
+   * import { mapBy } from 'ember-decorators/object/computed';
+   *
+   * export default class PeopleListComponent extends Component {
+   *   people = A([
+   *     {name: "George", age: 5},
+   *     {name: "Stella", age: 10},
+   *     {name: "Violet", age: 7}
+   *   ]);
+   *
+   *   @mapBy('people', 'age') ages; // [5, 10, 7]
+   * }
+   * ```
+   *
+   * @function
+   * @param {String} dependentKey - Key for the array to map over
+   * @param {String} propertyKey - Property of the array items to map by
+   */
+  var mapBy = exports.mapBy = legacyMacro(Ember.computed.mapBy);
+
+  /**
+   * Decorator that wraps [Ember.computed.match](http://emberjs.com/api/classes/Ember.computed.html#method_match)
+   *
+   * A computed property which matches the original value for the dependent
+   * property against a given RegExp, returning `true` if they values matches
+   * the RegExp and `false` if it does not.
+   *
+   * ```javascript
+   * import Component from '@ember/component';
+   * import { match } from 'ember-decorators/object/computed';
+   *
+   * export default class IsEmailValidComponent extends Component {
+   *   email = 'tomster@emberjs.com';
+   *
+   *   @match('email', /^.+@.+\..+$/) validEmail;
+   * }
+   * ```
+   *
+   * @function
+   * @param {String} dependentKey - The property to match
+   * @param {RegExp} pattern - The pattern to match against
+   */
+  var match = exports.match = legacyMacro(Ember.computed.match);
+
+  /**
+   * Decorator that wraps [Ember.computed.max](http://emberjs.com/api/classes/Ember.computed.html#method_max)
+   *
+   * A computed property that calculates the maximum value in the dependent
+   * array. This will return `-Infinity` when the dependent array is empty.
+   *
+   * ```javascript
+   * import Component from '@ember/component';
+   * import { A } from '@ember/array';
+   * import { max } from 'ember-decorators/object/computed';
+   *
+   * export default class MaxValueComponent extends Component {
+   *   values = A([1, 2, 5, 10]);
+   *
+   *   @max('values') maxValue; // 10
+   * }
+   * ```
+   *
+   * @function
+   * @param {String} dependentKey - Key for the array to find the max value of
+   */
+  var max = exports.max = legacyMacro(Ember.computed.max);
+
+  /**
+   * Decorator that wraps [Ember.computed.min](http://emberjs.com/api/classes/Ember.computed.html#method_min)
+   *
+   * A computed property that calculates the minimum value in the dependent
+   * array. This will return `Infinity` when the dependent array is empty.
+   *
+   * ```javascript
+   * import Component from '@ember/component';
+   * import { A } from '@ember/array';
+   * import { min } from 'ember-decorators/object/computed';
+   *
+   * export default class MinValueComponent extends Component {
+   *   values = A([1, 2, 5, 10]);
+   *
+   *   @min('values') minValue; // 1
+   * }
+   * ```
+   *
+   * @function
+   * @param {String} dependentKey - Key for the array to find the max value of
+   */
+  var min = exports.min = legacyMacro(Ember.computed.min);
+
+  /**
+   * Decorator that wraps [Ember.computed.none](http://emberjs.com/api/classes/Ember.computed.html#method_none)
+   *
+   * A computed property that returns true if the value of the dependent property
+   * is null or undefined. This avoids errors from JSLint complaining about use
+   * of `==`, which can be technically confusing.
+   *
+   * ```javascript
+   * import Component from '@ember/component';
+   * import { none } from 'ember-decorators/object/computed';
+   *
+   * export default class NameDisplayComponent extends Component {
+   *   firstName = null;
+   *
+   *   @none('firstName') isNameless; // true unless firstName is defined
+   * }
+   * ```
+   *
+   * @function
+   * @param {String} dependentKey - Key for the property to check
+   */
+  var none = exports.none = legacyMacro(Ember.computed.none);
+
+  /**
+   * Decorator that wraps [Ember.computed.not](http://emberjs.com/api/classes/Ember.computed.html#method_not)
+   *
+   * A computed property that returns the inverse boolean value of the original
+   * value for the dependent property.
+   *
+   * ```javascript
+   * import Component from '@ember/component';
+   * import { not } from 'ember-decorators/object/computed';
+   *
+   * export default class UserInfoComponent extends Component {
+   *   loggedIn = false;
+   *
+   *   @not('loggedIn') isAnonymous; // true
+   * }
+   * ```
+   *
+   * @function
+   * @param {String} dependentKey - Key for the property to `not`
+   */
+  var not = exports.not = legacyMacro(Ember.computed.not);
+
+  /**
+   * Decorator that wraps [Ember.computed.notEmpty](http://emberjs.com/api/classes/Ember.computed.html#method_notEmpty)
+   *
+   * A computed property that returns `true` if the value of the dependent
+   * property is NOT null, an empty string, empty array, or empty function.
+   *
+   * ```javascript
+   * import Component from '@ember/component';
+   * import { A } from '@ember/array';
+   * import { notEmpty } from 'ember-decorators/object/computed';
+   *
+   * export default class GroceryBagComponent extends Component {
+   *   groceryBag = A(['milk', 'eggs', 'apples']);
+   *
+   *   @notEmpty('groceryBag') hasGroceriesToPutAway; // true
+   * }
+   * ```
+   *
+   * @function
+   * @param {String} dependentKey - Key for the property to check
+   */
+  var notEmpty = exports.notEmpty = legacyMacro(Ember.computed.notEmpty);
+
+  /**
+   * Decorator that wraps [Ember.computed.oneWay](http://emberjs.com/api/classes/Ember.computed.html#method_oneWay)
+   *
+   * Where `computed.alias` aliases `get` and `set`, and allows for bidirectional
+   * data flow, `computed.oneWay` only provides an aliased `get`. The `set` will
+   * not mutate the upstream property, rather causes the current property to
+   * become the value set. This causes the downstream property to permanently
+   * diverge from the upstream property.
+   *
+   * ```javascript
+   * import Component from '@ember/component';
+   * import { oneWay } from 'ember-decorators/object/computed';
+   *
+   * export default class UserProfileComponent extends Component {
+   *   firstName = 'Joe';
+   *
+   *   @oneWay('firstName') originalName; // will always be 'Joe'
+   * }
+   * ```
+   *
+   * @function
+   * @param {String} dependentKey - Key for the property to alias
+   */
+  var oneWay = exports.oneWay = legacyMacro(Ember.computed.oneWay);
+
+  /**
+   * Decorator that wraps [Ember.computed.or](http://emberjs.com/api/classes/Ember.computed.html#method_or)
+   *
+   * A computed property which performs a logical or on the original values for
+   * the provided dependent properties.
+   *
+   * ```javascript
+   * import Component from '@ember/component';
+   * import { or } from 'ember-decorators/object/computed';
+   *
+   * export default class OutfitFeaturesComponent extends Component {
+   *   hasJacket = true;
+   *   hasUmbrella = false;
+   *
+   *   @or('hasJacket', 'hasUmbrella') isReadyForRain; // true
+   * }
+   * ```
+   *
+   * @function
+   * @param {...String} dependentKey - Key for the properties to `or`
+   */
+  var or = exports.or = legacyMacro(Ember.computed.or);
+
+  /**
+   * Decorator that wraps [Ember.computed.reads](http://emberjs.com/api/classes/Ember.computed.html#method_reads)
+   *
+   * This is a more semantically meaningful alias of `computed.oneWay`, whose
+   * name is somewhat ambiguous as to which direction the data flows.
+   *
+   * ```javascript
+   * import Component from '@ember/component';
+   * import { reads } from 'ember-decorators/object/computed';
+   *
+   * export default class UserProfileComponent extends Component {
+   *   first = 'Tomster';
+   *
+   *   @reads('first') firstName;
+   * }
+   * ```
+   *
+   * @function
+   * @param {String} dependentKey - Key for the property to read
+   */
+  var reads = exports.reads = legacyMacro(Ember.computed.reads);
+
+  /**
+   * Decorator that wraps [Ember.computed.reads](http://emberjs.com/api/classes/Ember.computed.html#method_reads)
+   *
+   * computed property which creates a one way computed property to the original
+   * value for property. Where computed.oneWay provides oneWay bindings,
+   * computed.readOnly provides a readOnly one way binding. Very often when using
+   * computed.oneWay one does not also want changes to propagate back up, as they
+   * will replace the value.
+   *
+   * This prevents the reverse flow, and also throws an exception when it occurs.
+   *
+   * ```javascript
+   * import Component from '@ember/component';
+   * import { readOnly } from 'ember-decorators/object/computed';
+   *
+   * export default class UserProfileComponent extends Component {
+   *   first = 'Tomster';
+   *
+   *   @readOnly('first') firstName;
+   * }
+   * ```
+   *
+   * @function
+   * @param {String} dependentKey - Key for the property to read
+   */
+  var readOnly = exports.readOnly = legacyMacro(Ember.computed.readOnly);
+
+  /**
+   * Decorator that wraps [Ember.computed.setDiff](http://emberjs.com/api/classes/Ember.computed.html#method_setDiff)
+   *
+   * A computed property which returns a new array with all the properties from
+   * the first dependent array that are not in the second dependent array.
+   *
+   * ```javascript
+   * import Component from '@ember/component';
+   * import { A } from '@ember/array';
+   * import { setDiff } from 'ember-decorators/object/computed';
+   *
+   * export default class FavoriteThingsComponent extends Component {
+   *   likes = A([ 'tacos', 'puppies', 'pizza' ]);
+   *   foods = A(['tacos', 'pizza']);
+   *
+   *   @setDiff('likes', 'foods') favoriteThingsThatArentFood; // ['puppies']
+   * }
+   * ```
+   *
+   * @function
+   * @param {String} setAProperty - Keys for the first set
+   * @param {String} setBProperty - Keys for the first set
+   */
+  var setDiff = exports.setDiff = legacyMacro(Ember.computed.setDiff);
+
+  /**
+   * Decorator that wraps [Ember.computed.sort](http://emberjs.com/api/classes/Ember.computed.html#method_sort)
+   *
+   * A computed property which returns a new array with all the properties from
+   * the first dependent array sorted based on a property or sort function.
+   *
+   *
+   * The callback method you provide should have the following signature:
+   *
+   * ```javascript
+   * function(itemA, itemB);
+   * ```
+   * - `itemA` the first item to compare.
+   * - `itemB` the second item to compare.
+   *
+   * This function should return negative number (e.g. `-1`) when `itemA` should
+   * come before `itemB`. It should return positive number (e.g. `1`) when
+   * `itemA` should come after `itemB`. If the `itemA` and `itemB` are equal this
+   * function should return `0`.
+   *
+   * Therefore, if this function is comparing some numeric values, simple
+   * `itemA - itemB` or `itemA.get( 'foo' ) - itemB.get( 'foo' )` can be used
+   * instead of series of `if`.
+   *
+   * ```javascript
+   * import Component from '@ember/component';
+   * import { A } from '@ember/array';
+   * import { sort } from 'ember-decorators/object/computed';
+   *
+   * export default class SortNamesComponent extends Component {
+   *   names = A([{name:'Link'},{name:'Zelda'},{name:'Ganon'},{name:'Navi'}]);
+   *
+   *   @sort('names')
+   *   sortedNames(a, b){
+   *     if (a.name > b.name) {
+   *       return 1;
+   *     } else if (a.name < b.name) {
+   *       return -1;
+   *     }
+   *
+   *     return 0;
+   *   } // [{name:'Ganon'},{name:'Link'},{name:'Navi'},{name:'Zelda'}]
+   *
+   *   // alternative syntax:
+   *
+   *   @sort('names', function(a, b){
+   *     if (a.name > b.name) {
+   *       return 1;
+   *     } else if (a.name < b.name) {
+   *       return -1;
+   *     }
+   *
+   *     return 0;
+   *   }) sortedNames; // [{name:'Ganon'},{name:'Link'},{name:'Navi'},{name:'Zelda'}]
+   * }
+   * ```
+   *
+   * @function
+   * @param {String} dependentKey - The key for the array that should be sorted
+   * @param {Array<String>|Function(Any, Any): Number} sortDefinition - Sorting function or sort descriptor
+   */
+  var sort = exports.sort = legacyMacro(Ember.computed.sort);
+
+  /**
+   * Decorator that wraps [Ember.computed.sum](http://emberjs.com/api/classes/Ember.computed.html#method_sum)
+   *
+   * A computed property that returns the sum of the value in the dependent
+   * array.
+   *
+   * ```javascript
+   * import Component from '@ember/component';
+   * import { A } from '@ember/array';
+   * import { sum } from 'ember-decorators/object/computed';
+   *
+   * export default class SumValuesComponent extends Component {
+   *   values = A([1, 2, 3]);
+   *
+   *   @sum('values') total; // 6
+   * }
+   * ```
+   *
+   * @function
+   * @param {String} dependentKey - Key of the array to sum up
+   */
+  var sum = exports.sum = legacyMacro(Ember.computed.sum);
+
+  /**
+   * Decorator that wraps [Ember.computed.union](http://emberjs.com/api/classes/Ember.computed.html#method_union)
+   *
+   * Alias for [union](http://emberjs.com/api/classes/Ember.computed.html#method_uniq).
+   *
+   * ```javascript
+   * import Component from '@ember/component';
+   * import { A } from '@ember/array';
+   * import { union } from 'ember-decorators/object/computed';
+   *
+   * export default class LikesAndFoodsComponent extends Component {
+   *   likes = A([ 'tacos', 'puppies', 'pizza' ]);
+   *   foods = A(['tacos', 'pizza', 'ramen']);
+   *
+   *   @union('likes', 'foods') favorites; // ['tacos', 'puppies', 'pizza', 'ramen']
+   * }
+   * ```
+   *
+   * @function
+   * @param {...String} dependentKeys - Keys of the arrays to union
+   */
+  var union = exports.union = legacyMacro(Ember.computed.union);
+
+  /**
+   * Decorator that wraps [Ember.computed.uniq](http://emberjs.com/api/classes/Ember.computed.html#method_uniq)
+   *
+   * A computed property which returns a new array with all the unique elements from one or more dependent arrays.
+   *
+   * ```javascript
+   * import Component from '@ember/component';
+   * import { A } from '@ember/array';
+   * import { uniq } from 'ember-decorators/object/computed';
+   *
+   * export default class FavoriteThingsComponent extends Component {
+   *   likes = A([ 'tacos', 'puppies', 'pizza' ]);
+   *   foods = A(['tacos', 'pizza', 'ramen']);
+   *
+   *   @uniq('likes', 'foods') favorites; // ['tacos', 'puppies', 'pizza', 'ramen']
+   * }
+   * ```
+   *
+   * @function
+   * @param {String} dependentKey - Key of the array to uniq
+   */
+  var uniq = exports.uniq = legacyMacro(Ember.computed.uniq);
+
+  /**
+   * Decorator that wraps [Ember.computed.uniqBy](http://emberjs.com/api/classes/Ember.computed.html#method_uniqBy)
+   *
+   * A computed property which returns a new array with all the unique elements
+   * from an array, with uniqueness determined by a specific key.
+   *
+   * ```javascript
+   * import Component from '@ember/component';
+   * import { A } from '@ember/array';
+   * import { uniqBy } from 'ember-decorators/object/computed';
+   *
+   * export default class FruitBowlComponent extends Component {
+   *   fruits = A([
+   *     { name: 'banana', color: 'yellow' },
+   *     { name: 'apple',  color: 'red' },
+   *     { name: 'kiwi',   color: 'brown' },
+   *     { name: 'cherry', color: 'red' },
+   *     { name: 'lemon',  color: 'yellow' }
+   *   ]);
+   *
+   *   @uniqBy('fruits', 'color') oneOfEachColor;
+   *   // [
+   *   //  { name: 'banana', color: 'yellow'},
+   *   //  { name: 'apple',  color: 'red'},
+   *   //  { name: 'kiwi',   color: 'brown'}
+   *   // ]
+   * }
+   * ```
+   *
+   * @function
+   * @param {String} dependentKey - Key of the array to uniq
+   * @param {String} propertyKey - Key of the property on the objects of the array to determine uniqueness by
+   */
+  var uniqBy = exports.uniqBy = true ? legacyMacro(Ember.computed.uniqBy) : function () {
+    (true && !(false) && Ember.assert('uniqBy is only available from Ember.js v2.7 onwards.', false));
+  };
+});
+;define('@ember-decorators/object/index', ['exports', '@ember-decorators/utils/collapse-proto', '@ember-decorators/utils/compatibility', '@ember-decorators/utils/computed'], function (exports, _collapseProto, _compatibility, _computed) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.readOnly = exports.computed = undefined;
+  exports.action = action;
+
+  function _toConsumableArray(arr) {
+    if (Array.isArray(arr)) {
+      for (var i = 0, arr2 = Array(arr.length); i < arr.length; i++) {
+        arr2[i] = arr[i];
+      }
+
+      return arr2;
+    } else {
+      return Array.from(arr);
+    }
+  }
+
+  /**
+   * Decorator that turns the target function into an Action
+   *
+   * Adds an `actions` object to the target object and creates a passthrough
+   * function that calls the original. This means the function still exists
+   * on the original object, and can be used directly.
+   *
+   * ```js
+   * import Component from '@ember/component';
+   * import { action } from 'ember-decorators/object';
+   *
+   * export default class ActionDemoComponent extends Component {
+   *   @action
+   *   foo() {
+   *     // do something
+   *   }
+   * }
+   * ```
+   *
+   * ```hbs
+   * <button onclick={{action "foo"}}>Execute foo action</button>
+   * ```
+   */
+  function action(target, key, desc) {
+    (true && !(desc && typeof desc.value === 'function') && Ember.assert('The @action decorator must be applied to functions', desc && typeof desc.value === 'function'));
+
+
+    (0, _collapseProto.default)(target);
+
+    if (false) {
+      if (!target.hasOwnProperty('_actions')) {
+        var parentActions = target._actions;
+        target._actions = parentActions ? Object.create(parentActions) : {};
+      }
+
+      target._actions[key] = desc.value;
+    } else {
+      if (!target.hasOwnProperty('actions')) {
+        var _parentActions = target.actions;
+        target.actions = _parentActions ? Object.create(_parentActions) : {};
+      }
+
+      target.actions[key] = desc.value;
+    }
+
+    return desc;
+  }
+
+  /**
+   * Decorator that turns a function into a computed property. The decorators should
+   * be applied to native getter and setter functions. Note that though they use getters
+   * and setters, you must still use the Ember `get`/`set` functions to get and set their
+   * values.
+   *
+   * ```javascript
+   * import Component from '@ember/component';
+   * import { computed } from 'ember-decorators/object';
+   *
+   * export default class UserProfileComponent extends Component {
+   *   first = 'John';
+   *   last = 'Smith';
+   *
+   *   @computed('first', 'last')
+   *   get name() {
+   *     const first = this.get('first');
+   *     const last = this.get('last');
+   *
+   *     return `${first} ${last}`; // => 'John Smith'
+   *   }
+   *
+   *   set name(value) {
+   *     if (typeof value !== 'string' || !value.test(/^[a-z]+ [a-z]+$/i)) {
+   *       throw new TypeError('Invalid name');
+   *     }
+   *
+   *     const [first, last] = value.split(' ');
+   *     this.setProperties({ first, last });
+   *
+   *     return value;
+   *   }
+   * }
+   * ```
+   *
+   * @function
+   * @param {...String} propertyNames - List of property keys this computed is dependent on
+   */
+  var computed = exports.computed = (0, _computed.computedDecoratorWithParams)(function (target, key, desc, params) {
+    (true && !(!desc.isDescriptor) && Ember.assert('ES6 property getters/setters only need to be decorated once, \'' + key + '\' was decorated on both the getter and the setter', !desc.isDescriptor));
+    (true && !('get' in desc || 'set' in desc) && Ember.assert('Attempted to apply @computed to ' + key + ', but it is not a native accessor function. Try converting it to `get ' + key + '()`', 'get' in desc || 'set' in desc));
+    (true && !('get' in desc && desc.get !== undefined) && Ember.assert('Using @computed for only a setter does not make sense. Add a getter for \'' + key + '\' as well or remove the @computed decorator.', 'get' in desc && desc.get !== undefined));
+    var get = desc.get,
+        set = desc.set;
+
+    // Unset the getter and setter so the descriptor just has a plain value
+
+    desc.get = undefined;
+    desc.set = undefined;
+
+    var setter = void 0;
+
+    if (typeof set === 'function') {
+      setter = function setter(key, value) {
+        var ret = set.call(this, value);
+        return typeof ret === 'undefined' ? get.call(this) : ret;
+      };
+    } else if (true) {
+      setter = function setter() {
+        (true && !(false) && Ember.assert('You must provide a setter in order to set \'' + key + '\' as a computed property.', false));
+      };
+
+      // Set flag to assert on redundant @readOnly
+      setter.isMissingSetter = true;
+    }
+
+    return _compatibility.computed.apply(undefined, _toConsumableArray(params).concat([{ get: get, set: setter }]));
+  });
+
+  /**
+   * Decorator that modifies a computed property to be read only.
+   *
+   * Usage:
+   *
+   * ```javascript
+   * import Component from '@ember/component';
+   * import { computed, readOnly } from 'ember-decorators/object';
+   *
+   * export default class extends Component {
+   *   @readOnly
+   *   @computed('first', 'last')
+   *   name(first, last) {
+   *     return `${first} ${last}`;
+   *   }
+   * }
+   * ```
+   *
+   * @function
+   */
+  var readOnly = exports.readOnly = (0, _computed.computedDecorator)(function (target, name, desc) {
+    (true && !(desc && desc.isDescriptor) && Ember.assert('Attempted to apply @readOnly to \'' + name + '\', but it was not a computed property. Note that @readOnly must come before computed decorators', desc && desc.isDescriptor));
+    (true && !(!desc._setter || !desc._setter.isMissingSetter) && Ember.assert('Attempted to apply @readOnly to a computed property that didn\'t have a setter, which is unnecessary', !desc._setter || !desc._setter.isMissingSetter));
+
+
+    return desc.readOnly();
+  });
+});
+;define('@ember-decorators/service/index', ['exports', '@ember-decorators/utils/computed'], function (exports, _computed) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.service = undefined;
+
+  function _toConsumableArray(arr) {
+    if (Array.isArray(arr)) {
+      for (var i = 0, arr2 = Array(arr.length); i < arr.length; i++) {
+        arr2[i] = arr[i];
+      }
+
+      return arr2;
+    } else {
+      return Array.from(arr);
+    }
+  }
+
+  /**
+   * Decorator that wraps `Ember.inject.service`
+   *
+   * Injects a service into the object as the decorated property
+   *
+   *  ```javascript
+   * import Component from '@ember/component';
+   * import { service } from 'ember-decorators/service';
+   *
+   * export default class StoreInjectedComponent extends Component
+   *   @service store;
+   * }
+   * ```
+   *
+   * @function
+   * @param {String} [serviceName] - The name of the service to inject. If not provided, the property name will be used
+   */
+  var service = exports.service = (0, _computed.computedDecoratorWithParams)(function (target, key, desc, params) {
+    return params.length > 0 ? Ember.inject.service.apply(undefined, _toConsumableArray(params)) : Ember.inject.service(key);
+  });
+});
+;define('@ember-decorators/utils/-private/descriptor', ['exports'], function (exports) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.isComputedDescriptor = isComputedDescriptor;
+  exports.computedDescriptorFor = computedDescriptorFor;
+
+  var _typeof = typeof Symbol === "function" && typeof Symbol.iterator === "symbol" ? function (obj) {
+    return typeof obj;
+  } : function (obj) {
+    return obj && typeof Symbol === "function" && obj.constructor === Symbol && obj !== Symbol.prototype ? "symbol" : typeof obj;
+  };
+
+  var DESCRIPTOR = '__DESCRIPTOR__';
+
+  function isCPGetter(getter) {
+    // Hack for descriptor traps, we want to be able to tell if the function
+    // is a descriptor trap before we call it at all
+    return getter !== null && typeof getter === 'function' && getter.toString().indexOf('CPGETTER_FUNCTION') !== -1;
+  }
+
+  function isDescriptorTrap(possibleDesc) {
+    if (false && true) {
+      return possibleDesc !== null && (typeof possibleDesc === 'undefined' ? 'undefined' : _typeof(possibleDesc)) === 'object' && possibleDesc[DESCRIPTOR] !== undefined;
+    } else {
+      throw new Error('Cannot call `isDescriptorTrap` in production');
+    }
+  }
+
+  function isComputedDescriptor(possibleDesc) {
+    return possibleDesc !== null && (typeof possibleDesc === 'undefined' ? 'undefined' : _typeof(possibleDesc)) === 'object' && possibleDesc.isDescriptor;
+  }
+
+  function computedDescriptorFor(obj, keyName) {
+    (true && !(obj !== null) && Ember.assert('Cannot call `descriptorFor` on null', obj !== null));
+    (true && !(obj !== undefined) && Ember.assert('Cannot call `descriptorFor` on undefined', obj !== undefined));
+    (true && !((typeof obj === 'undefined' ? 'undefined' : _typeof(obj)) === 'object' || typeof obj === 'function') && Ember.assert('Cannot call `descriptorFor` on ' + (typeof obj === 'undefined' ? 'undefined' : _typeof(obj)), (typeof obj === 'undefined' ? 'undefined' : _typeof(obj)) === 'object' || typeof obj === 'function'));
+
+
+    if (false) {
+      var meta = Ember.meta(obj);
+
+      if (meta !== undefined) {
+        return meta.peekDescriptors(keyName);
+      }
+    } else if (Object.hasOwnProperty.call(obj, keyName)) {
+      var _Object$getOwnPropert = Object.getOwnPropertyDescriptor(obj, keyName),
+          possibleDesc = _Object$getOwnPropert.value,
+          possibleCPGetter = _Object$getOwnPropert.get;
+
+      if (true && false && isCPGetter(possibleCPGetter)) {
+        possibleDesc = possibleCPGetter.call(obj);
+
+        if (isDescriptorTrap(possibleDesc)) {
+          return possibleDesc[DESCRIPTOR];
+        }
+      }
+
+      return isComputedDescriptor(possibleDesc) ? possibleDesc : undefined;
+    }
+  }
+});
+;define('@ember-decorators/utils/-private/index', ['exports', '@ember-decorators/utils/-private/descriptor'], function (exports, _descriptor) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  Object.defineProperty(exports, 'computedDescriptorFor', {
+    enumerable: true,
+    get: function () {
+      return _descriptor.computedDescriptorFor;
+    }
+  });
+  Object.defineProperty(exports, 'isComputedDescriptor', {
+    enumerable: true,
+    get: function () {
+      return _descriptor.isComputedDescriptor;
+    }
+  });
+});
+;define('@ember-decorators/utils/collapse-proto', ['exports'], function (exports) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = collapseProto;
+  function collapseProto(target) {
+    // We must collapse the superclass prototype to make sure that the `actions`
+    // object will exist. Since collapsing doesn't generally happen until a class is
+    // instantiated, we have to do it manually.
+    var superClass = Object.getPrototypeOf(target.constructor);
+
+    if (superClass.hasOwnProperty('proto') && typeof superClass.proto === 'function') {
+      superClass.proto();
+    }
+  }
+});
+;define('@ember-decorators/utils/compatibility', ['exports'], function (exports) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+
+
+  var computed = void 0;
+
+  if (true) {
+    exports.computed = computed = Ember.computed;
+  } else {
+    exports.computed = computed = function computed() {
+      for (var _len = arguments.length, params = Array(_len), _key = 0; _key < _len; _key++) {
+        params[_key] = arguments[_key];
+      }
+
+      var desc = params.pop();
+
+      if (typeof desc === 'function') {
+        return Ember.computed.apply(undefined, params.concat([desc]));
+      } else if ('set' in desc) {
+        var get = desc.get,
+            set = desc.set;
+
+
+        return Ember.computed.apply(undefined, params.concat([function (key, value) {
+          if (arguments.length > 1) {
+            return set.call(this, key, value);
+          }
+
+          return get.call(this);
+        }]));
+      } else {
+        return Ember.computed.apply(undefined, params.concat([desc.get]));
+      }
+    };
+  }
+
+  exports.computed = computed;
+});
+;define('@ember-decorators/utils/computed', ['exports', '@ember-decorators/utils/decorator', '@ember-decorators/utils/-private'], function (exports, _decorator, _private) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.computedDecorator = computedDecorator;
+  exports.computedDecoratorWithParams = computedDecoratorWithParams;
+  exports.computedDecoratorWithRequiredParams = computedDecoratorWithRequiredParams;
+
+
+  /**
+   * A macro that receives a decorator function which returns a ComputedProperty,
+   * and defines that property using `Ember.defineProperty`. Conceptually, CPs
+   * are custom property descriptors that require Ember's intervention to apply
+   * correctly. In the future, we will use finishers to define the CPs rather than
+   * directly defining them in the decorator function.
+   *
+   * @param {Function} fn - decorator function
+   */
+  function computedDecorator(fn) {
+    return function (target, key, desc, params) {
+      var previousDesc = (0, _private.computedDescriptorFor)(target, key) || desc;
+      var computedDesc = fn(target, key, previousDesc, params);
+
+      (true && !((0, _private.isComputedDescriptor)(computedDesc)) && Ember.assert('computed decorators must return an instance of an Ember ComputedProperty descriptor, received ' + computedDesc, (0, _private.isComputedDescriptor)(computedDesc)));
+
+
+      if (!false) {
+        // Until recent versions of Ember, computed properties would be defined
+        // by just setting them. We need to blow away any predefined properties
+        // (getters/setters, etc.) to allow Ember.defineProperty to work correctly.
+        Object.defineProperty(target, key, {
+          configurable: true,
+          writable: true,
+          enumerable: true,
+          value: undefined
+        });
+      }
+
+      Ember.defineProperty(target, key, computedDesc);
+
+      // There's currently no way to disable redefining the property when decorators
+      // are run, so return the property descriptor we just assigned
+      return Object.getOwnPropertyDescriptor(target, key);
+    };
+  }
+
+  function computedDecoratorWithParams(fn) {
+    return (0, _decorator.decoratorWithParams)(computedDecorator(fn));
+  }
+
+  function computedDecoratorWithRequiredParams(fn) {
+    return (0, _decorator.decoratorWithRequiredParams)(computedDecorator(fn));
+  }
+});
+;define('@ember-decorators/utils/decorator', ['exports'], function (exports) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.decoratorWithParams = decoratorWithParams;
+  exports.decoratorWithRequiredParams = decoratorWithRequiredParams;
+
+  var _typeof = typeof Symbol === "function" && typeof Symbol.iterator === "symbol" ? function (obj) {
+    return typeof obj;
+  } : function (obj) {
+    return obj && typeof Symbol === "function" && obj.constructor === Symbol && obj !== Symbol.prototype ? "symbol" : typeof obj;
+  };
+
+  var _slicedToArray = function () {
+    function sliceIterator(arr, i) {
+      var _arr = [];
+      var _n = true;
+      var _d = false;
+      var _e = undefined;
+
+      try {
+        for (var _i = arr[Symbol.iterator](), _s; !(_n = (_s = _i.next()).done); _n = true) {
+          _arr.push(_s.value);
+
+          if (i && _arr.length === i) break;
+        }
+      } catch (err) {
+        _d = true;
+        _e = err;
+      } finally {
+        try {
+          if (!_n && _i["return"]) _i["return"]();
+        } finally {
+          if (_d) throw _e;
+        }
+      }
+
+      return _arr;
+    }
+
+    return function (arr, i) {
+      if (Array.isArray(arr)) {
+        return arr;
+      } else if (Symbol.iterator in Object(arr)) {
+        return sliceIterator(arr, i);
+      } else {
+        throw new TypeError("Invalid attempt to destructure non-iterable instance");
+      }
+    };
+  }();
+
+  function isDescriptor(possibleDesc) {
+    if (possibleDesc.length === 3) {
+      var _possibleDesc = _slicedToArray(possibleDesc, 3),
+          target = _possibleDesc[0],
+          key = _possibleDesc[1],
+          desc = _possibleDesc[2];
+
+      return (typeof target === 'undefined' ? 'undefined' : _typeof(target)) === 'object' && target !== null && typeof key === 'string' && ((typeof desc === 'undefined' ? 'undefined' : _typeof(desc)) === 'object' && desc !== null && 'enumerable' in desc && 'configurable' in desc || desc === undefined // TS compatibility
+      );
+    }
+
+    return false;
+  }
+
+  /**
+   * A macro that takes a decorator function and allows it to optionally
+   * receive parameters
+   *
+   * ```js
+   * let foo = decoratorWithParams((target, desc, key, params) => {
+   *   console.log(params);
+   * });
+   *
+   * class {
+   *   @foo bar; // undefined
+   *   @foo('bar') baz; // ['bar']
+   * }
+   * ```
+   *
+   * @param {Function} fn - decorator function
+   */
+  function decoratorWithParams(fn) {
+    return function () {
+      for (var _len = arguments.length, params = Array(_len), _key = 0; _key < _len; _key++) {
+        params[_key] = arguments[_key];
+      }
+
+      // determine if user called as @computed('blah', 'blah') or @computed
+      if (isDescriptor(params)) {
+        return fn.apply(undefined, params.concat([[]]));
+      } else {
+        return function (target, key, desc) {
+          return fn(target, key, desc, params);
+        };
+      }
+    };
+  }
+
+  /**
+   * A macro that takes a decorator function and requires it to receive
+   * parameters:
+   *
+   * ```js
+   * let foo = decoratorWithRequiredParams((target, desc, key, params) => {
+   *   console.log(params);
+   * });
+   *
+   * class {
+   *   @foo('bar') baz; // ['bar']
+   *   @foo bar; // Error
+   * }
+   * ```
+   *
+   * @param {Function} fn - decorator function
+   */
+  function decoratorWithRequiredParams(fn) {
+    return function () {
+      for (var _len2 = arguments.length, params = Array(_len2), _key2 = 0; _key2 < _len2; _key2++) {
+        params[_key2] = arguments[_key2];
+      }
+
+      (true && !(!isDescriptor(params)) && Ember.assert('Cannot decorate member \'' + params[1] + '\' without parameters', !isDescriptor(params)));
+
+
+      return function (target, key, desc) {
+        (true && !(params.length > 0) && Ember.assert('Cannot decorate member \'' + key + '\' without parameters', params.length > 0));
+
+
+        return fn(target, key, desc, params);
+      };
+    };
+  }
+});
 ;define('ember-ajax/-private/promise', ['exports'], function (exports) {
   'use strict';
 
@@ -71993,6 +78848,8297 @@ createDeprecatedModule('resolver');
   });
   exports.default = _isFastboot.default ? najax : Ember.$.ajax;
 });
+;define('ember-bootstrap/components/base/bs-accordion', ['exports', 'ember-bootstrap/templates/components/bs-accordion', 'ember-bootstrap/utils/listen-to-cp'], function (exports, _bsAccordion, _listenToCp) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = Ember.Component.extend({
+    layout: _bsAccordion.default,
+    ariaRole: 'tablist',
+
+    /**
+     * The value of the currently selected accordion item. Set this to change selection programmatically.
+     *
+     * When the selection is changed by user interaction this property will not update by using two-way bindings in order
+     * to follow DDAU best practices. If you want to react to such changes, subscribe to the `onChange` action
+     *
+     * @property selected
+     * @public
+     */
+    selected: null,
+
+    /**
+     * The value of the currently selected accordion item
+     *
+     * @property isSelected
+     * @private
+     */
+    isSelected: (0, _listenToCp.default)('selected'),
+
+    /**
+     * Action when the selected accordion item is about to be changed.
+     *
+     * You can return false to prevent changing the active item, and do that in your action by
+     * setting the `selected` accordingly.
+     *
+     * @event onChange
+     * @param newValue
+     * @param oldValue
+     * @public
+     */
+    onChange: function onChange(newValue, oldValue) {},
+    // eslint-disable-line no-unused-vars
+
+    actions: {
+      change: function change(newValue) {
+        var oldValue = this.get('isSelected');
+        if (oldValue === newValue) {
+          newValue = null;
+        }
+        if (this.get('onChange')(newValue, oldValue) !== false) {
+          this.set('isSelected', newValue);
+        }
+      }
+    }
+
+  });
+});
+;define('ember-bootstrap/components/base/bs-accordion/item', ['exports', 'ember-bootstrap/mixins/type-class', 'ember-bootstrap/templates/components/bs-accordion/item'], function (exports, _typeClass, _item) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = Ember.Component.extend(_typeClass.default, {
+    layout: _item.default,
+
+    /**
+     * The title of the accordion item, displayed as a .panel-title element
+     *
+     * @property title
+     * @type string
+     * @public
+     */
+    title: null,
+
+    /**
+     * The value of the accordion item, which is used as the value of the `selected` property of the parent [Components.Accordion](Components.Accordion.html) component
+     *
+     * @property value
+     * @public
+     */
+    value: Ember.computed.oneWay('elementId'),
+
+    /**
+     * @property selected
+     * @private
+     */
+    selected: null,
+
+    /**
+     * @property collapsed
+     * @type boolean
+     * @readonly
+     * @private
+     */
+    collapsed: Ember.computed('value', 'selected', function () {
+      return this.get('value') !== this.get('selected');
+    }).readOnly(),
+
+    /**
+     * @property active
+     * @type boolean
+     * @readonly
+     * @private
+     */
+    active: Ember.computed.not('collapsed'),
+
+    /**
+     * Reference to the parent `Components.Accordion` class.
+     *
+     * @property accordion
+     * @private
+     */
+    accordion: null,
+
+    /**
+     * @event onClick
+     * @public
+     */
+    onClick: function onClick() {}
+  });
+});
+;define('ember-bootstrap/components/base/bs-accordion/item/body', ['exports', 'ember-bootstrap/templates/components/bs-accordion/body'], function (exports, _body) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = Ember.Component.extend({
+    layout: _body.default,
+    tagName: '',
+
+    /**
+     * @property collapsed
+     * @type boolean
+     * @public
+     */
+    collapsed: null
+
+  });
+});
+;define('ember-bootstrap/components/base/bs-accordion/item/title', ['exports', 'ember-bootstrap/templates/components/bs-accordion/title'], function (exports, _title) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = Ember.Component.extend({
+    layout: _title.default,
+    ariaRole: 'tab',
+    classNameBindings: ['collapsed:collapsed:expanded'],
+
+    /**
+     * @property collapsed
+     * @type boolean
+     * @public
+     */
+    collapsed: null,
+
+    /**
+     * @event onClick
+     * @public
+     */
+    onClick: function onClick() {},
+    click: function click(e) {
+      e.preventDefault();
+      this.get('onClick')();
+    }
+  });
+});
+;define('ember-bootstrap/components/base/bs-alert', ['exports', 'ember-bootstrap/mixins/transition-support', 'ember-bootstrap/templates/components/bs-alert', 'ember-bootstrap/mixins/type-class', 'ember-bootstrap/utils/listen-to-cp'], function (exports, _transitionSupport, _bsAlert, _typeClass, _listenToCp) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = Ember.Component.extend(_typeClass.default, _transitionSupport.default, {
+    layout: _bsAlert.default,
+    classNameBindings: ['alert', 'fade', 'dismissible:alert-dismissible'],
+
+    /**
+     * A dismissible alert will have a close button in the upper right corner, that the user can click to dismiss
+     * the alert.
+     *
+     * @property dismissible
+     * @type boolean
+     * @default true
+     * @public
+     */
+    dismissible: true,
+
+    /**
+     * If true the alert is completely hidden. Will be set when the fade animation has finished.
+     *
+     * @property hidden
+     * @type boolean
+     * @default false
+     * @readonly
+     * @private
+     */
+    hidden: false,
+
+    /**
+     * This property controls if the alert should be visible. If false it might still be in the DOM until the fade animation
+     * has completed.
+     *
+     * When the alert is dismissed by user interaction this property will not update by using two-way bindings in order
+     * to follow DDAU best practices. If you want to react to such changes, subscribe to the `onDismiss` action
+     *
+     * @property visible
+     * @type boolean
+     * @default true
+     * @public
+     */
+    visible: true,
+
+    /**
+     * @property _visible
+     * @private
+     */
+    _visible: (0, _listenToCp.default)('visible'),
+
+    /**
+     * @property notVisible
+     * @private
+     */
+    notVisible: Ember.computed.not('_visible'),
+
+    /**
+     * Set to false to disable the fade out animation when hiding the alert.
+     *
+     * @property fade
+     * @type boolean
+     * @default true
+     * @public
+     */
+    fade: true,
+
+    /**
+     * Computed property to set the alert class to the component div. Will be false when dismissed to have the component
+     * div (which cannot be removed form DOM by the component itself) without any markup.
+     *
+     * @property alert
+     * @type boolean
+     * @private
+     */
+    alert: Ember.computed.not('hidden'),
+    showAlert: Ember.computed.and('_visible', 'fade'),
+
+    /**
+     * @property classTypePrefix
+     * @type String
+     * @default 'alert'
+     * @private
+     */
+    classTypePrefix: 'alert',
+
+    /**
+     * The duration of the fade out animation
+     *
+     * @property fadeDuration
+     * @type number
+     * @default 150
+     * @public
+     */
+    fadeDuration: 150,
+
+    /**
+     * The action to be sent after the alert has been dismissed (including the CSS transition).
+     *
+     * @event onDismissed
+     * @public
+     */
+    onDismissed: function onDismissed() {},
+
+
+    /**
+     * The action is called when the close button is clicked.
+     *
+     * You can return false to prevent closing the alert automatically, and do that in your action by
+     * setting `visible` to false.
+     *
+     * @event onDismiss
+     * @public
+     */
+    onDismiss: function onDismiss() {},
+
+
+    actions: {
+      dismiss: function dismiss() {
+        if (this.get('onDismiss')() !== false) {
+          this.set('_visible', false);
+        }
+      }
+    },
+
+    /**
+     * Call to make the alert visible again after it has been hidden
+     *
+     * @method show
+     * @private
+     */
+    show: function show() {
+      this.set('hidden', false);
+    },
+
+
+    /**
+     * Call to hide the alert. If the `fade` property is true, this will fade out the alert before being finally
+     * dismissed.
+     *
+     * @method hide
+     * @private
+     */
+    hide: function hide() {
+      if (this.get('usesTransition')) {
+        Ember.run.later(this, function () {
+          if (!this.get('isDestroyed')) {
+            this.set('hidden', true);
+            this.get('onDismissed')();
+          }
+        }, this.get('fadeDuration'));
+      } else {
+        this.set('hidden', true);
+        this.get('onDismissed')();
+      }
+    },
+    init: function init() {
+      this._super.apply(this, arguments);
+      this.set('hidden', !this.get('_visible'));
+    },
+
+
+    _observeIsVisible: Ember.observer('_visible', function () {
+      if (this.get('_visible')) {
+        this.show();
+      } else {
+        this.hide();
+      }
+    })
+  });
+});
+;define('ember-bootstrap/components/base/bs-button-group', ['exports', 'ember-bootstrap/templates/components/bs-button-group', 'ember-bootstrap/mixins/size-class'], function (exports, _bsButtonGroup, _sizeClass) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = Ember.Component.extend(_sizeClass.default, {
+    layout: _bsButtonGroup.default,
+    ariaRole: 'group',
+    classNameBindings: ['vertical:btn-group-vertical:btn-group', 'justified:btn-group-justified'],
+
+    /**
+     * @property classTypePrefix
+     * @type String
+     * @default 'btn-group'
+     * @protected
+     */
+    classTypePrefix: 'btn-group',
+
+    /**
+     * Set to true for a vertically stacked button group, see http://getbootstrap.com/components/#btn-groups-vertical
+     *
+     * @property vertical
+     * @type boolean
+     * @default false
+     * @public
+     */
+    vertical: false,
+
+    /**
+     * Set to true for the buttons to stretch at equal sizes to span the entire width of its parent.
+     *
+     * *Important*: You have to wrap every button component in a `div class="btn-group">`:
+     *
+     * ```handlebars
+     * <div class="btn-group" role="group">
+     * {{#bs-button}}My Button{{/bs-button}}
+     * </div>
+     * ```
+     *
+     * See http://getbootstrap.com/components/#btn-groups-justified
+     *
+     * @property justified
+     * @type boolean
+     * @default false
+     * @public
+     */
+    justified: false,
+
+    /**
+     * The type of the button group specifies how child buttons behave and how the `value` property will be computed:
+     *
+     * ### null
+     * If `type` is not set (null), the button group will add no functionality besides Bootstrap styling
+     *
+     * ### radio
+     * if `type` is set to "radio", the buttons will behave like radio buttons:
+     * * the `value` property of the button group will reflect the `value` property of the active button
+     * * thus only one button may be active
+     *
+     * ### checkbox
+     * if `type` is set to "checkbox", the buttons will behave like checkboxes:
+     * * any number of buttons may be active
+     * * the `value` property of the button group will be an array containing the `value` properties of all active buttons
+     *
+     * @property type
+     * @type string
+     * @default null
+     * @public
+     */
+    type: null,
+
+    /**
+     * The value of the button group, computed by its child buttons.
+     * See the `type` property for how the value property is constructed.
+     *
+     * When you set the value, the corresponding buttons will be activated:
+     * * use a single value for a radio button group to activate the button with the same value
+     * * use an array of values for a checkbox button group to activate all the buttons with values contained in the array
+     *
+     * @property value
+     * @type array
+     * @public
+     */
+    value: undefined,
+
+    /**
+     * @property isRadio
+     * @type boolean
+     * @private
+     */
+    isRadio: Ember.computed.equal('type', 'radio').readOnly(),
+
+    /**
+     * This action is called whenever the button group's value should be changed because the user clicked a button.
+     * You will receive the new value of the button group (based on the `type` property), which you should use to update the
+     * `value` property.
+     *
+     * @event onChange
+     * @param {*} value
+     * @public
+     */
+    onChange: function onChange() {},
+
+
+    actions: {
+      buttonPressed: function buttonPressed(pressedValue) {
+        var newValue = Ember.copy(this.get('value'));
+
+        if (this.get('isRadio')) {
+          if (newValue !== pressedValue) {
+            newValue = pressedValue;
+          }
+        } else {
+          if (!Ember.isArray(newValue)) {
+            newValue = Ember.A([pressedValue]);
+          } else {
+            newValue = Ember.A(newValue);
+            if (newValue.includes(pressedValue)) {
+              newValue.removeObject(pressedValue);
+            } else {
+              newValue.pushObject(pressedValue);
+            }
+          }
+        }
+
+        this.get('onChange')(newValue);
+      }
+    }
+  });
+});
+;define('ember-bootstrap/components/base/bs-button-group/button', ['exports', 'ember-bootstrap/components/bs-button'], function (exports, _bsButton) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = _bsButton.default.extend({
+
+    /**
+     * @property groupValue
+     * @private
+     */
+    groupValue: null,
+
+    /**
+     * @property buttonGroupType
+     * @type string
+     * @private
+     */
+    buttonGroupType: false,
+
+    /**
+     * @property active
+     * @type boolean
+     * @readonly
+     * @private
+     */
+    active: Ember.computed('buttonGroupType', 'groupValue.[]', 'value', function () {
+      var _getProperties = this.getProperties('value', 'groupValue'),
+          value = _getProperties.value,
+          groupValue = _getProperties.groupValue;
+
+      if (this.get('buttonGroupType') === 'radio') {
+        return value === groupValue;
+      } else {
+        if (Ember.isArray(groupValue)) {
+          return groupValue.indexOf(value) !== -1;
+        }
+      }
+      return false;
+    }).readOnly()
+
+  });
+});
+;define('ember-bootstrap/components/base/bs-button', ['exports', 'ember-bootstrap/templates/components/bs-button', 'ember-bootstrap/mixins/type-class', 'ember-bootstrap/mixins/size-class'], function (exports, _bsButton, _typeClass, _sizeClass) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = Ember.Component.extend(_typeClass.default, _sizeClass.default, {
+    layout: _bsButton.default,
+    tagName: 'button',
+    classNames: ['btn'],
+    classNameBindings: ['active', 'block:btn-block'],
+
+    /**
+     * @property classTypePrefix
+     * @type String
+     * @default 'btn'
+     * @private
+     */
+    classTypePrefix: 'btn',
+
+    attributeBindings: ['disabled', 'buttonType:type', 'title'],
+
+    /**
+     * Default label of the button. Not need if used as a block component
+     *
+     * @property defaultText
+     * @type string
+     * @public
+     */
+    defaultText: null,
+
+    /**
+     * Property to disable the button
+     *
+     * @property disabled
+     * @type boolean
+     * @default false
+     * @public
+     */
+    disabled: false,
+
+    /**
+     * Set the type of the button, either 'button' or 'submit'
+     *
+     * @property buttonType
+     * @type String
+     * @default 'button'
+     * @public
+     */
+    buttonType: 'button',
+
+    /**
+     * Set the 'active' class to apply active/pressed CSS styling
+     *
+     * @property active
+     * @type boolean
+     * @default false
+     * @public
+     */
+    active: false,
+
+    /**
+     * Property for block level buttons
+     *
+     * See the [Bootstrap docs](http://getbootstrap.com/css/#buttons-sizes)
+     * @property block
+     * @type boolean
+     * @default false
+     * @public
+     */
+    block: false,
+
+    /**
+     * A click event on a button will not bubble up the DOM tree if it has an `onClick` action handler. Set to true to
+     * enable the event to bubble
+     *
+     * @property bubble
+     * @type boolean
+     * @default false
+     * @public
+     */
+    bubble: false,
+
+    /**
+     * If button is active and this is set, the icon property will match this property
+     *
+     * @property iconActive
+     * @type String
+     * @public
+     */
+    iconActive: null,
+
+    /**
+     * If button is inactive and this is set, the icon property will match this property
+     *
+     * @property iconInactive
+     * @type String
+     * @public
+     */
+    iconInactive: null,
+
+    /**
+     * Class(es) (e.g. glyphicons or font awesome) to use as a button icon
+     * This will render a <i class="{{icon}}"></i> element in front of the button's label
+     *
+     * @property icon
+     * @type String
+     * @readonly
+     * @protected
+     */
+    icon: Ember.computed('active', function () {
+      if (this.get('active')) {
+        return this.get('iconActive');
+      } else {
+        return this.get('iconInactive');
+      }
+    }),
+
+    /**
+     * Supply a value that will be associated with this button. This will be send
+     * as a parameter of the default action triggered when clicking the button
+     *
+     * @property value
+     * @type any
+     * @public
+     */
+    value: null,
+
+    /**
+     * State of the button. The button's label (if not used as a block component) will be set to the
+     * `<state>Text` property.
+     * This property will automatically be set when using a click action that supplies the callback with an promise
+     *
+     * @property textState
+     * @type String
+     * @default 'default'
+     * @protected
+     */
+    textState: 'default',
+
+    /**
+     * Set this to true to reset the state. A typical use case is to bind this attribute with ember-data isDirty flag.
+     *
+     * @property reset
+     * @type boolean
+     * @public
+     */
+    reset: null,
+
+    /**
+     * The HTML title attribute
+     *
+     * @property title
+     * @type string
+     * @public
+     */
+    title: null,
+
+    /**
+     * When clicking the button this action is called with the value of the button (that is the value of the "value" property).
+     * Return a promise object, and the buttons state will automatically set to "pending", "resolved" and/or "rejected".
+     *
+     * The click event will not bubble up, unless you set `bubble` to true.
+     *
+     * @event onClick
+     * @param {*} value
+     * @public
+     */
+    onClick: null,
+
+    /**
+     * This will reset the state property to 'default', and with that the button's label to defaultText
+     *
+     * @method resetState
+     * @protected
+     */
+    resetState: function resetState() {
+      this.set('textState', 'default');
+    },
+
+
+    resetObserver: Ember.observer('reset', function () {
+      if (this.get('reset')) {
+        Ember.run.scheduleOnce('actions', this, function () {
+          this.set('textState', 'default');
+        });
+      }
+    }),
+
+    text: Ember.computed('textState', 'defaultText', 'pendingText', 'resolvedText', 'rejectedText', function () {
+      return this.getWithDefault(this.get('textState') + 'Text', this.get('defaultText'));
+    }),
+
+    /**
+     * @method click
+     * @private
+     */
+    click: function click() {
+      var _this = this;
+
+      var action = this.get('onClick');
+      if (action !== null) {
+        var promise = action(this.get('value'));
+        if (promise && typeof promise.then === 'function' && !this.get('isDestroyed')) {
+          this.set('textState', 'pending');
+          promise.then(function () {
+            if (!_this.get('isDestroyed')) {
+              _this.set('textState', 'resolved');
+            }
+          }, function () {
+            if (!_this.get('isDestroyed')) {
+              _this.set('textState', 'rejected');
+            }
+          });
+        }
+        return this.get('bubble');
+      }
+    },
+    init: function init() {
+      this._super.apply(this, arguments);
+      this.get('reset');
+    }
+  });
+});
+;define('ember-bootstrap/components/base/bs-carousel', ['exports', 'ember-bootstrap/components/bs-carousel/slide', 'ember-bootstrap/mixins/component-parent', 'ember-bootstrap/templates/components/bs-carousel', 'ember-concurrency'], function (exports, _slide, _componentParent, _bsCarousel, _emberConcurrency) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+
+  function _toConsumableArray(arr) {
+    if (Array.isArray(arr)) {
+      for (var i = 0, arr2 = Array(arr.length); i < arr.length; i++) {
+        arr2[i] = arr[i];
+      }
+
+      return arr2;
+    } else {
+      return Array.from(arr);
+    }
+  }
+
+  exports.default = Ember.Component.extend(_componentParent.default, {
+    attributeBindings: ['tabindex'],
+    classNames: ['carousel', 'slide'],
+    layout: _bsCarousel.default,
+    tabindex: '1',
+
+    /**
+     * If a slide can turn to left, including corners.
+     *
+     * @private
+     * @property canTurnToLeft
+     */
+    canTurnToLeft: Ember.computed('wrap', 'currentIndex', function () {
+      return this.get('wrap') || this.get('currentIndex') > 0;
+    }),
+
+    /**
+     * If a slide can turn to right, including corners.
+     *
+     * @private
+     * @property canTurnToRight
+     */
+    canTurnToRight: Ember.computed('childSlides.length', 'wrap', 'currentIndex', function () {
+      return this.get('wrap') || this.get('currentIndex') < this.get('childSlides.length') - 1;
+    }),
+
+    /**
+     * All `CarouselSlide` child components.
+     *
+     * @private
+     * @property childSlides
+     * @readonly
+     * @type array
+     */
+    childSlides: Ember.computed.filter('children', function (view) {
+      return view instanceof _slide.default;
+    }).readOnly(),
+
+    /**
+     * This observer is the entry point for real time insertion and removing of slides.
+     *
+     * @private
+     * @property childSlidesObserver
+     */
+    childSlidesObserver: Ember.observer('childSlides.[]', 'autoPlay', function () {
+      var _this = this;
+
+      Ember.run.scheduleOnce('actions', function () {
+        var childSlides = _this.get('childSlides');
+        if (childSlides.length === 0) {
+          return;
+        }
+        // Sets new current index
+        var currentIndex = _this.get('currentIndex');
+        if (currentIndex >= childSlides.length) {
+          currentIndex = childSlides.length - 1;
+          _this.set('currentIndex', currentIndex);
+        }
+        // Automatic sliding
+        if (_this.get('autoPlay')) {
+          _this.get('waitIntervalToInitCycle').perform();
+        }
+        // Initial slide state
+        _this.set('presentationState', null);
+      });
+    }),
+
+    /**
+     * Indicates the current index of the current slide.
+     *
+     * @property currentIndex
+     * @private
+     */
+    currentIndex: null,
+
+    /**
+     * The current slide object that is going to be used by the nested slides components.
+     *
+     * @property currentSlide
+     * @private
+     *
+     */
+    currentSlide: Ember.computed('childSlides', 'currentIndex', function () {
+      return this.get('childSlides').objectAt(this.get('currentIndex'));
+    }).readOnly(),
+
+    /**
+     * Bootstrap style to indicate that a given slide should be moving to left/right.
+     *
+     * @property directionalClassName
+     * @private
+     * @type string
+     */
+    directionalClassName: null,
+
+    /**
+     * Indicates the next slide index to move into.
+     *
+     * @property followingIndex
+     * @private
+     * @type number
+     */
+    followingIndex: null,
+
+    /**
+     * The following slide object that is going to be used by the nested slides components.
+     *
+     * @property followingIndex
+     * @private
+     */
+    followingSlide: Ember.computed('childSlides', 'followingIndex', function () {
+      return this.get('childSlides').objectAt(this.get('followingIndex'));
+    }).readOnly(),
+
+    /**
+     * @private
+     * @property hasInterval
+     * @type boolean
+     */
+    hasInterval: Ember.computed.gt('interval', 0).readOnly(),
+
+    /**
+     * This observer is the entry point for programmatically slide changing.
+     *
+     * @property indexObserver
+     * @private
+     */
+    indexObserver: Ember.observer('index', function () {
+      this.send('toSlide', this.get('index'));
+    }),
+
+    /**
+     * @property indicators
+     * @private
+     */
+    indicators: Ember.computed('childSlides.length', function () {
+      return [].concat(_toConsumableArray(Array(this.get('childSlides.length'))));
+    }),
+
+    /**
+     * If user is hovering its cursor on component.
+     * This property is only manipulated when 'pauseOnMouseEnter' is true.
+     *
+     * @property isMouseHovering
+     * @private
+     * @type boolean
+     */
+    isMouseHovering: false,
+
+    /**
+     * The class name to append to the next control link element.
+     *
+     * @property nextControlClassName
+     * @type string
+     * @private
+     */
+    nextControlClassName: null,
+
+    /**
+     * Bootstrap style to indicate the next/previous slide.
+     *
+     * @property orderClassName
+     * @private
+     * @type string
+     */
+    orderClassName: null,
+
+    /**
+     * The current state of the current presentation, can be either "didTransition"
+     * or "willTransit".
+     *
+     * @private
+     * @property presentationState
+     * @type string
+     */
+    presentationState: null,
+
+    /**
+     * The class name to append to the previous control link element.
+     *
+     * @property prevControlClassName
+     * @type string
+     * @private
+     */
+    prevControlClassName: null,
+
+    /**
+     * @private
+     * @property shouldNotDoPresentation
+     * @type boolean
+     */
+    shouldNotDoPresentation: Ember.computed.lte('childSlides.length', 1),
+
+    /**
+     * @private
+     * @property shouldRunAutomatically
+     * @type boolean
+     */
+    shouldRunAutomatically: Ember.computed.readOnly('hasInterval'),
+
+    /**
+     * Starts automatic sliding on page load.
+     * This parameter has no effect if interval is less than or equal to zero.
+     *
+     * @default false
+     * @property autoPlay
+     * @public
+     * @type boolean
+     */
+    autoPlay: false,
+
+    /**
+     * If false will hard stop on corners, i.e., first slide won't make a transition to the
+     * last slide and vice versa.
+     *
+     * @default true
+     * @property wrap
+     * @public
+     * @type boolean
+     */
+    wrap: true,
+
+    /**
+     * Index of starting slide.
+     *
+     * @default 0
+     * @property index
+     * @public
+     * @type number
+     */
+    index: 0,
+
+    /**
+     * Waiting time before automatically show another slide.
+     * Automatic sliding is canceled if interval is less than or equal to zero.
+     *
+     * @default 5000
+     * @property interval
+     * @public
+     * @type number
+     */
+    interval: 5000,
+
+    /**
+     * Should bind keyboard events into sliding.
+     *
+     * @default true
+     * @property keyboard
+     * @public
+     * @type boolean
+     */
+    keyboard: true,
+
+    /**
+     * If automatic sliding should be left-to-right or right-to-left.
+     * This parameter has no effect if interval is less than or equal to zero.
+     *
+     * @default true
+     * @property ltr
+     * @public
+     * @type boolean
+     */
+    ltr: true,
+
+    /**
+     * The next control icon to be displayed.
+     *
+     * @default null
+     * @property nextControlIcon
+     * @type string
+     * @public
+     */
+    nextControlIcon: null,
+
+    /**
+     * Label for screen readers, defaults to 'Next'.
+     *
+     * @default 'Next'
+     * @property nextControlLabel
+     * @type string
+     * @public
+     */
+    nextControlLabel: 'Next',
+
+    /**
+     * Pauses automatic sliding if mouse cursor is hovering the component.
+     * This parameter has no effect if interval is less than or equal to zero.
+     *
+     * @default true
+     * @property pauseOnMouseEnter
+     * @public
+     * @type boolean
+     */
+    pauseOnMouseEnter: true,
+
+    /**
+     * The previous control icon to be displayed.
+     *
+     * @default null
+     * @property prevControlIcon
+     * @type string
+     * @public
+     */
+    prevControlIcon: null,
+
+    /**
+     * Label for screen readers, defaults to 'Previous'.
+     *
+     * @default 'Previous'
+     * @property prevControlLabel
+     * @type string
+     * @public
+     */
+    prevControlLabel: 'Previous',
+
+    /**
+     * Show or hide controls.
+     *
+     * @default true
+     * @property showControls
+     * @public
+     * @type boolean
+     */
+    showControls: true,
+
+    /**
+     * Show or hide indicators.
+     *
+     * @default true
+     * @property showIndicators
+     * @public
+     * @type boolean
+     */
+    showIndicators: true,
+
+    /**
+     * The duration of the slide transition.
+     * You should also change this parameter in Bootstrap CSS file.
+     *
+     * @default 600
+     * @property transitionDuration
+     * @public
+     * @type number
+     */
+    transitionDuration: 600,
+
+    /**
+     * Do a presentation and calls itself to perform a cycle.
+     *
+     * @method cycle
+     * @private
+     */
+    cycle: (0, _emberConcurrency.task)( /*#__PURE__*/regeneratorRuntime.mark(function _callee() {
+      return regeneratorRuntime.wrap(function _callee$(_context) {
+        while (1) {
+          switch (_context.prev = _context.next) {
+            case 0:
+              _context.next = 2;
+              return this.get('transition').perform();
+
+            case 2:
+              _context.next = 4;
+              return (0, _emberConcurrency.timeout)(this.get('interval'));
+
+            case 4:
+              this.toAppropriateSlide();
+
+            case 5:
+            case 'end':
+              return _context.stop();
+          }
+        }
+      }, _callee, this);
+    })).restartable(),
+
+    /**
+     * @method transition
+     * @private
+     */
+    transition: (0, _emberConcurrency.task)( /*#__PURE__*/regeneratorRuntime.mark(function _callee2() {
+      var _this2 = this;
+
+      return regeneratorRuntime.wrap(function _callee2$(_context2) {
+        while (1) {
+          switch (_context2.prev = _context2.next) {
+            case 0:
+              this.set('presentationState', 'willTransit');
+              _context2.next = 3;
+              return (0, _emberConcurrency.timeout)(this.get('transitionDuration'));
+
+            case 3:
+              this.set('presentationState', 'didTransition');
+              // Must change current index after execution of 'presentationStateObserver' method
+              // from child components.
+              _context2.next = 6;
+              return new Ember.RSVP.Promise(function (resolve) {
+                Ember.run.schedule('afterRender', _this2, function () {
+                  this.set('currentIndex', this.get('followingIndex'));
+                  resolve();
+                });
+              });
+
+            case 6:
+            case 'end':
+              return _context2.stop();
+          }
+        }
+      }, _callee2, this);
+    })).drop(),
+
+    /**
+     * Waits an interval time to start a cycle.
+     *
+     * @method waitIntervalToInitCycle
+     * @private
+     */
+    waitIntervalToInitCycle: (0, _emberConcurrency.task)( /*#__PURE__*/regeneratorRuntime.mark(function _callee3() {
+      return regeneratorRuntime.wrap(function _callee3$(_context3) {
+        while (1) {
+          switch (_context3.prev = _context3.next) {
+            case 0:
+              if (!(this.get('shouldRunAutomatically') === false)) {
+                _context3.next = 2;
+                break;
+              }
+
+              return _context3.abrupt('return');
+
+            case 2:
+              _context3.next = 4;
+              return (0, _emberConcurrency.timeout)(this.get('interval'));
+
+            case 4:
+              this.toAppropriateSlide();
+
+            case 5:
+            case 'end':
+              return _context3.stop();
+          }
+        }
+      }, _callee3, this);
+    })).restartable(),
+
+    actions: {
+      toSlide: function toSlide(toIndex) {
+        if (this.get('currentIndex') === toIndex || this.get('shouldNotDoPresentation')) {
+          return;
+        }
+        this.assignClassNameControls(toIndex);
+        this.setFollowingIndex(toIndex);
+        if (this.get('shouldRunAutomatically') === false || this.get('isMouseHovering')) {
+          this.get('transition').perform();
+        } else {
+          this.get('cycle').perform();
+        }
+      },
+      toNextSlide: function toNextSlide() {
+        if (this.get('canTurnToRight')) {
+          this.send('toSlide', this.get('currentIndex') + 1);
+        }
+      },
+      toPrevSlide: function toPrevSlide() {
+        if (this.get('canTurnToLeft')) {
+          this.send('toSlide', this.get('currentIndex') - 1);
+        }
+      }
+    },
+
+    /**
+     * Indicates what class names should be applicable to the current transition slides.
+     *
+     * @method assignClassNameControls
+     * @private
+     */
+    assignClassNameControls: function assignClassNameControls(toIndex) {
+      if (toIndex < this.get('currentIndex')) {
+        this.set('directionalClassName', 'right');
+        this.set('orderClassName', 'prev');
+      } else {
+        this.set('directionalClassName', 'left');
+        this.set('orderClassName', 'next');
+      }
+    },
+
+
+    /**
+     * Initial page loading configuration.
+     */
+    didInsertElement: function didInsertElement() {
+      this._super.apply(this, arguments);
+      this.registerEvents();
+      this.set('currentIndex', this.get('index'));
+      this.triggerChildSlidesObserver();
+    },
+
+
+    /**
+     * mouseEnter() and mouseLeave() doesn't work with ember-native-dom-event-dispatcher.
+     *
+     * @method registerEvents
+     * @private
+     */
+    registerEvents: function registerEvents() {
+      var self = this;
+      this.element.addEventListener('mouseenter', function () {
+        if (self.get('pauseOnMouseEnter')) {
+          self.set('isMouseHovering', true);
+          self.get('cycle').cancelAll();
+          self.get('waitIntervalToInitCycle').cancelAll();
+        }
+      });
+      this.element.addEventListener('mouseleave', function () {
+        if (self.get('pauseOnMouseEnter') && (self.get('transition.last') !== null || self.get('waitIntervalToInitCycle.last') !== null)) {
+          self.set('isMouseHovering', false);
+          self.get('waitIntervalToInitCycle').perform();
+        }
+      });
+    },
+
+
+    keyDown: function keyDown(e) {
+      var code = e.keyCode || e.which;
+      if (this.get('keyboard') === false || /input|textarea/i.test(e.target.tagName)) {
+        return;
+      }
+      switch (code) {
+        case 37:
+          this.send('toPrevSlide');
+          break;
+        case 39:
+          this.send('toNextSlide');
+          break;
+        default:
+          break;
+      }
+    },
+
+    /**
+     * Sets the following slide index within the lower and upper bounds.
+     *
+     * @method setFollowingIndex
+     * @private
+     */
+    setFollowingIndex: function setFollowingIndex(toIndex) {
+      var slidesLengthMinusOne = this.get('childSlides').length - 1;
+      if (toIndex > slidesLengthMinusOne) {
+        this.set('followingIndex', 0);
+      } else if (toIndex < 0) {
+        this.set('followingIndex', slidesLengthMinusOne);
+      } else {
+        this.set('followingIndex', toIndex);
+      }
+    },
+
+
+    /**
+     * Coordinates the correct slide movement direction.
+     *
+     * @method toAppropriateSlide
+     * @private
+     */
+    toAppropriateSlide: function toAppropriateSlide() {
+      if (this.get('ltr')) {
+        this.send('toNextSlide');
+      } else {
+        this.send('toPrevSlide');
+      }
+    },
+
+
+    /**
+     * @method triggerChildSlidesObserver
+     * @private
+     */
+    triggerChildSlidesObserver: function triggerChildSlidesObserver() {
+      this.get('childSlides');
+    }
+  });
+});
+;define('ember-bootstrap/components/base/bs-carousel/slide', ['exports', 'ember-bootstrap/mixins/component-child', 'ember-bootstrap/templates/components/bs-carousel/slide'], function (exports, _componentChild, _slide) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = Ember.Component.extend(_componentChild.default, {
+    classNameBindings: ['active'],
+    layout: _slide.default,
+
+    /**
+     * Defines slide visibility.
+     *
+     * @property active
+     * @type boolean
+     * @private
+     */
+    active: Ember.computed('isCurrentSlide', 'presentationState', function () {
+      return this.get('isCurrentSlide') && this.get('presentationState') === null;
+    }),
+
+    /**
+     * @private
+     * @property isCurrentSlide
+     * @type boolean
+     */
+    isCurrentSlide: Ember.computed('currentSlide', function () {
+      return this.get('currentSlide') === this;
+    }).readOnly(),
+
+    /**
+     * @private
+     * @property isFollowingSlide
+     * @type boolean
+     */
+    isFollowingSlide: Ember.computed('followingSlide', function () {
+      return this.get('followingSlide') === this;
+    }).readOnly(),
+
+    /**
+     * Slide is moving to the left.
+     *
+     * @property left
+     * @type boolean
+     * @private
+     */
+    left: false,
+
+    /**
+     * Next to appear in a left sliding.
+     *
+     * @property next
+     * @type boolean
+     * @private
+     */
+    next: false,
+
+    /**
+     * Next to appear in a right sliding.
+     *
+     * @property prev
+     * @type boolean
+     * @private
+     */
+    prev: false,
+
+    /**
+     * Slide is moving to the right.
+     *
+     * @property right
+     * @type boolean
+     * @private
+     */
+    right: false,
+
+    /**
+     * Coordinates the execution of a presentation.
+     *
+     * @method presentationStateObserver
+     * @private
+     */
+    presentationStateObserver: Ember.observer('presentationState', function () {
+      var presentationState = this.get('presentationState');
+      if (this.get('isCurrentSlide')) {
+        switch (presentationState) {
+          case 'didTransition':
+            this.currentSlideDidTransition();
+            break;
+          case 'willTransit':
+            this.currentSlideWillTransit();
+            break;
+        }
+      }
+      if (this.get('isFollowingSlide')) {
+        switch (presentationState) {
+          case 'didTransition':
+            this.followingSlideDidTransition();
+            break;
+          case 'willTransit':
+            this.followingSlideWillTransit();
+            break;
+        }
+      }
+    }),
+
+    /**
+     * @method currentSlideDidTransition
+     * @private
+     */
+    currentSlideDidTransition: function currentSlideDidTransition() {
+      this.set(this.get('directionalClassName'), false);
+      this.set('active', false);
+    },
+
+
+    /**
+     * @method currentSlideWillTransit
+     * @private
+     */
+    currentSlideWillTransit: function currentSlideWillTransit() {
+      this.set('active', true);
+      Ember.run.next(this, function () {
+        this.set(this.get('directionalClassName'), true);
+      });
+    },
+
+
+    /**
+     * @method followingSlideDidTransition
+     * @private
+     */
+    followingSlideDidTransition: function followingSlideDidTransition() {
+      this.set('active', true);
+      this.set(this.get('directionalClassName'), false);
+      this.set(this.get('orderClassName'), false);
+    },
+
+
+    /**
+     * @method followingSlideWillTransit
+     * @private
+     */
+    followingSlideWillTransit: function followingSlideWillTransit() {
+      this.set(this.get('orderClassName'), true);
+      Ember.run.next(this, function () {
+        this.reflow();
+        this.set(this.get('directionalClassName'), true);
+      });
+    },
+
+
+    /**
+     * Makes things more stable, especially when fast changing.
+     */
+    reflow: function reflow() {
+      this.element.offsetHeight;
+    }
+  });
+});
+;define('ember-bootstrap/components/base/bs-collapse', ['exports', 'ember-bootstrap/utils/transition-end'], function (exports, _transitionEnd) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = Ember.Component.extend({
+
+    classNameBindings: ['collapse', 'collapsing'],
+    attributeBindings: ['style'],
+
+    /**
+     * Collapsed/expanded state
+     *
+     * @property collapsed
+     * @type boolean
+     * @default true
+     * @public
+     */
+    collapsed: true,
+
+    /**
+     * True if this item is expanded
+     *
+     * @property active
+     * @private
+     */
+    active: false,
+
+    collapse: Ember.computed.not('transitioning'),
+    collapsing: Ember.computed.alias('transitioning'),
+    showContent: Ember.computed.and('collapse', 'active'),
+
+    /**
+     * true if the component is currently transitioning
+     *
+     * @property transitioning
+     * @type boolean
+     * @private
+     */
+    transitioning: false,
+
+    /**
+     * @property collapseSize
+     * @type number
+     * @private
+     */
+    collapseSize: null,
+
+    /**
+     * The size of the element when collapsed. Defaults to 0.
+     *
+     * @property collapsedSize
+     * @type number
+     * @default 0
+     * @public
+     */
+    collapsedSize: 0,
+
+    /**
+     * The size of the element when expanded. When null the value is calculated automatically to fit the containing elements.
+     *
+     * @property expandedSize
+     * @type number
+     * @default null
+     * @public
+     */
+    expandedSize: null,
+
+    /**
+     * Usually the size (height) of the element is only set while transitioning, and reseted afterwards. Set to true to always set a size.
+     *
+     * @property resetSizeWhenNotCollapsing
+     * @type boolean
+     * @default true
+     * @private
+     */
+    resetSizeWhenNotCollapsing: true,
+
+    /**
+     * The direction (height/width) of the collapse animation.
+     * When setting this to 'width' you should also define custom CSS transitions for the width property, as the Bootstrap
+     * CSS does only support collapsible elements for the height direction.
+     *
+     * @property collapseDimension
+     * @type string
+     * @default 'height'
+     * @public
+     */
+    collapseDimension: 'height',
+
+    /**
+     * The duration of the fade transition
+     *
+     * @property transitionDuration
+     * @type number
+     * @default 350
+     * @public
+     */
+    transitionDuration: 350,
+
+    style: Ember.computed('collapseSize', function () {
+      var size = this.get('collapseSize');
+      var dimension = this.get('collapseDimension');
+      if (Ember.isEmpty(size)) {
+        return Ember.String.htmlSafe('');
+      }
+      return Ember.String.htmlSafe(dimension + ': ' + size + 'px');
+    }),
+
+    /**
+     * The action to be sent when the element is about to be hidden.
+     *
+     * @event onHide
+     * @public
+     */
+    onHide: function onHide() {},
+
+
+    /**
+     * The action to be sent after the element has been completely hidden (including the CSS transition).
+     *
+     * @event onHidden
+     * @public
+     */
+    onHidden: function onHidden() {},
+
+
+    /**
+     * The action to be sent when the element is about to be shown.
+     *
+     * @event onShow
+     * @public
+     */
+    onShow: function onShow() {},
+
+
+    /**
+     * The action to be sent after the element has been completely shown (including the CSS transition).
+     *
+     * @event onShown
+     * @public
+     */
+    onShown: function onShown() {},
+
+
+    /**
+     * Triggers the show transition
+     *
+     * @method show
+     * @protected
+     */
+    show: function show() {
+      var complete = function complete() {
+        if (this.get('isDestroyed')) {
+          return;
+        }
+        this.set('transitioning', false);
+        if (this.get('resetSizeWhenNotCollapsing')) {
+          this.set('collapseSize', null);
+        }
+        this.get('onShown')();
+      };
+
+      this.get('onShow')();
+
+      this.setProperties({
+        transitioning: true,
+        collapseSize: this.get('collapsedSize'),
+        active: true
+      });
+
+      (0, _transitionEnd.default)(this.get('element'), complete, this, this.get('transitionDuration'));
+
+      Ember.run.next(this, function () {
+        if (!this.get('isDestroyed')) {
+          this.set('collapseSize', this.getExpandedSize('show'));
+        }
+      });
+    },
+
+
+    /**
+     * Get the size of the element when expanded
+     *
+     * @method getExpandedSize
+     * @param action
+     * @return {Number}
+     * @private
+     */
+    getExpandedSize: function getExpandedSize(action) {
+      var expandedSize = this.get('expandedSize');
+      if (Ember.isPresent(expandedSize)) {
+        return expandedSize;
+      }
+
+      var collapseElement = this.get('element');
+      var prefix = action === 'show' ? 'scroll' : 'offset';
+      var measureProperty = Ember.String.camelize(prefix + '-' + this.get('collapseDimension'));
+      return collapseElement[measureProperty];
+    },
+
+
+    /**
+     * Triggers the hide transition
+     *
+     * @method hide
+     * @protected
+     */
+    hide: function hide() {
+
+      var complete = function complete() {
+        if (this.get('isDestroyed')) {
+          return;
+        }
+        this.set('transitioning', false);
+        if (this.get('resetSizeWhenNotCollapsing')) {
+          this.set('collapseSize', null);
+        }
+        this.get('onHidden')();
+      };
+
+      this.get('onHide')();
+
+      this.setProperties({
+        transitioning: true,
+        collapseSize: this.getExpandedSize('hide'),
+        active: false
+      });
+
+      (0, _transitionEnd.default)(this.get('element'), complete, this, this.get('transitionDuration'));
+
+      Ember.run.next(this, function () {
+        if (!this.get('isDestroyed')) {
+          this.set('collapseSize', this.get('collapsedSize'));
+        }
+      });
+    },
+
+
+    _onCollapsedChange: Ember.observer('collapsed', function () {
+      var collapsed = this.get('collapsed');
+      var active = this.get('active');
+      if (collapsed !== active) {
+        return;
+      }
+      if (collapsed === false) {
+        this.show();
+      } else {
+        this.hide();
+      }
+    }),
+
+    init: function init() {
+      this._super.apply(this, arguments);
+      this.set('active', !this.get('collapsed'));
+    },
+
+
+    _updateCollapsedSize: Ember.observer('collapsedSize', function () {
+      if (!this.get('resetSizeWhenNotCollapsing') && this.get('collapsed') && !this.get('collapsing')) {
+        this.set('collapseSize', this.get('collapsedSize'));
+      }
+    }),
+
+    _updateExpandedSize: Ember.observer('expandedSize', function () {
+      if (!this.get('resetSizeWhenNotCollapsing') && !this.get('collapsed') && !this.get('collapsing')) {
+        this.set('collapseSize', this.get('expandedSize'));
+      }
+    })
+  });
+});
+;define('ember-bootstrap/components/base/bs-contextual-help', ['exports', 'ember-bootstrap/mixins/transition-support', 'ember-bootstrap/utils/get-parent', 'ember-bootstrap/utils/transition-end'], function (exports, _transitionSupport, _getParent, _transitionEnd) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+
+  var _slicedToArray = function () {
+    function sliceIterator(arr, i) {
+      var _arr = [];
+      var _n = true;
+      var _d = false;
+      var _e = undefined;
+
+      try {
+        for (var _i = arr[Symbol.iterator](), _s; !(_n = (_s = _i.next()).done); _n = true) {
+          _arr.push(_s.value);
+
+          if (i && _arr.length === i) break;
+        }
+      } catch (err) {
+        _d = true;
+        _e = err;
+      } finally {
+        try {
+          if (!_n && _i["return"]) _i["return"]();
+        } finally {
+          if (_d) throw _e;
+        }
+      }
+
+      return _arr;
+    }
+
+    return function (arr, i) {
+      if (Array.isArray(arr)) {
+        return arr;
+      } else if (Symbol.iterator in Object(arr)) {
+        return sliceIterator(arr, i);
+      } else {
+        throw new TypeError("Invalid attempt to destructure non-iterable instance");
+      }
+    };
+  }();
+
+  var InState = Ember.Object.extend({
+    hover: false,
+    focus: false,
+    click: false,
+    showHelp: Ember.computed.or('hover', 'focus', 'click')
+  });
+
+  function noop() {}
+
+  /**
+  
+   @class Components.ContextualHelp
+   @namespace Components
+   @extends Ember.Component
+   @uses Mixins.TransitionSupport
+   @private
+   */
+  exports.default = Ember.Component.extend(_transitionSupport.default, {
+    tagName: '',
+
+    /**
+     * @property title
+     * @type string
+     * @public
+     */
+    title: null,
+
+    /**
+     * How to position the tooltip/popover - top | bottom | left | right
+     *
+     * @property title
+     * @type string
+     * @default 'top'
+     * @public
+     */
+    placement: 'top',
+
+    /**
+     * By default it will dynamically reorient the tooltip/popover based on the available space in the viewport. For
+     * example, if `placement` is "left", the tooltip/popover will display to the left when possible, otherwise it will
+     * display right. Set to `false` to force placement according to the `placement` property
+     *
+     * @property autoPlacement
+     * @type boolean
+     * @default true
+     * @public
+     */
+    autoPlacement: true,
+
+    /**
+     * You can programmatically show the tooltip/popover by setting this to `true`
+     *
+     * @property visible
+     * @type boolean
+     * @default false
+     * @public
+     */
+    visible: false,
+
+    /**
+     * @property inDom
+     * @type boolean
+     * @private
+     */
+    inDom: Ember.computed.and('visible', 'triggerTargetElement'),
+
+    /**
+     * Set to false to disable fade animations.
+     *
+     * @property fade
+     * @type boolean
+     * @default true
+     * @public
+     */
+    fade: true,
+
+    /**
+     * Used to apply Bootstrap's visibility class
+     *
+     * @property showHelp
+     * @type boolean
+     * @default false
+     * @private
+     */
+    showHelp: Ember.computed.reads('visible'),
+
+    /**
+     * Delay showing and hiding the tooltip/popover (ms). Individual delays for showing and hiding can be specified by using the
+     * `delayShow` and `delayHide` properties.
+     *
+     * @property delay
+     * @type number
+     * @default 0
+     * @public
+     */
+    delay: 0,
+
+    /**
+     * Delay showing the tooltip/popover. This property overrides the general delay set with the `delay` property.
+     *
+     * @property delayShow
+     * @type number
+     * @default 0
+     * @public
+     */
+    delayShow: Ember.computed.reads('delay'),
+
+    /**
+     * Delay hiding the tooltip/popover. This property overrides the general delay set with the `delay` property.
+     *
+     * @property delayHide
+     * @type number
+     * @default 0
+     * @public
+     */
+    delayHide: Ember.computed.reads('delay'),
+
+    hasDelayShow: Ember.computed.gt('delayShow', 0),
+    hasDelayHide: Ember.computed.gt('delayHide', 0),
+
+    /**
+     * The duration of the fade transition
+     *
+     * @property transitionDuration
+     * @type number
+     * @default 150
+     * @public
+     */
+    transitionDuration: 150,
+
+    /**
+     * Keeps the tooltip/popover within the bounds of this element when `autoPlacement` is true. Can be any valid CSS selector.
+     *
+     * @property viewportSelector
+     * @type string
+     * @default 'body'
+     * @see viewportPadding
+     * @see autoPlacement
+     * @public
+     */
+    viewportSelector: 'body',
+
+    /**
+     * Take a padding into account for keeping the tooltip/popover within the bounds of the element given by `viewportSelector`.
+     *
+     * @property viewportPadding
+     * @type number
+     * @default 0
+     * @see viewportSelector
+     * @see autoPlacement
+     * @public
+     */
+    viewportPadding: 0,
+
+    /**
+     * The id of the overlay element.
+     *
+     * @property overlayId
+     * @type string
+     * @readonly
+     * @private
+     */
+    overlayId: Ember.computed(function () {
+      return 'overlay-' + Ember.guidFor(this);
+    }),
+
+    /**
+     * The DOM element of the overlay element.
+     *
+     * @property overlayElement
+     * @type object
+     * @readonly
+     * @private
+     */
+    overlayElement: Ember.computed('overlayId', function () {
+      return document.getElementById(this.get('overlayId'));
+    }).volatile(),
+
+    /**
+     * The DOM element of the arrow element.
+     *
+     * @property arrowElement
+     * @type object
+     * @readonly
+     * @private
+     */
+    arrowElement: null,
+
+    /**
+     * The DOM element of the viewport element.
+     *
+     * @property viewportElement
+     * @type object
+     * @readonly
+     * @private
+     */
+    viewportElement: Ember.computed('viewportSelector', function () {
+      return document.querySelector(this.get('viewportSelector'));
+    }),
+
+    /**
+     * The DOM element that triggers the tooltip/popover. By default it is the parent element of this component.
+     * You can set this to any CSS selector to have any other element trigger the tooltip/popover.
+     * With the special value of "parentView" you can attach the tooltip/popover to the parent component's element.
+     *
+     * @property triggerElement
+     * @type string
+     * @public
+     */
+    triggerElement: null,
+
+    /**
+     * @property triggerTargetElement
+     * @type {object}
+     * @private
+     */
+    triggerTargetElement: Ember.computed('triggerElement', function () {
+      var triggerElement = this.get('triggerElement');
+      var el = void 0;
+
+      if (Ember.isBlank(triggerElement)) {
+        try {
+          el = (0, _getParent.default)(this);
+        } catch (e) {
+          return null;
+        }
+      } else if (triggerElement === 'parentView') {
+        el = this.get('parentView.element');
+      } else {
+        el = document.querySelector(triggerElement);
+      }
+      return el;
+    }).volatile(),
+
+    /**
+     * The event(s) that should trigger the tooltip/popover - click | hover | focus.
+     * You can set this to a single event or multiple events, given as an array or a string separated by spaces.
+     *
+     * @property triggerEvents
+     * @type array|string
+     * @default 'hover focus'
+     * @public
+     */
+    triggerEvents: 'hover focus',
+
+    _triggerEvents: Ember.computed('triggerEvents', function () {
+      var events = this.get('triggerEvents');
+      if (!Ember.isArray(events)) {
+        events = events.split(' ');
+      }
+
+      return events.map(function (event) {
+        switch (event) {
+          case 'hover':
+            return ['mouseenter', 'mouseleave'];
+          case 'focus':
+            return ['focusin', 'focusout'];
+          default:
+            return event;
+        }
+      });
+    }),
+
+    /**
+     * If true component will render in place, rather than be wormholed.
+     *
+     * @property renderInPlace
+     * @type boolean
+     * @default false
+     * @public
+     */
+    renderInPlace: false,
+
+    /**
+     * @property _renderInPlace
+     * @type boolean
+     * @private
+     */
+    _renderInPlace: Ember.computed('renderInPlace', function () {
+      return this.get('renderInPlace') || typeof document === 'undefined' || !document.getElementById('ember-bootstrap-wormhole');
+    }),
+
+    /**
+     * Current hover state, 'in', 'out' or null
+     *
+     * @property hoverState
+     * @type string
+     * @private
+     */
+    hoverState: null,
+
+    /**
+     * Current state for events
+     *
+     * @property inState
+     * @type {InState}
+     * @private
+     */
+    inState: Ember.computed(function () {
+      return InState.create();
+    }),
+
+    /**
+     * Ember.run timer
+     *
+     * @property timer
+     * @private
+     */
+    timer: null,
+
+    /**
+     * This action is called immediately when the tooltip/popover is about to be shown.
+     *
+     * @event onShow
+     * @public
+     */
+    onShow: function onShow() {},
+
+
+    /**
+     * This action will be called when the tooltip/popover has been made visible to the user (will wait for CSS transitions to complete).
+     *
+     * @event onShown
+     * @public
+     */
+    onShown: function onShown() {},
+
+
+    /**
+     * This action is called immediately when the tooltip/popover is about to be hidden.
+     *
+     * @event onHide
+     * @public
+     */
+    onHide: function onHide() {},
+
+
+    /**
+     * This action is called when the tooltip/popover has finished being hidden from the user (will wait for CSS transitions to complete).
+     *
+     * @event onHidden
+     * @public
+     */
+    onHidden: function onHidden() {},
+
+
+    /**
+     * Called when a show event has been received
+     *
+     * @method enter
+     * @param e
+     * @private
+     */
+    enter: function enter(e) {
+      if (e) {
+        var eventType = e.type === 'focusin' ? 'focus' : 'hover';
+        this.get('inState').set(eventType, true);
+      }
+
+      if (this.get('showHelp') || this.get('hoverState') === 'in') {
+        this.set('hoverState', 'in');
+        return;
+      }
+
+      Ember.run.cancel(this.timer);
+
+      this.set('hoverState', 'in');
+
+      if (!this.get('hasDelayShow')) {
+        return this.show();
+      }
+
+      this.timer = Ember.run.later(this, function () {
+        if (this.get('hoverState') === 'in') {
+          this.show();
+        }
+      }, this.get('delayShow'));
+    },
+
+
+    /**
+     * Called when a hide event has been received
+     *
+     * @method leave
+     * @param e
+     * @private
+     */
+    leave: function leave(e) {
+      if (e) {
+        var eventType = e.type === 'focusout' ? 'focus' : 'hover';
+        this.get('inState').set(eventType, false);
+      }
+
+      if (this.get('inState.showHelp')) {
+        return;
+      }
+
+      Ember.run.cancel(this.timer);
+
+      this.set('hoverState', 'out');
+
+      if (!this.get('hasDelayHide')) {
+        return this.hide();
+      }
+
+      this.timer = Ember.run.later(this, function () {
+        if (this.get('hoverState') === 'out') {
+          this.hide();
+        }
+      }, this.get('delayHide'));
+    },
+
+
+    /**
+     * Called for a click event
+     *
+     * @method toggle
+     * @param e
+     * @private
+     */
+    toggle: function toggle(e) {
+      if (e) {
+        this.get('inState').toggleProperty('click');
+        if (this.get('inState.showHelp')) {
+          this.enter();
+        } else {
+          this.leave();
+        }
+      } else {
+        if (this.get('showHelp')) {
+          this.leave();
+        } else {
+          this.enter();
+        }
+      }
+    },
+
+
+    /**
+     * Show the tooltip/popover
+     *
+     * @method show
+     * @private
+     */
+    show: function show() {
+      if (this.get('isDestroyed')) {
+        return;
+      }
+
+      if (false === this.get('onShow')(this)) {
+        return;
+      }
+
+      // this waits for the tooltip/popover element to be created. when animating a wormholed tooltip/popover we need to wait until
+      // ember-wormhole has moved things in the DOM for the animation to be correct, so use Ember.run.next in this case
+      var delayFn = !this.get('_renderInPlace') && this.get('fade') ? Ember.run.next : function (target, fn) {
+        Ember.run.schedule('afterRender', target, fn);
+      };
+
+      this.set('inDom', true);
+      delayFn(this, this._show);
+    },
+    _show: function _show() {
+      var skipTransition = arguments.length > 0 && arguments[0] !== undefined ? arguments[0] : false;
+
+      this.set('showHelp', true);
+
+      // If this is a touch-enabled device we add extra
+      // empty mouseover listeners to the body's immediate children;
+      // only needed because of broken event delegation on iOS
+      // https://www.quirksmode.org/blog/archives/2014/02/mouse_event_bub.html
+
+      // See https://github.com/twbs/bootstrap/pull/22481
+      if ('ontouchstart' in document.documentElement) {
+        var children = document.body.children;
+
+        for (var i = 0; i < children.length; i++) {
+          children[i].addEventListener('mouseover', noop);
+        }
+      }
+
+      function tooltipShowComplete() {
+        if (this.get('isDestroyed')) {
+          return;
+        }
+        var prevHoverState = this.get('hoverState');
+
+        this.get('onShown')(this);
+        this.set('hoverState', null);
+
+        if (prevHoverState === 'out') {
+          this.leave();
+        }
+      }
+
+      if (skipTransition === false && this.get('usesTransition')) {
+        (0, _transitionEnd.default)(this.get('overlayElement'), tooltipShowComplete, this, this.get('transitionDuration'));
+      } else {
+        tooltipShowComplete.call(this);
+      }
+    },
+
+
+    /**
+     * Position the tooltip/popover's arrow
+     *
+     * @method replaceArrow
+     * @param delta
+     * @param dimension
+     * @param isVertical
+     * @private
+     */
+    replaceArrow: function replaceArrow(delta, dimension, isVertical) {
+      var el = this.get('arrowElement');
+      el.style[isVertical ? 'left' : 'top'] = 50 * (1 - delta / dimension) + '%';
+      el.style[isVertical ? 'top' : 'left'] = null;
+    },
+
+
+    /**
+     * Hide the tooltip/popover
+     *
+     * @method hide
+     * @private
+     */
+    hide: function hide() {
+      if (this.get('isDestroyed')) {
+        return;
+      }
+
+      if (false === this.get('onHide')(this)) {
+        return;
+      }
+
+      function tooltipHideComplete() {
+        if (this.get('isDestroyed')) {
+          return;
+        }
+        if (this.get('hoverState') !== 'in') {
+          this.set('inDom', false);
+        }
+        this.get('onHidden')(this);
+      }
+
+      this.set('showHelp', false);
+
+      // if this is a touch-enabled device we remove the extra
+      // empty mouseover listeners we added for iOS support
+      if ('ontouchstart' in document.documentElement) {
+        var children = document.body.children;
+
+        for (var i = 0; i < children.length; i++) {
+          children[i].removeEventListener('mouseover', noop);
+        }
+      }
+
+      if (this.get('usesTransition')) {
+        (0, _transitionEnd.default)(this.get('overlayElement'), tooltipHideComplete, this, this.get('transitionDuration'));
+      } else {
+        tooltipHideComplete.call(this);
+      }
+
+      this.set('hoverState', null);
+    },
+
+
+    /**
+     * @method addListeners
+     * @private
+     */
+    addListeners: function addListeners() {
+      var _this = this;
+
+      var target = this.get('triggerTargetElement');
+
+      this.get('_triggerEvents').forEach(function (event) {
+        if (Ember.isArray(event)) {
+          var _event = _slicedToArray(event, 2),
+              inEvent = _event[0],
+              outEvent = _event[1];
+
+          target.addEventListener(inEvent, _this._handleEnter);
+          target.addEventListener(outEvent, _this._handleLeave);
+        } else {
+          target.addEventListener(event, _this._handleToggle);
+        }
+      });
+    },
+
+
+    /**
+     * @method removeListeners
+     * @private
+     */
+    removeListeners: function removeListeners() {
+      var _this2 = this;
+
+      try {
+        var target = this.get('triggerTargetElement');
+        this.get('_triggerEvents').forEach(function (event) {
+          if (Ember.isArray(event)) {
+            var _event2 = _slicedToArray(event, 2),
+                inEvent = _event2[0],
+                outEvent = _event2[1];
+
+            target.removeEventListener(inEvent, _this2._handleEnter);
+            target.removeEventListener(outEvent, _this2._handleLeave);
+          } else {
+            target.removeEventListener(event, _this2._handleToggle);
+          }
+        });
+      } catch (e) {} // eslint-disable-line no-empty
+    },
+    init: function init() {
+      this._super.apply(this, arguments);
+      this._handleEnter = Ember.run.bind(this, this.enter);
+      this._handleLeave = Ember.run.bind(this, this.leave);
+      this._handleToggle = Ember.run.bind(this, this.toggle);
+    },
+    didInsertElement: function didInsertElement() {
+      this._super.apply(this, arguments);
+      this.addListeners();
+      if (this.get('visible')) {
+        Ember.run.next(this, this.show, true);
+      }
+    },
+    willDestroyElement: function willDestroyElement() {
+      this._super.apply(this, arguments);
+      this.removeListeners();
+    },
+
+
+    _watchVisible: Ember.observer('visible', function () {
+      if (this.get('visible')) {
+        this.show();
+      } else {
+        this.hide();
+      }
+    })
+
+  });
+});
+;define('ember-bootstrap/components/base/bs-contextual-help/element', ['exports', 'ember-bootstrap/templates/components/bs-tooltip/element'], function (exports, _element) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = Ember.Component.extend({
+    layout: _element.default,
+    tagName: '',
+    ariaRole: 'tooltip',
+
+    /**
+     * @property placement
+     * @type string
+     * @default 'top'
+     * @public
+     */
+    placement: 'top',
+
+    actualPlacement: Ember.computed.reads('placement'),
+
+    /**
+     * @property fade
+     * @type boolean
+     * @default true
+     * @public
+     */
+    fade: true,
+
+    /**
+     * @property showHelp
+     * @type boolean
+     * @default false
+     * @public
+     */
+    showHelp: false,
+
+    /**
+     * If true component will render in place, rather than be wormholed.
+     *
+     * @property renderInPlace
+     * @type boolean
+     * @default true
+     * @public
+     */
+    renderInPlace: true,
+
+    /**
+     * Which element to align to
+     *
+     * @property popperTarget
+     * @type {string|HTMLElement}
+     * @public
+     */
+    popperTarget: null,
+
+    /**
+     * @property autoPlacement
+     * @type boolean
+     * @default true
+     * @public
+     */
+    autoPlacement: true,
+
+    /**
+     * The DOM element of the viewport element.
+     *
+     * @property viewportElement
+     * @type object
+     * @public
+     */
+    viewportElement: null,
+
+    /**
+     * Take a padding into account for keeping the tooltip/popover within the bounds of the element given by `viewportElement`.
+     *
+     * @property viewportPadding
+     * @type number
+     * @default 0
+     * @public
+     */
+    viewportPadding: 0,
+
+    /**
+     * @property arrowClass
+     * @private
+     */
+    arrowClass: 'arrow',
+
+    /**
+     * @property popperClassNames
+     * @type {array}
+     * @private
+     */
+    popperClassNames: null,
+
+    /**
+     * @property popperClass
+     * @type {string}
+     * @private
+     */
+    popperClass: Ember.computed('popperClassNames.[]', 'class', function () {
+      var classes = this.get('popperClassNames');
+      var classProperty = this.get('class');
+      if (typeof classProperty === 'string') {
+        classes = classes.concat(classProperty.split(' '));
+      }
+      return classes.join(' ');
+    }),
+
+    /**
+     * popper.js modifier config
+     *
+     * @property popperModifiers
+     * @type {object}
+     * @private
+     */
+    popperModifiers: Ember.computed('arrowClass', 'autoPlacement', 'viewportElement', 'viewportPadding', function () {
+      var self = this;
+      return {
+        arrow: {
+          element: '.' + this.get('arrowClass')
+        },
+        offset: {
+          fn: function fn(data) {
+            var tip = document.getElementById(self.get('id'));
+            (true && !(tip) && Ember.assert('Contextual help element needs existing popper element', tip));
+
+            // manually read margins because getBoundingClientRect includes difference
+
+            var marginTop = parseInt(window.getComputedStyle(tip).marginTop, 10);
+            var marginLeft = parseInt(window.getComputedStyle(tip).marginLeft, 10);
+
+            // we must check for NaN for ie 8/9
+            if (isNaN(marginTop) || marginTop > 0) {
+              marginTop = 0;
+            }
+            if (isNaN(marginLeft) || marginLeft > 0) {
+              marginLeft = 0;
+            }
+
+            data.offsets.popper.top += marginTop;
+            data.offsets.popper.left += marginLeft;
+
+            return window.Popper.Defaults.modifiers.offset.fn.apply(this, arguments);
+          }
+        },
+        preventOverflow: {
+          enabled: this.get('autoPlacement'),
+          boundariesElement: this.get('viewportElement'),
+          padding: this.get('viewportPadding')
+        },
+        hide: {
+          enabled: this.get('autoPlacement')
+        },
+        flip: {
+          enabled: this.get('autoPlacement')
+        }
+      };
+    }),
+
+    didReceiveAttrs: function didReceiveAttrs() {
+      (true && !(this.get('id')) && Ember.assert('Contextual help element needs id for popper element', this.get('id')));
+    },
+
+
+    actions: {
+      updatePlacement: function updatePlacement(popperDataObject) {
+        if (this.get('actualPlacement') === popperDataObject.placement) {
+          return;
+        }
+        this.set('actualPlacement', popperDataObject.placement);
+        Ember.run.scheduleOnce('afterRender', popperDataObject.instance, popperDataObject.instance.scheduleUpdate);
+      }
+    }
+  });
+});
+;define('ember-bootstrap/components/base/bs-dropdown', ['exports', 'ember-bootstrap/templates/components/bs-dropdown'], function (exports, _bsDropdown) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = Ember.Component.extend({
+    layout: _bsDropdown.default,
+    classNameBindings: ['containerClass'],
+
+    /**
+     * This property reflects the state of the dropdown, whether it is open or closed.
+     *
+     * @property isOpen
+     * @default false
+     * @type boolean
+     * @private
+     */
+    isOpen: false,
+
+    /**
+     * By default clicking on an open dropdown menu will close it. Set this property to false for the menu to stay open.
+     *
+     * @property closeOnMenuClick
+     * @default true
+     * @type boolean
+     * @public
+     */
+    closeOnMenuClick: true,
+
+    /**
+     * By default the dropdown menu will expand downwards. Set to 'up' to expand upwards.
+     * BS4 also allows 'left' and 'right'
+     *
+     * @property direction
+     * @type string
+     * @default 'down'
+     * @public
+     */
+    direction: 'down',
+
+    /**
+     * Indicates the dropdown is being used as a navigation item dropdown.
+     *
+     * @property inNav
+     * @type boolean
+     * @default false
+     * @private
+     */
+    inNav: false,
+
+    /**
+     * A computed property to generate the suiting class for the dropdown container, either "dropdown", "dropup" or "btn-group".
+     * BS4 only: "dropleft", "dropright"
+     *
+     * @property containerClass
+     * @type string
+     * @readonly
+     * @private
+     */
+    containerClass: Ember.computed('toggle.tagName', 'direction', function () {
+      if (this.get('toggle.tagName') === 'button' && !this.get('toggle.block')) {
+        return this.get('direction') !== 'down' ? 'btn-group drop' + this.get('direction') : 'btn-group';
+      } else {
+        return 'drop' + this.get('direction');
+      }
+    }),
+
+    /**
+     * @property menuElement
+     * @private
+     */
+    menuElement: Ember.computed(function () {
+      return this.get('element').querySelector('.dropdown-menu');
+    }).volatile(),
+
+    /**
+     * @property toggleElement
+     * @private
+     */
+    toggleElement: Ember.computed('toggle', function () {
+      return typeof FastBoot === 'undefined' ? this.get('toggle.element') || null : null;
+    }),
+
+    /**
+     * Reference to the child toggle (Toggle or Button)
+     *
+     * @property toggle
+     * @private
+     */
+    toggle: null,
+
+    /**
+     * Action is called when dropdown is about to be shown
+     *
+     * @event onShow
+     * @param {*} value
+     * @public
+     */
+    onShow: function onShow(value) {},
+    // eslint-disable-line no-unused-vars
+
+    /**
+     * Action is called when dropdown is about to be hidden
+     *
+     * @event onHide
+     * @param {*} value
+     * @public
+     */
+    onHide: function onHide(value) {},
+    // eslint-disable-line no-unused-vars
+
+    actions: {
+      toggleDropdown: function toggleDropdown() {
+        if (this.get('isOpen')) {
+          this.send('closeDropdown');
+        } else {
+          this.send('openDropdown');
+        }
+      },
+      openDropdown: function openDropdown() {
+        this.set('isOpen', true);
+        this.addClickListener();
+        this.get('onShow')();
+      },
+      closeDropdown: function closeDropdown() {
+        this.set('isOpen', false);
+        this.removeClickListener();
+        this.get('onHide')();
+      }
+    },
+
+    addClickListener: function addClickListener() {
+      if (!this.clickListener) {
+        this.clickListener = Ember.run.bind(this, this.closeOnClickHandler);
+        document.addEventListener('click', this.clickListener, true);
+      }
+    },
+    removeClickListener: function removeClickListener() {
+      if (this.clickListener) {
+        document.removeEventListener('click', this.clickListener, true);
+        this.clickListener = null;
+      }
+    },
+    willDestroyElement: function willDestroyElement() {
+      this._super.apply(this, arguments);
+      this.removeClickListener();
+    },
+
+
+    /**
+     * Handler for click events to close the dropdown
+     *
+     * @method closeOnClickHandler
+     * @param e
+     * @protected
+     */
+    closeOnClickHandler: function closeOnClickHandler(e) {
+      var target = e.target;
+
+      var _getProperties = this.getProperties('toggleElement', 'menuElement'),
+          toggleElement = _getProperties.toggleElement,
+          menuElement = _getProperties.menuElement;
+
+      if (!this.get('isDestroyed') && toggleElement && !toggleElement.contains(target) && (menuElement && !menuElement.contains(target) || this.get('closeOnMenuClick'))) {
+        this.send('closeDropdown');
+      }
+    }
+  });
+});
+;define('ember-bootstrap/components/base/bs-dropdown/button', ['exports', 'ember-bootstrap/components/bs-button', 'ember-bootstrap/mixins/dropdown-toggle'], function (exports, _bsButton, _dropdownToggle) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = _bsButton.default.extend(_dropdownToggle.default);
+});
+;define('ember-bootstrap/components/base/bs-dropdown/menu', ['exports', 'ember-bootstrap/templates/components/bs-dropdown/menu'], function (exports, _menu) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = Ember.Component.extend({
+    layout: _menu.default,
+
+    /**
+     * Defaults to a `<ul>` tag in BS3 and a '<div>' tag in BS4. Change for other types of dropdown menus.
+     *
+     * @property tagName
+     * @type string
+     * @default ul
+     * @public
+     */
+
+    /**
+     * @property ariaRole
+     * @default menu
+     * @type string
+     * @protected
+     */
+    ariaRole: 'menu',
+
+    /**
+     * Alignment of the menu, either "left" or "right"
+     *
+     * @property align
+     * @type string
+     * @default left
+     * @public
+     */
+    align: 'left',
+
+    /**
+     * @property direction
+     * @default 'down'
+     * @type string
+     * @private
+     */
+    direction: 'down',
+
+    /**
+     * @property inNav
+     * @type {boolean}
+     * @private
+     */
+    inNav: false,
+
+    /**
+     * Applies only to BS4: by default the menu is rendered in the same place the dropdown. If you experience clipping
+     * issues, you can set this to false to render the menu in a wormhole at the top of the DOM.
+     *
+     * @property renderInPlace
+     * @type boolean
+     * @default true
+     * @public
+     */
+    renderInPlace: true,
+
+    alignClass: Ember.computed('align', function () {
+      if (this.get('align') !== 'left') {
+        return 'dropdown-menu-' + this.get('align');
+      }
+    })
+  });
+});
+;define('ember-bootstrap/components/base/bs-dropdown/menu/divider', ['exports'], function (exports) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = Ember.Component.extend({});
+});
+;define('ember-bootstrap/components/base/bs-dropdown/menu/item', ['exports'], function (exports) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = Ember.Component.extend({});
+});
+;define('ember-bootstrap/components/base/bs-dropdown/menu/link-to', ['exports'], function (exports) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = Ember.LinkComponent.extend({});
+});
+;define('ember-bootstrap/components/base/bs-dropdown/toggle', ['exports', 'ember-bootstrap/mixins/dropdown-toggle'], function (exports, _dropdownToggle) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = Ember.Component.extend(_dropdownToggle.default, {
+    /**
+     * Defaults to a `<a>` tag. Change for other types of dropdown toggles.
+     *
+     * @property tagName
+     * @type string
+     * @default a
+     * @public
+     */
+    tagName: 'a',
+
+    attributeBindings: ['href'],
+
+    /**
+     * @property inNav
+     * @type {boolean}
+     * @private
+     */
+    inNav: false,
+
+    /**
+     * Computed property to generate a `href="#"` attribute when `tagName` is "a".
+     *
+     * @property href
+     * @type string
+     * @readonly
+     * @private
+     */
+    href: Ember.computed('tagName', function () {
+      if (this.get('tagName').toUpperCase() === 'A') {
+        return '#';
+      }
+    }),
+
+    /**
+     * When clicking the toggle this action is called.
+     *
+     * @event onClick
+     * @param {*} value
+     * @public
+     */
+    onClick: function onClick() {},
+    click: function click(e) {
+      e.preventDefault();
+      this.get('onClick')();
+    }
+  });
+});
+;define('ember-bootstrap/components/base/bs-form', ['exports', 'ember-bootstrap/templates/components/bs-form'], function (exports, _bsForm) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = Ember.Component.extend({
+    layout: _bsForm.default,
+    tagName: 'form',
+    classNameBindings: ['layoutClass'],
+    attributeBindings: ['_novalidate:novalidate'],
+    ariaRole: 'form',
+
+    /**
+     * Bootstrap form class name (computed)
+     *
+     * @property layoutClass
+     * @type string
+     * @readonly
+     * @protected
+     *
+     */
+
+    /**
+     * Set a model that this form should represent. This serves several purposes:
+     *
+     * * child `Components.FormElement`s can access and bind to this model by their `property`
+     * * when the model supports validation by using the [ember-validations](https://github.com/dockyard/ember-validations) mixin,
+     * child `Components.FormElement`s will look at the validation information of their `property` and render their form group accordingly.
+     * Moreover the form's `submit` event handler will validate the model and deny submitting if the model is not validated successfully.
+     *
+     * @property model
+     * @type Ember.Object
+     * @public
+     */
+    model: null,
+
+    /**
+     * Set the layout of the form to either "vertical", "horizontal" or "inline". See http://getbootstrap.com/css/#forms-inline and http://getbootstrap.com/css/#forms-horizontal
+     *
+     * @property formLayout
+     * @type string
+     * @public
+     */
+    formLayout: 'vertical',
+
+    /**
+     * Check if validating the model is supported. This needs to be implemented by another addon.
+     *
+     * @property hasValidator
+     * @type boolean
+     * @readonly
+     * @protected
+     */
+    hasValidator: false,
+
+    /**
+     * The Bootstrap grid class for form labels. This is used by the `Components.FormElement` class as a default for the
+     * whole form.
+     *
+     * @property horizontalLabelGridClass
+     * @type string
+     * @default 'col-md-4'
+     * @public
+     */
+    horizontalLabelGridClass: 'col-md-4',
+
+    /**
+     * If set to true pressing enter will submit the form, even if no submit button is present
+     *
+     * @property submitOnEnter
+     * @type boolean
+     * @default false
+     * @public
+     */
+    submitOnEnter: false,
+
+    /**
+     * If set to true novalidate attribute is present on form element
+     *
+     * @property novalidate
+     * @type boolean
+     * @default null
+     * @public
+     */
+    novalidate: false,
+
+    _novalidate: Ember.computed('novalidate', function () {
+      return this.get('novalidate') === true ? '' : undefined;
+    }),
+
+    /**
+     * Validate hook which will return a promise that will either resolve if the model is valid
+     * or reject if it's not. This should be overridden to add validation support.
+     *
+     * @method validate
+     * @param {Object} model
+     * @return {Promise}
+     * @public
+     */
+    validate: function validate(model) {},
+    // eslint-disable-line no-unused-vars
+
+    /**
+     * @property showAllValidations
+     * @type boolean
+     * @default false
+     * @private
+     */
+    showAllValidations: false,
+
+    /**
+     * Action is called before the form is validated (if possible) and submitted.
+     *
+     * @event onBefore
+     * @param { Object } model  The form's `model`
+     * @public
+     */
+    onBefore: function onBefore(model) {},
+    // eslint-disable-line no-unused-vars
+
+    /**
+     * Action is called when submit has been triggered and the model has passed all validations (if present).
+     *
+     * @event onSubmit
+     * @param { Object } model  The form's `model`
+     * @param { Object } result The returned result from the validate method, if validation is available
+     * @public
+     */
+    onSubmit: function onSubmit(model, result) {},
+    // eslint-disable-line no-unused-vars
+
+    /**
+     * Action is called when validation of the model has failed.
+     *
+     * @event onInvalid
+     * @param { Object } model  The form's `model`
+     * @param { Object } error
+     * @public
+     */
+    onInvalid: function onInvalid(model, error) {},
+    // eslint-disable-line no-unused-vars
+
+    /**
+     * Submit handler that will send the default action ("action") to the controller when submitting the form.
+     *
+     * If there is a supplied `model` that supports validation (`hasValidator`) the model will be validated before, and
+     * only if validation is successful the default action will be sent. Otherwise an "invalid" action will be sent, and
+     * all the `showValidation` property of all child `Components.FormElement`s will be set to true, so error state and
+     * messages will be shown automatically.
+     *
+     * @method submit
+     * @private
+     */
+    submit: function submit(e) {
+      var _this = this;
+
+      if (e) {
+        e.preventDefault();
+      }
+      var model = this.get('model');
+
+      this.get('onBefore')(model);
+
+      if (!this.get('hasValidator')) {
+        return this.get('onSubmit')(model);
+      } else {
+        var validationPromise = this.validate(this.get('model'));
+        if (validationPromise && validationPromise instanceof Ember.RSVP.Promise) {
+          validationPromise.then(function (r) {
+            return _this.get('onSubmit')(model, r);
+          }).catch(function (err) {
+            _this.set('showAllValidations', true);
+            return _this.get('onInvalid')(model, err);
+          });
+        }
+      }
+    },
+    keyPress: function keyPress(e) {
+      var code = e.keyCode || e.which;
+      if (code === 13 && this.get('submitOnEnter')) {
+        this.triggerSubmit();
+      }
+    },
+    triggerSubmit: function triggerSubmit() {
+      var event = document.createEvent('Event');
+      event.initEvent('submit', true, true);
+      this.get('element').dispatchEvent(event);
+    },
+
+
+    actions: {
+      change: function change(value, model, property) {
+        (true && !(Ember.isPresent(model) && Ember.isPresent(property)) && Ember.assert('You cannot use the form element\'s default onChange action for form elements if not using a model or setting the value directly on a form element. You must add your own onChange action to the form element in this case!', Ember.isPresent(model) && Ember.isPresent(property)));
+
+        Ember.set(model, property, value);
+      }
+    }
+  });
+});
+;define('ember-bootstrap/components/base/bs-form/element', ['exports', 'ember-bootstrap/templates/components/bs-form/element', 'ember-bootstrap/components/bs-form/group'], function (exports, _element, _group) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+
+
+  var nonDefaultLayouts = Ember.A(['checkbox']);
+
+  /**
+   Sub class of `Components.FormGroup` that adds automatic form layout markup and form validation features.
+  
+   ### Form layout
+  
+   The appropriate Bootstrap markup for the given `formLayout` and `controlType` is automatically generated to easily
+   create forms without coding the default Bootstrap form markup by hand:
+  
+   ```hbs
+   {{#bs-form formLayout="horizontal" onSubmit=(action "submit") as |form|}}
+   {{form.element controlType="email" label="Email" placeholder="Email" value=email}}
+   {{form.element controlType="password" label="Password" placeholder="Password" value=password}}
+   {{form.element controlType="checkbox" label="Remember me" value=rememberMe}}
+   {{bs-button defaultText="Submit" type="primary" buttonType="submit"}}
+   {{/bs-form}}
+   ```
+  
+   ### Form validation
+  
+   In the following example the control elements of the three form elements value will be bound to the properties
+   (given by `property`) of the form's `model`, which in this case is its controller (see `model=this`):
+  
+   ```hbs
+   {{#bs-form formLayout="horizontal" model=this onSubmit=(action "submit") as |form|}}
+   {{form.element controlType="email" label="Email" placeholder="Email" property="email"}}
+   {{form.element controlType="password" label="Password" placeholder="Password" property="password"}}
+   {{form.element controlType="checkbox" label="Remember me" property="rememberMe"}}
+   {{bs-button defaultText="Submit" type="primary" buttonType="submit"}}
+   {{/bs-form}}
+   ```
+  
+   By using this indirection in comparison to directly binding the `value` property, you get the benefit of automatic
+   form validation, given that your `model` has a supported means of validating itself.
+   See [Components.Form](Components.Form.html) for details on how to enable form validation.
+  
+   In the example above the `model` was our controller itself, so the control elements were bound to the appropriate
+   properties of our controller. A controller implementing validations on those properties could look like this:
+  
+   ```js
+   import Ember from 'ember';
+   import EmberValidations from 'ember-validations';
+  
+   export default Ember.Controller.extend(EmberValidations,{
+     email: null,
+     password: null,
+     rememberMe: false,
+     validations: {
+       email: {
+         presence: true,
+         format: {
+           with: /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,4}$/
+         }
+       },
+       password: {
+         presence: true,
+         length: { minimum: 6, maximum: 10}
+       },
+       comments: {
+         length: { minimum: 5, maximum: 20}
+       }
+     }
+   });
+   ```
+  
+   If the `showValidation` property is `true` (which is automatically the case if a `focusOut` event is captured from the
+   control element or the containing `Components.Form` was submitted with its `model` failing validation) and there are
+   validation errors for the `model`'s `property`, the appropriate Bootstrap validation markup (see
+   http://getbootstrap.com/css/#forms-control-validation) is applied:
+  
+   * `validation` is set to 'error', which will set the `has-error` CSS class
+   * the `errorIcon` feedback icon is displayed if `controlType` is a text field
+   * the validation messages are displayed as Bootstrap `help-block`s in BS3 and `form-control-feedback` in BS4
+  
+   The same applies for warning messages, if the used validation library supports this. (Currently only
+   [ember-cp-validations](https://github.com/offirgolan/ember-cp-validations))
+  
+   As soon as the validation is successful again...
+  
+   * `validation` is set to 'success', which will set the `has-success` CSS class
+   * the `successIcon` feedback icon is displayed if `controlType` is a text field
+   * the validation messages are removed
+  
+   In case you want to display some error or warning message that is independent of the model's validation, for
+   example to display a failure message on a login form after a failed authentication attempt (so not coming from
+   the validation library), you can use the `customError` or `customWarning` properties to do so.
+  
+   ### Custom controls
+  
+   Apart from the standard built-in browser controls (see the `controlType` property), you can use any custom control simply
+   by invoking the component with a block template. Use whatever control you might want, for example a select-2 component
+   (from the [ember-select-2 addon](https://istefo.github.io/ember-select-2)):
+  
+   ```hbs
+   {{#bs-form model=this onSubmit=(action "submit") as |form|}}
+     {{#form.element label="Select-2" property="gender" useIcons=false as |el|}}
+       {{select-2 id=el.id content=genderChoices optionLabelPath="label" value=el.value searchEnabled=false}}
+     {{/form.element}}
+   {{/bs-form}}
+   ```
+  
+   The component yields a hash with the following properties:
+   * `control`: the component that would be used for rendering the form control based on the given `controlType`
+   * `id`: id to be used for the form control, so it matches the labels `for` attribute
+   * `value`: the value of the form element
+   * `validation`: the validation state of the element, `null` if no validation is to be shown, otherwise 'success', 'error' or 'warning'
+  
+   If your custom control does not render an input element, you should set `useIcons` to `false` since bootstrap only supports
+   feedback icons with textual `<input class="form-control">` elements.
+  
+   If you just want to customize the existing control component, you can use the aforementioned yielded `control` component
+   to customize that existing component:
+  
+   ```hbs
+   {{#bs-form model=this onSubmit=(action "submit") as |form|}}
+     {{#form.element label="Email" placeholder="Email" property="email" as |el|}}
+       {{el.control class="input-lg"}}
+     {{/form.element}}
+   {{/bs-form}}
+   ```
+  
+   ### HTML attributes
+  
+   To set HTML attributes on the control element provided by this component, set them as properties of this component:
+  
+   ```hbs
+   {{#bs-form formLayout="horizontal" model=this onSubmit=(action "submit") as |form|}}
+   {{form.element controlType="email" label="Email" property="email"
+     placeholder="Email"
+     required=true
+     multiple=true
+     tabIndex=5
+   }}
+   ...
+   {{/bs-form}}
+   ```
+  
+   The following attributes are supported depending on the `controlType`:
+  
+   <table class="table table-striped">
+   <thead>
+   <tr>
+   <th></th>
+   <th>textarea</th>
+   <th>checkbox</th>
+   <th>all others</th>
+   </tr>
+   </thead>
+   <tbody>
+   <tr>
+   <td>accept</td>
+   <td></td>
+   <td></td>
+   <td>✔︎</td>
+   </tr>
+   <tr>
+   <td>autocomplete</td>
+   <td>✔︎</td>
+   <td></td>
+   <td>✔︎</td>
+   </tr>
+   <tr>
+   <td>autofocus</td>
+   <td>✔︎</td>
+   <td>✔︎</td>
+   <td>✔︎</td>
+   </tr>
+   <tr>
+   <td>autosave</td>
+   <td></td>
+   <td></td>
+   <td>✔︎</td>
+   </tr>
+   <tr>
+   <td>cols</td>
+   <td>✔︎</td>
+   <td></td>
+   <td></td>
+   </tr>
+   <tr>
+   <td>disabled</td>
+   <td></td>
+   <td>✔︎</td>
+   <td>✔︎</td>
+   </tr>
+   <tr>
+   <td>form</td>
+   <td>✔︎</td>
+   <td>✔︎</td>
+   <td>✔︎</td>
+   </tr>
+   <tr>
+   <td>inputmode</td>
+   <td></td>
+   <td></td>
+   <td>✔︎</td>
+   </tr>
+   <tr>
+   <td>max</td>
+   <td></td>
+   <td></td>
+   <td>✔︎</td>
+   </tr>
+   <tr>
+   <td>maxlength</td>
+   <td>✔︎</td>
+   <td></td>
+   <td>✔︎</td>
+   </tr>
+   <tr>
+   <td>min</td>
+   <td></td>
+   <td></td>
+   <td>✔︎</td>
+   </tr>
+   <tr>
+   <td>minlength</td>
+   <td>✔︎</td>
+   <td></td>
+   <td>✔︎</td>
+   </tr>
+   <tr>
+   <td>multiple</td>
+   <td></td>
+   <td></td>
+   <td>✔︎</td>
+   </tr>
+   <tr>
+   <td>name</td>
+   <td>✔︎</td>
+   <td>✔︎</td>
+   <td>✔︎</td>
+   </tr>
+   <tr>
+   <td>pattern</td>
+   <td></td>
+   <td></td>
+   <td>✔︎</td>
+   </tr>
+   <tr>
+   <td>placeholder</td>
+   <td>✔︎</td>
+   <td></td>
+   <td>✔︎</td>
+   </tr>
+   <tr>
+   <td>readonly</td>
+   <td>✔︎</td>
+   <td>✔︎</td>
+   <td>✔︎</td>
+   </tr>
+   <tr>
+   <td>required</td>
+   <td>✔︎</td>
+   <td>✔︎</td>
+   <td>✔︎</td>
+   </tr>
+   <tr>
+   <td>rows</td>
+   <td>✔︎</td>
+   <td></td>
+   <td></td>
+   </tr>
+   <tr>
+   <td>size<br>via <code>controlSize</code> property</td>
+   <td></td>
+   <td></td>
+   <td>✔︎</td>
+   </tr>
+   <tr>
+   <td>spellcheck</td>
+   <td>✔︎</td>
+   <td></td>
+   <td>✔︎</td>
+   </tr>
+   <tr>
+   <td>step</td>
+   <td></td>
+   <td></td>
+   <td>✔︎</td>
+   </tr>
+   <tr>
+   <td>tabindex</td>
+   <td>✔︎</td>
+   <td>✔︎</td>
+   <td>✔︎</td>
+   </tr>
+   <tr>
+   <td>title</td>
+   <td>✔︎</td>
+   <td>✔︎</td>
+   <td>✔︎</td>
+   </tr>
+   <tr>
+   <td>wrap</td>
+   <td>✔︎</td>
+   <td></td>
+   <td></td>
+   </tr>
+   </tbody>
+   </table>
+  
+   @class FormElement
+   @namespace Components
+   @extends Components.FormGroup
+   @public
+   */
+  exports.default = _group.default.extend({
+    layout: _element.default,
+    classNameBindings: ['disabled:disabled', 'required:is-required', 'isValidating'],
+
+    /**
+     * Text to display within a `<label>` tag.
+     *
+     * You should include a label for every form input cause otherwise screen readers
+     * will have trouble with your forms. Use `invisibleLabel` property if you want
+     * to hide them.
+     *
+     * @property label
+     * @type string
+     * @public
+     */
+    label: null,
+
+    /**
+     * Controls label visibility by adding 'sr-only' class.
+     *
+     * @property invisibleLabel
+     * @type boolean
+     * @default false
+     * @public
+     */
+    invisibleLabel: false,
+
+    /**
+     * @property hasLabel
+     * @type boolean
+     * @readonly
+     * @private
+     */
+    hasLabel: Ember.computed.notEmpty('label'),
+
+    /**
+     * The type of the control widget.
+     * Supported types:
+     *
+     * * 'text'
+     * * 'checkbox'
+     * * 'textarea'
+     * * any other type will use an input tag with the `controlType` value as the type attribute (for e.g. HTML5 input
+     * types like 'email'), and the same layout as the 'text' type
+     *
+     * @property controlType
+     * @type string
+     * @default 'text'
+     * @public
+     */
+    controlType: 'text',
+
+    /**
+     * The value of the control element is bound to this property. You can bind it to some controller property to
+     * get/set the control element's value:
+     *
+     * ```hbs
+     * {{form.element controlType="email" label="Email" placeholder="Email" value=email}}
+     * ```
+     *
+     * Note: you lose the ability to validate this form element by directly binding to its value. It is recommended
+     * to use the `property` feature instead.
+     *
+     *
+     * @property value
+     * @public
+     */
+    value: null,
+
+    /**
+     The property name of the form element's `model` (by default the `model` of its parent `Components.Form`) that this
+     form element should represent. The control element's value will automatically be bound to the model property's
+     value.
+      Using this property enables form validation on this element.
+      @property property
+     @type string
+     @public
+     */
+    property: null,
+
+    /**
+     * The model used for validation. Defaults to the parent `Components.Form`'s `model`
+     *
+     * @property model
+     * @public
+     */
+    model: null,
+
+    /**
+     * Show a help text next to the control
+     *
+     * @property helpText
+     * @type {string}
+     * @public
+     */
+    helpText: null,
+
+    /**
+     * Only if there is a validator, this property makes all errors to be displayed at once
+     * inside a scrollable container.
+     *
+     * @default false
+     * @property showMultipleErrors
+     * @public
+     * @type {Boolean}
+     */
+    showMultipleErrors: false,
+
+    /**
+     * @property hasHelpText
+     * @type boolean
+     * @readonly
+     * @private
+     */
+    hasHelpText: Ember.computed.notEmpty('helpText').readOnly(),
+
+    /**
+     * The array of error messages from the `model`'s validation.
+     *
+     * @property errors
+     * @type array
+     * @protected
+     */
+    errors: null,
+
+    /**
+     * @property hasErrors
+     * @type boolean
+     * @readonly
+     * @private
+     */
+    hasErrors: Ember.computed.gt('errors.length', 0),
+
+    /**
+     * The array of warning messages from the `model`'s validation.
+     *
+     * @property errors
+     * @type array
+     * @protected
+     */
+    warnings: null,
+
+    /**
+     * @property hasWarnings
+     * @type boolean
+     * @readonly
+     * @private
+     */
+    hasWarnings: Ember.computed.gt('warnings.length', 0),
+
+    /**
+     * Show a custom error message that does not come from the model's validation. Will be immediately shown, regardless
+     * of any user interaction (i.e. no `focusOut` event required)
+     *
+     * @property customError
+     * @type string
+     * @public
+     */
+    customError: null,
+
+    /**
+     * @property hasCustomError
+     * @type boolean
+     * @readonly
+     * @private
+     */
+    hasCustomError: Ember.computed.notEmpty('customError'),
+
+    /**
+     * Show a custom warning message that does not come from the model's validation. Will be immediately shown, regardless
+     * of any user interaction (i.e. no `focusOut` event required). If the model's validation has an error then the error
+     * will be shown in place of this warning.
+     *
+     * @property customWarning
+     * @type string
+     * @public
+     */
+    customWarning: null,
+
+    /**
+     * @property hasCustomWarning
+     * @type boolean
+     * @readonly
+     * @private
+     */
+    hasCustomWarning: Ember.computed.notEmpty('customWarning'),
+
+    /**
+     * Property for size styling, set to 'lg', 'sm' or 'xs' (the latter only for BS3)
+     *
+     * @property size
+     * @type String
+     * @public
+     */
+    size: null,
+
+    /**
+     * The array of validation messages (either errors or warnings) from either custom error/warnings or , if we are showing model validation messages, the model's validation
+     *
+     * @property validationMessages
+     * @type array
+     * @private
+     */
+    validationMessages: Ember.computed('hasCustomError', 'customError', 'hasErrors', 'hasCustomWarning', 'customWarning', 'hasWarnings', 'errors.[]', 'warnings.[]', 'showModelValidation', function () {
+      if (this.get('hasCustomError')) {
+        return Ember.A([this.get('customError')]);
+      }
+      if (this.get('hasErrors') && this.get('showModelValidation')) {
+        return Ember.A(this.get('errors'));
+      }
+      if (this.get('hasCustomWarning')) {
+        return Ember.A([this.get('customWarning')]);
+      }
+      if (this.get('hasWarnings') && this.get('showModelValidation')) {
+        return Ember.A(this.get('warnings'));
+      }
+      return null;
+    }),
+
+    /**
+     * @property hasValidationMessages
+     * @type boolean
+     * @readonly
+     * @private
+     */
+    hasValidationMessages: Ember.computed.gt('validationMessages.length', 0),
+
+    /**
+     * @property hasValidator
+     * @type boolean
+     * @default false
+     * @protected
+     */
+    hasValidator: false,
+
+    /**
+     * Set a validating state for async validations
+     *
+     * @property isValidating
+     * @type boolean
+     * @default false
+     * @protected
+     */
+    isValidating: false,
+
+    /**
+     * If `true` form validation markup is rendered (requires a validatable `model`).
+     *
+     * @property showValidation
+     * @type boolean
+     * @default false
+     * @private
+     */
+    showValidation: Ember.computed.or('showOwnValidation', 'showAllValidations', 'hasCustomError', 'hasCustomWarning'),
+
+    /**
+     * @property showOwnValidation
+     * @type boolean
+     * @default false
+     * @private
+     */
+    showOwnValidation: false,
+
+    /**
+     * @property showAllValidations
+     * @type boolean
+     * @default false
+     * @private
+     */
+    showAllValidations: false,
+
+    /**
+     * @property showModelValidations
+     * @type boolean
+     * @readonly
+     * @private
+     */
+    showModelValidation: Ember.computed.or('showOwnValidation', 'showAllValidations'),
+
+    /**
+     * @property showValidationMessages
+     * @type boolean
+     * @readonly
+     * @private
+     */
+    showValidationMessages: Ember.computed.and('showValidation', 'hasValidationMessages'),
+
+    /**
+     * Event or list of events which enable form validation markup rendering.
+     * Supported events: ['focusOut', 'change', 'input']
+     *
+     * @property showValidationOn
+     * @type string|array
+     * @default ['focusOut']
+     * @public
+     */
+    showValidationOn: null,
+
+    /**
+     * @property _showValidationOn
+     * @type array
+     * @readonly
+     * @private
+     */
+    _showValidationOn: Ember.computed('showValidationOn.[]', function () {
+      var showValidationOn = this.get('showValidationOn');
+
+      (true && !(Ember.isArray(showValidationOn) || Ember.typeOf(showValidationOn) === 'string') && Ember.assert('showValidationOn must be a String or an Array', Ember.isArray(showValidationOn) || Ember.typeOf(showValidationOn) === 'string'));
+
+      if (Ember.isArray(showValidationOn)) {
+        return showValidationOn;
+      }
+
+      if (typeof showValidationOn.toString === 'function') {
+        return [showValidationOn];
+      }
+      return [];
+    }),
+
+    /**
+     * @method showValidationOnHandler
+     * @private
+     */
+    showValidationOnHandler: function showValidationOnHandler(event) {
+      if (this.get('_showValidationOn').indexOf(event) !== -1) {
+        this.set('showOwnValidation', true);
+      }
+    },
+
+
+    /**
+     * The validation ("error" (BS3)/"danger" (BS4), "warning", or "success") or null if no validation is to be shown. Automatically computed from the
+     * models validation state.
+     *
+     * @property validation
+     * @readonly
+     * @type string
+     * @private
+     */
+    validation: Ember.computed('hasCustomError', 'hasErrors', 'hasCustomWarning', 'hasWarnings', 'hasValidator', 'showValidation', 'showModelValidation', 'isValidating', 'disabled', function () {
+      if (!this.get('showValidation') || !this.get('hasValidator') || this.get('isValidating') || this.get('disabled')) {
+        return null;
+      } else if (this.get('showModelValidation')) {
+        /* The display of model validation messages has been triggered */
+        return this.get('hasErrors') || this.get('hasCustomError') ? 'error' : this.get('hasWarnings') || this.get('hasCustomWarning') ? 'warning' : 'success';
+      } else {
+        /* If there are custom errors or warnings these should always be shown */
+        return this.get('hasCustomError') ? 'error' : 'warning';
+      }
+    }),
+
+    /**
+     * True for text field `controlType`s
+     *
+     * @property useIcons
+     * @type boolean
+     * @readonly
+     * @public
+     */
+    useIcons: Ember.computed.equal('controlComponent', 'bs-form/element/control/input'),
+
+    /**
+     * The form layout used for the markup generation (see http://getbootstrap.com/css/#forms):
+     *
+     * * 'horizontal'
+     * * 'vertical'
+     * * 'inline'
+     *
+     * Defaults to the parent `form`'s `formLayout` property.
+     *
+     * @property formLayout
+     * @type string
+     * @default 'vertical'
+     * @public
+     */
+    formLayout: 'vertical',
+
+    /**
+     * The Bootstrap grid class for form labels within a horizontal layout form. Defaults to the value of the same
+     * property of the parent form. The corresponding grid class for form controls is automatically computed.
+     *
+     * @property horizontalLabelGridClass
+     * @type string
+     * @public
+     */
+    horizontalLabelGridClass: null,
+
+    /**
+     * ID for input field and the corresponding label's "for" attribute
+     *
+     * @property formElementId
+     * @type string
+     * @private
+     */
+    formElementId: Ember.computed('elementId', function () {
+      return this.get('elementId') + '-field';
+    }),
+
+    /**
+     * ID of the helpText, used for aria-describedby attribute of the control element
+     *
+     * @property ariaDescribedBy
+     * @type string
+     * @private
+     */
+    ariaDescribedBy: Ember.computed('elementId', function () {
+      return this.get('elementId') + '-help';
+    }),
+
+    /**
+     * @property layoutComponent
+     * @type {String}
+     * @private
+     */
+    layoutComponent: Ember.computed('formLayout', 'controlType', function () {
+      var formLayout = this.get('formLayout');
+      var controlType = this.get('controlType');
+
+      if (nonDefaultLayouts.includes(controlType)) {
+        return 'bs-form/element/layout/' + formLayout + '/' + controlType;
+      } else {
+        return 'bs-form/element/layout/' + formLayout;
+      }
+    }),
+
+    /**
+     * @property controlComponent
+     * @type {String}
+     * @private
+     */
+    controlComponent: Ember.computed('controlType', function () {
+      var controlType = this.get('controlType');
+      var componentName = 'bs-form/element/control/' + controlType;
+
+      if (Ember.getOwner(this).hasRegistration('component:' + componentName)) {
+        return componentName;
+      }
+
+      return 'bs-form/element/control/input';
+    }),
+
+    /**
+     * @property errorsComponent
+     * @type {String}
+     * @private
+     */
+    errorsComponent: 'bs-form/element/errors',
+
+    /**
+     * @property feedbackIconComponent
+     * @type {String}
+     * @private
+     */
+    feedbackIconComponent: 'bs-form/element/feedback-icon',
+
+    /**
+     * @property labelComponent
+     * @type {String}
+     * @private
+     */
+    labelComponent: 'bs-form/element/label',
+
+    /**
+     * @property helpTextComponent
+     * @type {String}
+     * @private
+     */
+    helpTextComponent: 'bs-form/element/help-text',
+
+    /**
+     * Setup validation properties. This method acts as a hook for external validation
+     * libraries to overwrite. In case of failed validations the `errors` property should contain an array of error messages.
+     *
+     * @method setupValidations
+     * @private
+     */
+    setupValidations: function setupValidations() {},
+
+
+    /**
+     * Listen for focusOut events from the control element to automatically set `showOwnValidation` to true to enable
+     * form validation markup rendering if `showValidationsOn` contains `focusOut`.
+     *
+     * @event focusOut
+     * @private
+     */
+    focusOut: function focusOut() {
+      this.showValidationOnHandler('focusOut');
+    },
+
+
+    /**
+     * Listen for change events from the control element to automatically set `showOwnValidation` to true to enable
+     * form validation markup rendering if `showValidationsOn` contains `change`.
+     *
+     * @event change
+     * @private
+     */
+    change: function change() {
+      this.showValidationOnHandler('change');
+    },
+
+
+    /**
+     * Listen for input events from the control element to automatically set `showOwnValidation` to true to enable
+     * form validation markup rendering if `showValidationsOn` contains `input`.
+     *
+     * @event input
+     * @private
+     */
+    input: function input() {
+      this.showValidationOnHandler('input');
+    },
+
+
+    /**
+     * The action is called whenever the input value is changed, e.g. by typing text
+     *
+     * @event onChange
+     * @param {String} value The new value of the form control
+     * @param {Object} model The form element's model
+     * @param {String} property The value of `property`
+     * @public
+     */
+    onChange: function onChange() {},
+    init: function init() {
+      this._super.apply(this, arguments);
+      if (this.get('showValidationOn') === null) {
+        this.set('showValidationOn', ['focusOut']);
+      }
+      if (!Ember.isBlank(this.get('property'))) {
+        Ember.defineProperty(this, 'value', Ember.computed.alias('model.' + this.get('property')));
+        this.setupValidations();
+      }
+    },
+
+
+    /*
+     * adjust feedback icon position
+     *
+     * Bootstrap documentation:
+     *  Manual positioning of feedback icons is required for [...] input groups
+     *  with an add-on on the right. [...] For input groups, adjust the right
+     *  value to an appropriate pixel value depending on the width of your addon.
+     */
+    adjustFeedbackIcons: Ember.observer('hasFeedback', 'formLayout', function () {
+      var _this = this;
+
+      Ember.run.scheduleOnce('afterRender', function () {
+        var el = _this.get('element');
+        var feedbackIcon = void 0;
+        // validation state icons are only shown if form element has feedback
+        if (_this.get('hasFeedback') && !_this.get('isDestroying')
+        // and form group element has
+        // an input-group
+        && el.querySelector('.input-group')
+        // an addon or button on right side
+        && el.querySelector('.input-group input + .input-group-addon, .input-group input + .input-group-btn')
+        // an icon showing validation state
+        && (feedbackIcon = el.querySelector('.form-control-feedback'))) {
+          // clear existing adjustment
+          feedbackIcon.style.right = '';
+
+          var defaultPosition = 0;
+          var match = getComputedStyle(feedbackIcon).right.match(/^(\d+)px$/);
+          if (match) {
+            defaultPosition = parseInt(match[1]);
+          }
+          // Bootstrap documentation:
+          //  We do not support multiple add-ons (.input-group-addon or .input-group-btn) on a single side.
+          // therefore we could rely on having only one input-group-addon or input-group-btn
+          var inputGroupWidth = el.querySelector('input + .input-group-addon, input + .input-group-btn').offsetWidth;
+          var adjustedPosition = defaultPosition + inputGroupWidth;
+
+          feedbackIcon.style.right = adjustedPosition + 'px';
+        }
+      });
+    }),
+
+    didInsertElement: function didInsertElement() {
+      this._super.apply(this, arguments);
+      this.adjustFeedbackIcons();
+    },
+
+
+    actions: {
+      change: function change(value) {
+        var _getProperties = this.getProperties('onChange', 'model', 'property'),
+            onChange = _getProperties.onChange,
+            model = _getProperties.model,
+            property = _getProperties.property;
+
+        onChange(value, model, property);
+      }
+    }
+  });
+});
+;define('ember-bootstrap/components/base/bs-form/element/control', ['exports'], function (exports) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = Ember.Component.extend({
+
+    /**
+     * @property value
+     * @public
+     */
+    value: null,
+
+    /**
+     * @property ariaDescribedBy
+     * @type {string}
+     * @public
+     */
+    ariaDescribedBy: null,
+
+    /**
+     * This action is called whenever the `value` changes
+     *
+     * @event onChange
+     * @param {*} value
+     * @public
+     */
+    onChange: function onChange() {}
+  });
+});
+;define('ember-bootstrap/components/base/bs-form/element/control/checkbox', ['exports', 'ember-bootstrap/components/base/bs-form/element/control', 'ember-bootstrap/mixins/control-attributes'], function (exports, _control, _controlAttributes) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = _control.default.extend(_controlAttributes.default, {
+    attributeBindings: ['value:checked', 'type'],
+
+    /**
+     * @property type
+     * @type {String}
+     * @readonly
+     * @private
+     */
+    type: 'checkbox',
+
+    click: function click(event) {
+      this.get('onChange')(event.target.checked);
+    }
+  });
+});
+;define('ember-bootstrap/components/base/bs-form/element/control/input', ['exports', 'ember-bootstrap/components/base/bs-form/element/control', 'ember-bootstrap/mixins/control-attributes'], function (exports, _control, _controlAttributes) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = _control.default.extend(_controlAttributes.default, {
+    attributeBindings: ['value', 'type', 'placeholder', 'controlSize:size', 'minlength', 'maxlength', 'min', 'max', 'pattern', 'accept', 'autocomplete', 'autosave', 'inputmode', 'multiple', 'step', 'spellcheck'],
+    classNames: ['form-control'],
+
+    /**
+     * @property type
+     * @type {String}
+     * @public
+     */
+    type: 'text',
+
+    change: function change(event) {
+      this.get('onChange')(event.target.value);
+    },
+    input: function input(event) {
+      this.get('onChange')(event.target.value);
+    }
+  });
+});
+;define('ember-bootstrap/components/base/bs-form/element/control/textarea', ['exports', 'ember-bootstrap/components/base/bs-form/element/control', 'ember-bootstrap/mixins/control-attributes'], function (exports, _control, _controlAttributes) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = _control.default.extend(_controlAttributes.default, {
+    attributeBindings: ['value', 'placeholder', 'minlength', 'maxlength', 'autocomplete', 'spellcheck', 'rows', 'cols', 'wrap'],
+    tagName: 'textarea',
+    classNames: ['form-control'],
+
+    change: function change(event) {
+      this.get('onChange')(event.target.value);
+    },
+    input: function input(event) {
+      this.get('onChange')(event.target.value);
+    }
+  });
+});
+;define('ember-bootstrap/components/base/bs-form/element/errors', ['exports', 'ember-bootstrap/templates/components/bs-form/element/errors'], function (exports, _errors) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = Ember.Component.extend({
+    layout: _errors.default,
+    tagName: '',
+
+    /**
+     * @property show
+     * @type {Boolean}
+     * @public
+     */
+    show: false,
+
+    /**
+     * @property messages
+     * @type {Ember.Array}
+     * @public
+     */
+    messages: null,
+
+    /**
+     * Whether or not should display several errors at the same time.
+     *
+     * @default false
+     * @property showMultipleErrors
+     * @public
+     * @type {Boolean}
+     */
+    showMultipleErrors: false
+  });
+});
+;define('ember-bootstrap/components/base/bs-form/element/feedback-icon', ['exports', 'ember-bootstrap/templates/components/bs-form/element/feedback-icon'], function (exports, _feedbackIcon) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = Ember.Component.extend({
+    layout: _feedbackIcon.default,
+    tagName: '',
+
+    /**
+     * @property show
+     * @type {Boolean}
+     * @public
+     */
+    show: false,
+
+    /**
+     * @property iconName
+     * @type {String}
+     * @public
+     */
+    iconName: null
+  });
+});
+;define('ember-bootstrap/components/base/bs-form/element/help-text', ['exports', 'ember-bootstrap/templates/components/bs-form/element/help-text'], function (exports, _helpText) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = Ember.Component.extend({
+    layout: _helpText.default,
+
+    /**
+     * @property text
+     * @type {string}
+     * @public
+     */
+    text: null
+  });
+});
+;define('ember-bootstrap/components/base/bs-form/element/label', ['exports', 'ember-bootstrap/templates/components/bs-form/element/label'], function (exports, _label) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = Ember.Component.extend({
+    layout: _label.default,
+    tagName: '',
+
+    /**
+     * @property label
+     * @type string
+     * @public
+     */
+    label: null,
+
+    /**
+     * @property invisibleLabel
+     * @type boolean
+     * @public
+     */
+    invisibleLabel: false,
+
+    /**
+     * @property formElementId
+     * @type {String}
+     * @public
+     */
+    formElementId: null,
+
+    /**
+     * @property labelClass
+     * @type {String}
+     * @public
+     */
+    labelClass: null,
+
+    /**
+     * The form layout used for the markup generation (see http://getbootstrap.com/css/#forms):
+     *
+     * * 'horizontal'
+     * * 'vertical'
+     * * 'inline'
+     *
+     * Defaults to the parent `form`'s `formLayout` property.
+     *
+     * @property formLayout
+     * @type string
+     * @default 'vertical'
+     * @public
+     */
+    formLayout: 'vertical',
+
+    /**
+     * The type of the control widget.
+     * Supported types:
+     *
+     * * 'text'
+     * * 'checkbox'
+     * * 'textarea'
+     * * any other type will use an input tag with the `controlType` value as the type attribute (for e.g. HTML5 input
+     * types like 'email'), and the same layout as the 'text' type
+     *
+     * @property controlType
+     * @type string
+     * @default 'text'
+     * @public
+     */
+    controlType: 'text',
+
+    /**
+     * Indicates whether the type of the control widget equals `checkbox`
+     *
+     * @property isCheckbox
+     * @type boolean
+     * @private
+     */
+    isCheckbox: Ember.computed.equal('controlType', 'checkbox').readOnly(),
+
+    /**
+     * Indicates whether the form type equals `horizontal`
+     *
+     * @property isHorizontal
+     * @type boolean
+     * @private
+     */
+    isHorizontal: Ember.computed.equal('formLayout', 'horizontal').readOnly()
+  });
+});
+;define('ember-bootstrap/components/base/bs-form/element/layout', ['exports'], function (exports) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = Ember.Component.extend({
+    tagName: '',
+
+    /**
+     * @property formElementId
+     * @type {String}
+     * @public
+     */
+    formElementId: null,
+
+    /**
+     * @property hasLabel
+     * @type boolean
+     * @public
+     */
+    hasLabel: true,
+
+    /**
+     * @property errorsComponent
+     * @type {Ember.Component}
+     * @public
+     */
+    errorsComponent: null,
+
+    /**
+     * @property feedbackIconComponent
+     * @type {Ember.Component}
+     * @public
+     */
+    feedbackIconComponent: null,
+
+    /**
+     * @property labelComponent
+     * @type {Ember.Component}
+     * @public
+     */
+    labelComponent: null,
+
+    /**
+     * @property helpTextComponent
+     * @type {Ember.Component}
+     * @public
+     */
+    helpTextComponent: null
+  });
+});
+;define('ember-bootstrap/components/base/bs-form/element/layout/horizontal', ['exports', 'ember-bootstrap/components/base/bs-form/element/layout', 'ember-bootstrap/templates/components/bs-form/element/layout/horizontal'], function (exports, _layout, _horizontal) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = _layout.default.extend({
+    layout: _horizontal.default,
+
+    /**
+     * The Bootstrap grid class for form labels within a horizontal layout form.
+     *
+     * @property horizontalLabelGridClass
+     * @type string
+     * @public
+     */
+    horizontalLabelGridClass: null,
+
+    /**
+     * Computed property that specifies the Bootstrap grid class for form controls within a horizontal layout form.
+     *
+     * @property horizontalInputGridClass
+     * @type string
+     * @readonly
+     * @private
+     */
+    horizontalInputGridClass: Ember.computed('horizontalLabelGridClass', function () {
+      if (Ember.isBlank(this.get('horizontalLabelGridClass'))) {
+        return;
+      }
+      var parts = this.get('horizontalLabelGridClass').split('-');
+      (true && !(parts.length === 3) && Ember.assert('horizontalInputGridClass must match format bootstrap grid column class', parts.length === 3));
+
+      parts[2] = 12 - parts[2];
+      return parts.join('-');
+    }).readOnly(),
+
+    /**
+     * Computed property that specifies the Bootstrap offset grid class for form controls within a horizontal layout
+     * form, that have no label.
+     *
+     * @property horizontalInputOffsetGridClass
+     * @type string
+     * @readonly
+     * @private
+     */
+    horizontalInputOffsetGridClass: Ember.computed('horizontalLabelGridClass', function () {
+      if (Ember.isBlank(this.get('horizontalLabelGridClass'))) {
+        return;
+      }
+      var parts = this.get('horizontalLabelGridClass').split('-');
+      parts.splice(2, 0, 'offset');
+      return parts.join('-');
+    })
+
+  });
+});
+;define('ember-bootstrap/components/base/bs-form/element/layout/horizontal/checkbox', ['exports', 'ember-bootstrap/components/base/bs-form/element/layout/horizontal', 'ember-bootstrap/templates/components/bs-form/element/layout/horizontal/checkbox'], function (exports, _horizontal, _checkbox) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = _horizontal.default.extend({
+    layout: _checkbox.default
+  });
+});
+;define('ember-bootstrap/components/base/bs-form/element/layout/inline', ['exports', 'ember-bootstrap/components/base/bs-form/element/layout', 'ember-bootstrap/templates/components/bs-form/element/layout/vertical'], function (exports, _layout, _vertical) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = _layout.default.extend({
+    layout: _vertical.default
+  });
+});
+;define('ember-bootstrap/components/base/bs-form/element/layout/inline/checkbox', ['exports', 'ember-bootstrap/components/base/bs-form/element/layout/inline', 'ember-bootstrap/templates/components/bs-form/element/layout/vertical/checkbox'], function (exports, _inline, _checkbox) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = _inline.default.extend({
+    layout: _checkbox.default
+  });
+});
+;define('ember-bootstrap/components/base/bs-form/element/layout/vertical', ['exports', 'ember-bootstrap/components/base/bs-form/element/layout', 'ember-bootstrap/templates/components/bs-form/element/layout/vertical'], function (exports, _layout, _vertical) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = _layout.default.extend({
+    layout: _vertical.default
+  });
+});
+;define('ember-bootstrap/components/base/bs-form/element/layout/vertical/checkbox', ['exports', 'ember-bootstrap/components/base/bs-form/element/layout/vertical', 'ember-bootstrap/templates/components/bs-form/element/layout/vertical/checkbox'], function (exports, _vertical, _checkbox) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = _vertical.default.extend({
+    layout: _checkbox.default
+  });
+});
+;define('ember-bootstrap/components/base/bs-form/group', ['exports', 'ember-bootstrap/templates/components/bs-form/group'], function (exports, _group) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = Ember.Component.extend({
+    layout: _group.default,
+
+    /**
+     * @property classTypePrefix
+     * @type String
+     * @default 'form-group' (BS3) or 'form-control' (BS4)
+     * @private
+     */
+
+    /**
+     * Computed property which is true if the form group is in a validation state
+     *
+     * @property hasValidation
+     * @type boolean
+     * @private
+     * @readonly
+     */
+    hasValidation: Ember.computed.notEmpty('validation').readOnly(),
+
+    /**
+     * Set to a validation state to render the form-group with a validation style (only for BS3).
+     * See http://getbootstrap.com/css/#forms-control-validation
+     *
+     * The default states of "success", "warning" and "error" are supported by Bootstrap out-of-the-box.
+     * But you can use custom states as well. This will set a has-<state> class, and (if `useIcons`is true)
+     * a feedback whose class is taken from the <state>Icon property
+     *
+     * @property validation
+     * @type string
+     * @public
+     */
+    validation: null
+  });
+});
+;define('ember-bootstrap/components/base/bs-modal-simple', ['exports', 'ember-bootstrap/components/bs-modal', 'ember-bootstrap/templates/components/bs-modal-simple'], function (exports, _bsModal, _bsModalSimple) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = _bsModal.default.extend({
+    layout: _bsModalSimple.default,
+
+    /**
+     * The title of the modal, visible in the modal header. Is ignored if `header` is false.
+     *
+     * @property title
+     * @type string
+     * @public
+     */
+    title: null,
+
+    /**
+     * Display a close button (x icon) in the corner of the modal header.
+     *
+     * @property closeButton
+     * @type boolean
+     * @default true
+     * @public
+     */
+    closeButton: true,
+
+    /**
+     * The title of the default close button.
+     *
+     * @property closeTitle
+     * @type string
+     * @default 'Ok'
+     * @public
+     */
+    closeTitle: 'Ok',
+
+    /**
+     * The type of the submit button (primary button).
+     *
+     * @property submitButtonType
+     * @type string
+     * @default 'primary'
+     * @public
+     */
+    submitButtonType: 'primary',
+
+    /**
+     * The title of the submit button (primary button). Will be ignored (i.e. no button) if set to null.
+     *
+     * @property submitTitle
+     * @type string
+     * @default null
+     * @public
+     */
+    submitTitle: null
+
+  });
+});
+;define('ember-bootstrap/components/base/bs-modal', ['exports', 'ember-bootstrap/templates/components/bs-modal', 'ember-bootstrap/mixins/transition-support', 'ember-bootstrap/utils/listen-to-cp', 'ember-bootstrap/utils/transition-end', 'ember-bootstrap/utils/dom'], function (exports, _bsModal, _transitionSupport, _listenToCp, _transitionEnd, _dom) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = Ember.Component.extend(_transitionSupport.default, {
+    layout: _bsModal.default,
+
+    /**
+     * Visibility of the modal. Toggle to show/hide with CSS transitions.
+     *
+     * When the modal is closed by user interaction this property will not update by using two-way bindings in order
+     * to follow DDAU best practices. If you want to react to such changes, subscribe to the `onHide` action
+     *
+     * @property open
+     * @type boolean
+     * @default true
+     * @public
+     */
+    open: true,
+
+    /**
+     * @property isOpen
+     * @private
+     */
+    isOpen: (0, _listenToCp.default)('open'),
+
+    /**
+     * @property _isOpen
+     * @private
+     */
+    _isOpen: false,
+
+    /**
+     * Set to false to disable fade animations.
+     *
+     * @property fade
+     * @type boolean
+     * @default true
+     * @public
+     */
+    fade: Ember.computed.not('isFastBoot'),
+
+    /**
+     * @property notFade
+     * @type boolean
+     * @private
+     */
+    notFade: Ember.computed.not('fade'),
+
+    /**
+     * Used to apply Bootstrap's visibility classes.
+     *
+     * @property showModal
+     * @type boolean
+     * @default false
+     * @private
+     */
+    showModal: false,
+
+    /**
+     * Render modal markup?
+     *
+     * @property inDom
+     * @type boolean
+     * @default false
+     * @private
+     */
+    inDom: false,
+
+    /**
+     * @property paddingLeft
+     * @type number|null
+     * @default null
+     * @private
+     */
+    paddingLeft: null,
+
+    /**
+     * @property paddingRight
+     * @type number|null
+     * @default null
+     * @private
+     */
+    paddingRight: null,
+
+    /**
+     * Use a semi-transparent modal background to hide the rest of the page.
+     *
+     * @property backdrop
+     * @type boolean
+     * @default true
+     * @public
+     */
+    backdrop: true,
+
+    /**
+     * @property showBackdrop
+     * @type boolean
+     * @default false
+     * @private
+     */
+    showBackdrop: false,
+
+    /**
+     * Closes the modal when escape key is pressed.
+     *
+     * @property keyboard
+     * @type boolean
+     * @default true
+     * @public
+     */
+    keyboard: true,
+
+    /**
+     * [BS4 only!] Vertical position, either 'top' (default) or 'center'
+     * 'center' will apply the `modal-dialog-centered` class
+     *
+     * @property position
+     * @type {string}
+     * @default 'top'
+     * @public
+     */
+    position: 'top',
+
+    /**
+     * The id of the `.modal` element.
+     *
+     * @property modalId
+     * @type string
+     * @readonly
+     * @private
+     */
+    modalId: Ember.computed('elementId', function () {
+      return this.get('elementId') + '-modal';
+    }),
+
+    /**
+     * The DOM element of the `.modal` element.
+     *
+     * @property modalElement
+     * @type object
+     * @readonly
+     * @private
+     */
+    modalElement: Ember.computed('modalId', function () {
+      return document.getElementById(this.get('modalId'));
+    }).volatile(),
+
+    /**
+     * The id of the backdrop element.
+     *
+     * @property backdropId
+     * @type string
+     * @readonly
+     * @private
+     */
+    backdropId: Ember.computed('elementId', function () {
+      return this.get('elementId') + '-backdrop';
+    }),
+
+    /**
+     * The DOM element of the backdrop element.
+     *
+     * @property backdropElement
+     * @type object
+     * @readonly
+     * @private
+     */
+    backdropElement: Ember.computed('backdropId', function () {
+      return document.getElementById(this.get('backdropId'));
+    }).volatile(),
+
+    /**
+     * The destination DOM element for in-element.
+     *
+     * @property destinationElement
+     * @type object
+     * @readonly
+     * @private
+     */
+    destinationElement: Ember.computed(function () {
+      var dom = (0, _dom.getDOM)(this);
+      return (0, _dom.findElementById)(dom, 'ember-bootstrap-wormhole');
+    }).volatile(),
+
+    /**
+     * Property for size styling, set to null (default), 'lg' or 'sm'
+     *
+     * Also see the [Bootstrap docs](http://getbootstrap.com/javascript/#modals-sizes)
+     *
+     * @property size
+     * @type String
+     * @public
+     */
+    size: null,
+
+    /**
+     * If true clicking on the backdrop will close the modal.
+     *
+     * @property backdropClose
+     * @type boolean
+     * @default true
+     * @public
+     */
+    backdropClose: true,
+
+    /**
+     * If true component will render in place, rather than be wormholed.
+     *
+     * @property renderInPlace
+     * @type boolean
+     * @default false
+     * @public
+     */
+    renderInPlace: false,
+
+    /**
+     * @property _renderInPlace
+     * @type boolean
+     * @private
+     */
+    _renderInPlace: Ember.computed('renderInPlace', 'destinationElement', function () {
+      return this.get('renderInPlace') || !this.get('destinationElement');
+    }),
+
+    /**
+     * The duration of the fade transition
+     *
+     * @property transitionDuration
+     * @type number
+     * @default 300
+     * @public
+     */
+    transitionDuration: 300,
+
+    /**
+     * The duration of the backdrop fade transition
+     *
+     * @property backdropTransitionDuration
+     * @type number
+     * @default 150
+     * @public
+     */
+    backdropTransitionDuration: 150,
+
+    /**
+     * @property isFastBoot
+     * @type {Boolean}
+     * @private
+     */
+    isFastBoot: Ember.computed(function () {
+      if (!Ember.getOwner) {
+        // Ember.getOwner is available as of Ember 2.3, while FastBoot requires 2.4. So just return false...
+        return false;
+      }
+
+      var owner = Ember.getOwner(this);
+      if (!owner) {
+        return false;
+      }
+
+      var fastboot = owner.lookup('service:fastboot');
+      if (!fastboot) {
+        return false;
+      }
+
+      return Ember.get(fastboot, 'isFastBoot');
+    }),
+
+    /**
+     * The action to be sent when the modal footer's submit button (if present) is pressed.
+     * Note that if your modal body contains a form (e.g. [Components.Form](Components.Form.html){{/crossLink}}) this action will
+     * not be triggered. Instead a submit event will be triggered on the form itself. See the class description for an
+     * example.
+     *
+     * @property onSubmit
+     * @type function
+     * @public
+     */
+    onSubmit: function onSubmit() {},
+
+
+    /**
+     * The action to be sent when the modal is closing.
+     * This will be triggered by pressing the modal header's close button (x button) or the modal footer's close button.
+     * Note that this will happen before the modal is hidden from the DOM, as the fade transitions will still need some
+     * time to finish. Use the `onHidden` if you need the modal to be hidden when the action triggers.
+     *
+     * You can return false to prevent closing the modal automatically, and do that in your action by
+     * setting `open` to false.
+     *
+     * @property onHide
+     * @type function
+     * @public
+     */
+    onHide: function onHide() {},
+
+
+    /**
+     * The action to be sent after the modal has been completely hidden (including the CSS transition).
+     *
+     * @property onHidden
+     * @type function
+     * @default null
+     * @public
+     */
+    onHidden: function onHidden() {},
+
+
+    /**
+     * The action to be sent when the modal is opening.
+     * This will be triggered immediately after the modal is shown (so it's safe to access the DOM for
+     * size calculations and the like). This means that if fade=true, it will be shown in between the
+     * backdrop animation and the fade animation.
+     *
+     * @property onShow
+     * @type function
+     * @default null
+     * @public
+     */
+    onShow: function onShow() {},
+
+
+    /**
+     * The action to be sent after the modal has been completely shown (including the CSS transition).
+     *
+     * @property onShown
+     * @type function
+     * @public
+     */
+    onShown: function onShown() {},
+
+
+    actions: {
+      close: function close() {
+        if (this.get('onHide')() !== false) {
+          this.set('isOpen', false);
+        }
+      },
+      submit: function submit() {
+        // replace modalId by :scope selector if supported by all target browsers
+        var modalId = this.get('modalId');
+        var forms = this.get('modalElement').querySelectorAll('#' + modalId + ' .modal-body form');
+        if (forms.length > 0) {
+          // trigger submit event on body forms
+          var event = document.createEvent('Events');
+          event.initEvent('submit', true, true);
+          Array.prototype.slice.call(forms).forEach(function (form) {
+            return form.dispatchEvent(event);
+          });
+        } else {
+          // if we have no form, we send a submit action
+          this.get('onSubmit')();
+        }
+      }
+    },
+
+    /**
+     * Give the modal (or its autofocus element) focus
+     *
+     * @method takeFocus
+     * @private
+     */
+    takeFocus: function takeFocus() {
+      var modalEl = this.get('modalElement');
+      var focusElement = modalEl && modalEl.querySelector('[autofocus]');
+      if (!focusElement) {
+        focusElement = modalEl;
+      }
+      if (focusElement) {
+        focusElement.focus();
+      }
+    },
+
+
+    /**
+     * Show the modal
+     *
+     * @method show
+     * @private
+     */
+    show: function show() {
+      if (this._isOpen) {
+        return;
+      }
+      this._isOpen = true;
+
+      document.body.classList.add('modal-open');
+
+      this.resize();
+
+      var callback = function callback() {
+        var _this = this;
+
+        if (this.get('isDestroyed')) {
+          return;
+        }
+
+        this.checkScrollbar();
+        this.setScrollbar();
+
+        Ember.run.schedule('afterRender', function () {
+          var modalEl = _this.get('modalElement');
+          if (!modalEl) {
+            return;
+          }
+
+          modalEl.scrollTop = 0;
+          _this.handleUpdate();
+          _this.set('showModal', true);
+          _this.get('onShow')();
+
+          if (_this.get('usesTransition')) {
+            (0, _transitionEnd.default)(_this.get('modalElement'), function () {
+              this.takeFocus();
+              this.get('onShown')();
+            }, _this, _this.get('transitionDuration'));
+          } else {
+            _this.takeFocus();
+            _this.get('onShown')();
+          }
+        });
+      };
+      this.set('inDom', true);
+      this.handleBackdrop(callback);
+    },
+
+
+    /**
+     * Hide the modal
+     *
+     * @method hide
+     * @private
+     */
+    hide: function hide() {
+      if (!this._isOpen) {
+        return;
+      }
+      this._isOpen = false;
+
+      this.resize();
+      this.set('showModal', false);
+
+      if (this.get('usesTransition')) {
+        (0, _transitionEnd.default)(this.get('modalElement'), this.hideModal, this, this.get('transitionDuration'));
+      } else {
+        this.hideModal();
+      }
+    },
+
+
+    /**
+     * Clean up after modal is hidden and call onHidden
+     *
+     * @method hideModal
+     * @private
+     */
+    hideModal: function hideModal() {
+      var _this2 = this;
+
+      if (this.get('isDestroyed')) {
+        return;
+      }
+
+      this.handleBackdrop(function () {
+        document.body.classList.remove('modal-open');
+        _this2.resetAdjustments();
+        _this2.resetScrollbar();
+        _this2.set('inDom', false);
+        _this2.get('onHidden')();
+      });
+    },
+
+
+    /**
+     * SHow/hide the backdrop
+     *
+     * @method handleBackdrop
+     * @param callback
+     * @private
+     */
+    handleBackdrop: function handleBackdrop(callback) {
+      var doAnimate = this.get('usesTransition');
+
+      if (this.get('isOpen') && this.get('backdrop')) {
+        this.set('showBackdrop', true);
+
+        if (!callback) {
+          return;
+        }
+
+        Ember.run.schedule('afterRender', this, function () {
+          var backdrop = this.get('backdropElement');
+          (true && !(backdrop) && Ember.assert('Backdrop element should be in DOM', backdrop));
+
+          if (doAnimate) {
+            (0, _transitionEnd.default)(backdrop, callback, this, this.get('backdropTransitionDuration'));
+          } else {
+            callback.call(this);
+          }
+        });
+      } else if (!this.get('isOpen') && this.get('backdrop')) {
+        var backdrop = this.get('backdropElement');
+        (true && !(backdrop) && Ember.assert('Backdrop element should be in DOM', backdrop));
+
+
+        var callbackRemove = function callbackRemove() {
+          if (this.get('isDestroyed')) {
+            return;
+          }
+          this.set('showBackdrop', false);
+          if (callback) {
+            callback.call(this);
+          }
+        };
+        if (doAnimate) {
+          (0, _transitionEnd.default)(backdrop, callbackRemove, this, this.get('backdropTransitionDuration'));
+        } else {
+          callbackRemove.call(this);
+        }
+      } else if (callback) {
+        Ember.run.next(this, callback);
+      }
+    },
+
+
+    /**
+     * Attach/Detach resize event listeners
+     *
+     * @method resize
+     * @private
+     */
+    resize: function resize() {
+      if (this.get('isOpen')) {
+        this._handleUpdate = Ember.run.bind(this, this.handleUpdate);
+        window.addEventListener('resize', this._handleUpdate, false);
+      } else {
+        window.removeEventListener('resize', this._handleUpdate, false);
+      }
+    },
+
+
+    /**
+     * @method handleUpdate
+     * @private
+     */
+    handleUpdate: function handleUpdate() {
+      this.adjustDialog();
+    },
+
+
+    /**
+     * @method adjustDialog
+     * @private
+     */
+    adjustDialog: function adjustDialog() {
+      var modalIsOverflowing = this.get('modalElement').scrollHeight > document.documentElement.clientHeight;
+      this.setProperties({
+        paddingLeft: !this.bodyIsOverflowing && modalIsOverflowing ? this.get('scrollbarWidth') : null,
+        paddingRight: this.bodyIsOverflowing && !modalIsOverflowing ? this.get('scrollbarWidth') : null
+      });
+    },
+
+
+    /**
+     * @method resetAdjustments
+     * @private
+     */
+    resetAdjustments: function resetAdjustments() {
+      this.setProperties({
+        paddingLeft: null,
+        paddingRight: null
+      });
+    },
+
+
+    /**
+     * @method checkScrollbar
+     * @private
+     */
+    checkScrollbar: function checkScrollbar() {
+      var fullWindowWidth = window.innerWidth;
+      if (!fullWindowWidth) {
+        // workaround for missing window.innerWidth in IE8
+        var documentElementRect = document.documentElement.getBoundingClientRect();
+        fullWindowWidth = documentElementRect.right - Math.abs(documentElementRect.left);
+      }
+
+      this.bodyIsOverflowing = document.body.clientWidth < fullWindowWidth;
+    },
+
+
+    /**
+     * @method setScrollbar
+     * @private
+     */
+    setScrollbar: function setScrollbar() {
+      var bodyPad = parseInt(document.body.style.paddingRight || 0, 10);
+      this._originalBodyPad = document.body.style.paddingRight || '';
+      if (this.bodyIsOverflowing) {
+        document.body.style.paddingRight = bodyPad + this.get('scrollbarWidth');
+      }
+    },
+
+
+    /**
+     * @method resetScrollbar
+     * @private
+     */
+    resetScrollbar: function resetScrollbar() {
+      document.body.style.paddingRight = this._originalBodyPad;
+    },
+
+
+    /**
+     * @property scrollbarWidth
+     * @type number
+     * @readonly
+     * @private
+     */
+    scrollbarWidth: Ember.computed(function () {
+      var scrollDiv = document.createElement('div');
+      scrollDiv.className = 'modal-scrollbar-measure';
+      var modalEl = this.get('modalElement');
+      modalEl.parentNode.insertBefore(scrollDiv, modalEl.nextSibling);
+      var scrollbarWidth = scrollDiv.offsetWidth - scrollDiv.clientWidth;
+      scrollDiv.parentNode.removeChild(scrollDiv);
+      return scrollbarWidth;
+    }),
+
+    didInsertElement: function didInsertElement() {
+      this._super.apply(this, arguments);
+      if (this.get('isOpen')) {
+        this.show();
+      }
+    },
+    willDestroyElement: function willDestroyElement() {
+      this._super.apply(this, arguments);
+      window.removeEventListener('resize', this._handleUpdate, false);
+      document.body.classList.remove('modal-open');
+      this.resetScrollbar();
+    },
+
+
+    _observeOpen: Ember.observer('isOpen', function () {
+      if (this.get('isOpen')) {
+        this.show();
+      } else {
+        this.hide();
+      }
+    }),
+
+    init: function init() {
+      this._super.apply(this, arguments);
+
+      var _getProperties = this.getProperties('isOpen', 'backdrop', 'fade', 'isFastBoot'),
+          isOpen = _getProperties.isOpen,
+          backdrop = _getProperties.backdrop,
+          fade = _getProperties.fade,
+          isFastBoot = _getProperties.isFastBoot;
+
+      this.setProperties({
+        showModal: isOpen && (!fade || isFastBoot),
+        showBackdrop: isOpen && backdrop,
+        inDom: isOpen
+      });
+    }
+  });
+});
+;define('ember-bootstrap/components/base/bs-modal/body', ['exports', 'ember-bootstrap/templates/components/bs-modal/body'], function (exports, _body) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = Ember.Component.extend({
+    layout: _body.default,
+    classNames: ['modal-body']
+  });
+});
+;define('ember-bootstrap/components/base/bs-modal/dialog', ['exports', 'ember-bootstrap/templates/components/bs-modal/dialog'], function (exports, _dialog) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = Ember.Component.extend({
+    layout: _dialog.default,
+    classNames: ['modal'],
+    classNameBindings: ['fade'],
+    attributeBindings: ['tabindex', 'style'],
+    ariaRole: 'dialog',
+    tabindex: '-1',
+
+    /**
+     * Set to false to disable fade animations.
+     *
+     * @property fade
+     * @type boolean
+     * @default true
+     * @public
+     */
+    fade: true,
+
+    /**
+     * Used to apply Bootstrap's visibility classes
+     *
+     * @property showModal
+     * @type boolean
+     * @default false
+     * @private
+     */
+    showModal: false,
+
+    /**
+     * Render modal markup?
+     *
+     * @property inDom
+     * @type boolean
+     * @default false
+     * @private
+     */
+    inDom: false,
+
+    /**
+     * @property paddingLeft
+     * @type number|null
+     * @default null
+     * @private
+     */
+    paddingLeft: null,
+
+    /**
+     * @property paddingRight
+     * @type number|null
+     * @default null
+     * @private
+     */
+    paddingRight: null,
+
+    /**
+     * Closes the modal when escape key is pressed.
+     *
+     * @property keyboard
+     * @type boolean
+     * @default true
+     * @public
+     */
+    keyboard: true,
+
+    /**
+     * Property for size styling, set to null (default), 'lg' or 'sm'
+     *
+     * Also see the [Bootstrap docs](http://getbootstrap.com/javascript/#modals-sizes)
+     *
+     * @property size
+     * @type String
+     * @public
+     */
+    size: null,
+
+    /**
+     * If true clicking on the backdrop will close the modal.
+     *
+     * @property backdropClose
+     * @type boolean
+     * @default true
+     * @public
+     */
+    backdropClose: true,
+
+    /**
+     * @property style
+     * @type string
+     * @readOnly
+     * @private
+     */
+    style: Ember.computed('inDom', 'paddingLeft', 'paddingRight', function () {
+      var styles = [];
+
+      var _getProperties = this.getProperties('inDom', 'paddingLeft', 'paddingRight'),
+          inDom = _getProperties.inDom,
+          paddingLeft = _getProperties.paddingLeft,
+          paddingRight = _getProperties.paddingRight;
+
+      if (inDom) {
+        styles.push('display: block');
+      }
+      if (paddingLeft) {
+        styles.push('padding-left: ' + paddingLeft + 'px');
+      }
+      if (paddingRight) {
+        styles.push('padding-right: ' + paddingRight + 'px');
+      }
+
+      return Ember.String.htmlSafe(styles.join(';'));
+    }),
+
+    /**
+     * Name of the size class
+     *
+     * @property sizeClass
+     * @type string
+     * @readOnly
+     * @private
+     */
+    sizeClass: Ember.computed('size', function () {
+      var size = this.get('size');
+      return Ember.isBlank(size) ? null : 'modal-' + size;
+    }).readOnly(),
+
+    /**
+     * @event onClose
+     * @public
+     */
+    onClose: function onClose() {},
+    keyDown: function keyDown(e) {
+      var code = e.keyCode || e.which;
+      if (code === 27 && this.get('keyboard')) {
+        this.get('onClose')();
+      }
+    },
+    _click: function _click(e) {
+      if (!e.target.classList.contains('modal') || !this.get('backdropClose')) {
+        return;
+      }
+      this.get('onClose')();
+    },
+    didInsertElement: function didInsertElement() {
+      this._super.apply(this, arguments);
+      // Ember events use event delegation, but we need to add an `onclick` handler directly on the modal element for
+      // iOS to allow clicking the div. So a `click(){}` method here won't work, we need to attach an event listener
+      // directly to the element
+      this.element.onclick = Ember.run.bind(this, this._click);
+    },
+    willDestroyElement: function willDestroyElement() {
+      this.element.onclick = null;
+    }
+  });
+});
+;define('ember-bootstrap/components/base/bs-modal/footer', ['exports', 'ember-bootstrap/templates/components/bs-modal/footer'], function (exports, _footer) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = Ember.Component.extend({
+    layout: _footer.default,
+    tagName: 'form',
+    classNames: ['modal-footer'],
+
+    /**
+     * The title of the default close button. Will be ignored (i.e. no close button) if you provide your own block
+     * template.
+     *
+     * @property closeTitle
+     * @type string
+     * @default 'Ok'
+     * @public
+     */
+    closeTitle: 'Ok',
+
+    /**
+     * The title of the submit button (primary button). Will be ignored (i.e. no button) if set to null or if you provide
+     * your own block template.
+     *
+     * @property submitTitle
+     * @type string
+     * @default null
+     * @public
+     */
+    submitTitle: null,
+
+    hasSubmitButton: Ember.computed.notEmpty('submitTitle'),
+
+    /**
+     * Set to true to disable the submit button. If you bind this to some property that indicates if submitting is allowed
+     * (form validation for example) this can be used to prevent the user from pressing the submit button.
+     *
+     * @property submitDisabled
+     * @type boolean
+     * @default false
+     * @public
+     */
+    submitDisabled: false,
+
+    /**
+     * The type of the submit button (primary button).
+     *
+     * @property submitButtonType
+     * @type string
+     * @default 'primary'
+     * @public
+     */
+    submitButtonType: 'primary',
+
+    /**
+     * The action to send to the parent modal component when the modal footer's form is submitted
+     *
+     * @event onSubmit
+     * @public
+     */
+    onSubmit: function onSubmit() {},
+
+
+    /**
+     * @event onClose
+     * @public
+     */
+    onClose: function onClose() {},
+    submit: function submit(e) {
+      e.preventDefault();
+      // send to parent bs-modal component
+      this.get('onSubmit')();
+    }
+  });
+});
+;define('ember-bootstrap/components/base/bs-modal/header', ['exports', 'ember-bootstrap/templates/components/bs-modal/header'], function (exports, _header) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = Ember.Component.extend({
+    layout: _header.default,
+    classNames: ['modal-header'],
+
+    /**
+     * Show a close button (x icon)
+     *
+     * @property closeButton
+     * @type boolean
+     * @default true
+     * @public
+     */
+    closeButton: true,
+
+    /**
+     * The title to display in the modal header
+     *
+     * @property title
+     * @type string
+     * @default null
+     * @public
+     */
+    title: null,
+
+    /**
+     * @event onClose
+     * @public
+     */
+    onClose: function onClose() {}
+  });
+});
+;define('ember-bootstrap/components/base/bs-modal/header/close', ['exports', 'ember-bootstrap/templates/components/bs-modal/header/close'], function (exports, _close) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = Ember.Component.extend({
+    layout: _close.default,
+    tagName: 'button',
+    classNames: ['close'],
+    attributeBindings: ['type', 'aria-label'],
+    'aria-label': 'Close',
+    type: 'button',
+
+    /**
+     * @event onClick
+     * @public
+     */
+    onClick: function onClick() {},
+    click: function click() {
+      this.get('onClick')();
+    }
+  });
+});
+;define('ember-bootstrap/components/base/bs-modal/header/title', ['exports', 'ember-bootstrap/templates/components/bs-modal/header/title'], function (exports, _title) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = Ember.Component.extend({
+    layout: _title.default,
+    tagName: 'h4',
+    classNames: ['modal-title']
+  });
+});
+;define('ember-bootstrap/components/base/bs-nav', ['exports', 'ember-bootstrap/templates/components/bs-nav'], function (exports, _bsNav) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = Ember.Component.extend({
+    layout: _bsNav.default,
+
+    tagName: 'ul',
+    classNames: ['nav'],
+
+    classNameBindings: ['typeClass', 'justified:nav-justified'],
+
+    typeClass: Ember.computed('type', function () {
+      var type = this.get('type');
+      if (Ember.isPresent(type)) {
+        return 'nav-' + type;
+      }
+    }),
+
+    /**
+     * Special type of nav, either "pills" or "tabs"
+     *
+     * @property type
+     * @type String
+     * @default null
+     * @public
+     */
+    type: null,
+
+    /**
+     * Make the nav justified, see [bootstrap docs](http://getbootstrap.com/components/#nav-justified)
+     *
+     * @property justified
+     * @type boolean
+     * @default false
+     * @public
+     */
+    justified: false,
+
+    /**
+     * Make the nav pills stacked, see [bootstrap docs](http://getbootstrap.com/components/#nav-pills)
+     *
+     * @property stacked
+     * @type boolean
+     * @default false
+     * @public
+     */
+    stacked: false,
+
+    /**
+     * @property itemComponent
+     * @type {String}
+     * @private
+     */
+    itemComponent: 'bs-nav/item',
+
+    /**
+     * @property linkToComponent
+     * @type {String}
+     * @private
+     */
+    linkToComponent: 'bs-nav/link-to',
+
+    /**
+     * @property dropdownComponent
+     * @type {String}
+     * @private
+     */
+    dropdownComponent: 'bs-dropdown'
+  });
+});
+;define('ember-bootstrap/components/base/bs-nav/item', ['exports', 'ember-bootstrap/templates/components/bs-nav/item', 'ember-bootstrap/mixins/component-parent'], function (exports, _item, _componentParent) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = Ember.Component.extend(_componentParent.default, {
+    layout: _item.default,
+    classNameBindings: ['disabled', 'active'],
+    tagName: 'li',
+    ariaRole: 'presentation',
+
+    /**
+     * Render the nav item as disabled (see [Bootstrap docs](http://getbootstrap.com/components/#nav-disabled-links)).
+     * By default it will look at any nested `link-to` components and make itself disabled if there is a disabled link.
+     * See the [link-to API](http://emberjs.com/api/classes/Ember.Templates.helpers.html#toc_disabling-the-code-link-to-code-component)
+     *
+     * @property disabled
+     * @type boolean
+     * @public
+     */
+    disabled: Ember.computed.reads('_disabled'),
+    _disabled: false,
+
+    /**
+     * Render the nav item as active.
+     * By default it will look at any nested `link-to` components and make itself active if there is an active link
+     * (i.e. the link points to the current route).
+     * See the [link-to API](http://emberjs.com/api/classes/Ember.Templates.helpers.html#toc_handling-current-route)
+     *
+     * @property active
+     * @type boolean
+     * @public
+     */
+    active: Ember.computed.reads('_active'),
+    _active: false,
+
+    /**
+     * Collection of all `Ember.LinkComponent`s that are children
+     *
+     * @property childLinks
+     * @private
+     */
+    childLinks: Ember.computed.filter('children', function (view) {
+      return view instanceof Ember.LinkComponent;
+    }),
+
+    activeChildLinks: Ember.computed.filterBy('childLinks', 'active'),
+    hasActiveChildLinks: Ember.computed.gt('activeChildLinks.length', 0),
+
+    disabledChildLinks: Ember.computed.filterBy('childLinks', 'disabled'),
+    hasDisabledChildLinks: Ember.computed.gt('disabledChildLinks.length', 0),
+
+    /**
+     * Called when clicking the nav item
+     *
+     * @event onClick
+     * @public
+     */
+    onClick: function onClick() {},
+    click: function click() {
+      this.onClick();
+    },
+    init: function init() {
+      this._super.apply(this, arguments);
+      this.get('activeChildLinks');
+      this.get('disabledChildLinks');
+    },
+
+
+    _observeActive: Ember.observer('activeChildLinks.[]', function () {
+      Ember.run.scheduleOnce('afterRender', this, this._updateActive);
+    }),
+
+    _updateActive: function _updateActive() {
+      this.set('_active', this.get('hasActiveChildLinks'));
+    },
+
+
+    _observeDisabled: Ember.observer('disabledChildLinks.[]', function () {
+      Ember.run.scheduleOnce('afterRender', this, this._updateDisabled);
+    }),
+
+    _updateDisabled: function _updateDisabled() {
+      this.set('_disabled', this.get('hasDisabledChildLinks'));
+    }
+  });
+});
+;define('ember-bootstrap/components/base/bs-nav/link-to', ['exports', 'ember-bootstrap/mixins/component-child'], function (exports, _componentChild) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = Ember.LinkComponent.extend(_componentChild.default, {});
+});
+;define('ember-bootstrap/components/base/bs-navbar', ['exports', 'ember-bootstrap/mixins/type-class', 'ember-bootstrap/templates/components/bs-navbar', 'ember-bootstrap/utils/listen-to-cp'], function (exports, _typeClass, _bsNavbar, _listenToCp) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = Ember.Component.extend(_typeClass.default, {
+    layout: _bsNavbar.default,
+
+    tagName: 'nav',
+    classNames: ['navbar'],
+    classNameBindings: ['positionClass'],
+
+    classTypePrefix: 'navbar',
+
+    /**
+     * Manages the state for the responsive menu between the toggle and the content.
+     *
+     * @property collapsed
+     * @type boolean
+     * @default true
+     * @public
+     */
+    collapsed: true,
+
+    /**
+     * @property _collapsed
+     * @private
+     */
+    _collapsed: (0, _listenToCp.default)('collapsed'),
+
+    /**
+     * Controls whether the wrapping div is a fluid container or not.
+     *
+     * @property fluid
+     * @type boolean
+     * @default true
+     * @public
+     */
+    fluid: true,
+
+    /**
+     * Specifies the position classes for the navbar, currently supporting none, "fixed-top", "fixed-bottom", and
+     * either "static-top" (BS3) or "sticky-top" (BS4).
+     * See the [bootstrap docs](http://getbootstrap.com/components/#navbar-fixed-top) for details.
+     *
+     * @property position
+     * @type String
+     * @default null
+     * @public
+     */
+    position: null,
+
+    positionClass: Ember.computed('position', function () {
+      var position = this.get('position');
+      var validPositions = this.get('_validPositions');
+      var positionPrefix = this.get('_positionPrefix');
+
+      if (validPositions.indexOf(position) === -1) {
+        return null;
+      }
+
+      return '' + positionPrefix + position;
+    }),
+
+    /**
+     * The action to be sent when the navbar is about to be collapsed.
+     *
+     * You can return false to prevent collapsing the navbar automatically, and do that in your action by
+     * setting `collapsed` to true.
+     *
+     * @event onCollapse
+     * @public
+     */
+    onCollapse: function onCollapse() {},
+
+
+    /**
+     * The action to be sent after the navbar has been collapsed (including the CSS transition).
+     *
+     * @event onCollapsed
+     * @public
+     */
+    onCollapsed: function onCollapsed() {},
+
+
+    /**
+     * The action to be sent when the navbar is about to be expanded.
+     *
+     * You can return false to prevent expanding the navbar automatically, and do that in your action by
+     * setting `collapsed` to false.
+     *
+     * @event onExpand
+     * @public
+     */
+    onExpand: function onExpand() {},
+
+
+    /**
+     * The action to be sent after the navbar has been expanded (including the CSS transition).
+     *
+     * @event onExpanded
+     * @public
+     */
+    onExpanded: function onExpanded() {},
+
+
+    _onCollapsedChange: Ember.observer('_collapsed', function () {
+      var collapsed = this.get('_collapsed');
+      var active = this.get('active');
+      if (collapsed !== active) {
+        return;
+      }
+      if (collapsed === false) {
+        this.show();
+      } else {
+        this.hide();
+      }
+    }),
+
+    /**
+     * @method expand
+     * @private
+     */
+    expand: function expand() {
+      if (this.onExpand() !== false) {
+        this.set('_collapsed', false);
+      }
+    },
+
+
+    /**
+     * @method collapse
+     * @private
+     */
+    collapse: function collapse() {
+      if (this.onCollapse() !== false) {
+        this.set('_collapsed', true);
+      }
+    },
+
+
+    actions: {
+      expand: function expand() {
+        this.expand();
+      },
+      collapse: function collapse() {
+        this.collapse();
+      },
+      toggleNavbar: function toggleNavbar() {
+        if (this.get('_collapsed')) {
+          this.expand();
+        } else {
+          this.collapse();
+        }
+      }
+    }
+
+    /**
+     * Bootstrap 4 Only: Defines the responsive toggle breakpoint size. Options are the standard
+     * two character Bootstrap size abbreviations. Used to set the `navbar-expand-*`
+     * class. Set to `null` to disable collapsing.
+     *
+     * @property toggleBreakpoint
+     * @type String
+     * @default 'lg'
+     * @public
+     */
+
+    /**
+     * Bootstrap 4 Only: Sets the background color for the navbar. Can be any color
+     * in the set that composes the `bg-*` classes and can be extended by creating your
+     * own `bg-*` classes.
+     *
+     * @property backgroundColor
+     * @type String
+     * @default 'light'
+     * @public
+     */
+  });
+});
+;define('ember-bootstrap/components/base/bs-navbar/content', ['exports', 'ember-bootstrap/templates/components/bs-navbar/content', 'ember-bootstrap/components/bs-collapse'], function (exports, _content, _bsCollapse) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = _bsCollapse.default.extend({
+    layout: _content.default,
+
+    classNames: ['navbar-collapse']
+  });
+});
+;define('ember-bootstrap/components/base/bs-navbar/link-to', ['exports', 'ember-bootstrap/components/bs-nav/link-to'], function (exports, _linkTo) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = _linkTo.default.extend({
+
+    /**
+     * @property collapseNavbar
+     * @type {Boolean}
+     * @default true
+     * @public
+     */
+    collapseNavbar: true,
+
+    /**
+     * @event onCollapse
+     * @private
+     */
+    onCollapse: function onCollapse() {},
+    click: function click() {
+      if (this.get('collapseNavbar')) {
+        this.onCollapse();
+      }
+    }
+  });
+});
+;define('ember-bootstrap/components/base/bs-navbar/nav', ['exports', 'ember-bootstrap/components/bs-nav'], function (exports, _bsNav) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = _bsNav.default.extend({
+    classNames: ['navbar-nav'],
+
+    didReceiveAttrs: function didReceiveAttrs() {
+      this._super.apply(this, arguments);
+      this.set('justified', false);
+    }
+  });
+});
+;define('ember-bootstrap/components/base/bs-navbar/toggle', ['exports', 'ember-bootstrap/templates/components/bs-navbar/toggle'], function (exports, _toggle) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = Ember.Component.extend({
+    layout: _toggle.default,
+    tagName: 'button',
+
+    classNameBindings: ['collapsed'],
+    collapsed: true,
+
+    /**
+     * @event onClick
+     * @public
+     */
+    onClick: function onClick() {},
+    click: function click() {
+      this.onClick();
+    }
+  });
+});
+;define('ember-bootstrap/components/base/bs-popover', ['exports', 'ember-bootstrap/components/base/bs-contextual-help', 'ember-bootstrap/templates/components/bs-popover'], function (exports, _bsContextualHelp, _bsPopover) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = _bsContextualHelp.default.extend({
+    layout: _bsPopover.default,
+
+    /**
+     * @property placement
+     * @type string
+     * @default 'right'
+     * @public
+     */
+    placement: 'right',
+
+    /**
+     * @property triggerEvents
+     * @type array|string
+     * @default 'click'
+     * @public
+     */
+    triggerEvents: 'click',
+
+    /**
+     * The DOm element of the arrow element.
+     *
+     * @property arrowElement
+     * @type object
+     * @readonly
+     * @private
+     */
+    arrowElement: Ember.computed('overlayElement', function () {
+      return this.get('overlayElement').querySelector('.arrow');
+    }).volatile()
+  });
+});
+;define('ember-bootstrap/components/base/bs-popover/element', ['exports', 'ember-bootstrap/components/base/bs-contextual-help/element', 'ember-bootstrap/templates/components/bs-popover/element'], function (exports, _element, _element2) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = _element.default.extend({
+    layout: _element2.default,
+
+    /**
+     * @property title
+     * @type string
+     * @public
+     */
+    title: undefined,
+
+    /**
+     * @property hasTitle
+     * @type boolean
+     * @private
+     */
+    hasTitle: Ember.computed.notEmpty('title')
+  });
+});
+;define('ember-bootstrap/components/base/bs-progress', ['exports', 'ember-bootstrap/templates/components/bs-progress'], function (exports, _bsProgress) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = Ember.Component.extend({
+    layout: _bsProgress.default,
+    classNames: ['progress']
+  });
+});
+;define('ember-bootstrap/components/base/bs-progress/bar', ['exports', 'ember-bootstrap/templates/components/bs-progress/bar', 'ember-bootstrap/mixins/type-class'], function (exports, _bar, _typeClass) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = Ember.Component.extend(_typeClass.default, {
+    layout: _bar.default,
+    classNames: ['progress-bar'],
+    classNameBindings: ['progressBarStriped'],
+
+    attributeBindings: ['style', 'ariaValuenow', 'ariaValuemin', 'ariaValuemax'],
+
+    /**
+     * The lower limit of the value range
+     *
+     * @property minValue
+     * @type number
+     * @default 0
+     * @public
+     */
+    minValue: 0,
+
+    /**
+     * The upper limit of the value range
+     *
+     * @property maxValue
+     * @type number
+     * @default 100
+     * @public
+     */
+    maxValue: 100,
+
+    /**
+     * The value the progress bar should represent
+     *
+     * @property value
+     * @type number
+     * @default 0
+     * @public
+     */
+    value: 0,
+
+    /**
+     If true a label will be shown inside the progress bar.
+      By default it will be the percentage corresponding to the `value` property, rounded to `roundDigits` digits.
+     You can customize it by using the component with a block template, which the component yields the percentage
+     value to:
+      ```hbs
+     {{#bs-progress}}
+       {{#bs-progress-bar value=progressValue as |percent|}}{{progressValue}} ({{percent}}%){{/bs-progress-bar}}
+     {{/bs-progress}}
+     ```
+      @property showLabel
+     @type boolean
+     @default false
+     @public
+     */
+    showLabel: false,
+
+    /**
+     * Create a striped effect, see http://getbootstrap.com/components/#progress-striped
+     *
+     * @property striped
+     * @type boolean
+     * @default false
+     * @public
+     */
+    striped: false,
+
+    /**
+     * Animate the stripes, see http://getbootstrap.com/components/#progress-animated
+     *
+     * @property animate
+     * @type boolean
+     * @default false
+     * @public
+     */
+    animate: false,
+
+    /**
+     * Specify to how many digits the progress bar label should be rounded.
+     *
+     * @property roundDigits
+     * @type number
+     * @default 0
+     * @public
+     */
+    roundDigits: 0,
+
+    progressBarStriped: Ember.computed.readOnly('striped'),
+    progressBarAnimate: Ember.computed.readOnly('animate'),
+
+    ariaValuenow: Ember.computed.readOnly('value'),
+    ariaValuemin: Ember.computed.readOnly('minValue'),
+    ariaValuemax: Ember.computed.readOnly('maxValue'),
+
+    /**
+     * The percentage of `value`
+     *
+     * @property percent
+     * @type number
+     * @protected
+     * @readonly
+     */
+    percent: Ember.computed('value', 'minValue', 'maxValue', function () {
+      var value = parseFloat(this.get('value'));
+      var minValue = parseFloat(this.get('minValue'));
+      var maxValue = parseFloat(this.get('maxValue'));
+
+      return Math.min(Math.max((value - minValue) / (maxValue - minValue), 0), 1) * 100;
+    }).readOnly(),
+
+    /**
+     * The percentage of `value`, rounded to `roundDigits` digits
+     *
+     * @property percentRounded
+     * @type number
+     * @protected
+     * @readonly
+     */
+    percentRounded: Ember.computed('percent', 'roundDigits', function () {
+      var roundFactor = Math.pow(10, this.get('roundDigits'));
+      return Math.round(this.get('percent') * roundFactor) / roundFactor;
+    }).readOnly(),
+
+    /**
+     * @property style
+     * @type string
+     * @private
+     * @readonly
+     */
+    style: Ember.computed('percent', function () {
+      var percent = this.get('percent');
+      return Ember.String.htmlSafe('width: ' + percent + '%');
+    })
+
+  });
+});
+;define('ember-bootstrap/components/base/bs-tab', ['exports', 'ember-bootstrap/templates/components/bs-tab', 'ember-bootstrap/mixins/component-parent', 'ember-bootstrap/components/bs-tab/pane', 'ember-bootstrap/utils/listen-to-cp'], function (exports, _bsTab, _componentParent, _pane, _listenToCp) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = Ember.Component.extend(_componentParent.default, {
+    layout: _bsTab.default,
+
+    /**
+     * Type of nav, either "pills" or "tabs"
+     *
+     * @property type
+     * @type String
+     * @default 'tabs'
+     * @public
+     */
+    type: 'tabs',
+
+    /**
+     * By default the tabs will be automatically generated using the available [TabPane](Components.TabPane.html)
+     * components. If set to true, you can deactivate this and setup the tabs manually. See the example above.
+     *
+     * @property customTabs
+     * @type boolean
+     * @default false
+     * @public
+     */
+    customTabs: false,
+
+    /**
+     * The id (`elementId`) of the active [TabPane](Components.TabPane.html).
+     * By default the first tab will be active, but this can be changed by setting this property
+     *
+     * ```hbs
+     * {{#bs-tab activeId="pane2"}}
+     *   {{#tab.pane id="pane1" title="Tab 1"}}
+     *      ...
+     *   {{/tab.pane}}
+     *   {{#tab.pane id="pane1" title="Tab 1"}}
+     *     ...
+     *   {{/tab.pane}}
+     * {{/bs-tab}}
+     * ```
+     *
+     * When the selection is changed by user interaction this property will not update by using two-way bindings in order
+     * to follow DDAU best practices. If you want to react to such changes, subscribe to the `onChange` action
+     *
+     * @property activeId
+     * @type string
+     * @public
+     */
+    activeId: Ember.computed.oneWay('childPanes.firstObject.elementId'),
+
+    /**
+     * @property isActiveId
+     * @private
+     */
+    isActiveId: (0, _listenToCp.default)('activeId'),
+
+    /**
+     * Set to false to disable the fade animation when switching tabs.
+     *
+     * @property fade
+     * @type boolean
+     * @default true
+     * @public
+     */
+    fade: true,
+
+    /**
+     * The duration of the fade animation
+     *
+     * @property fadeDuration
+     * @type integer
+     * @default 150
+     * @public
+     */
+    fadeDuration: 150,
+
+    /**
+     * This action is called when switching the active tab, with the new and previous pane id
+     *
+     * You can return false to prevent changing the active tab automatically, and do that in your action by
+     * setting `activeId`.
+     *
+     * @event onChange
+     * @public
+     */
+    onChange: function onChange() {},
+
+
+    /**
+     * All `TabPane` child components
+     *
+     * @property childPanes
+     * @type array
+     * @readonly
+     * @private
+     */
+    childPanes: Ember.computed.filter('children', function (view) {
+      return view instanceof _pane.default;
+    }),
+
+    /**
+     * Array of objects that define the tab structure
+     *
+     * @property navItems
+     * @type array
+     * @readonly
+     * @private
+     */
+    navItems: Ember.computed('childPanes.@each.{elementId,title,group}', function () {
+      var items = Ember.A();
+      this.get('childPanes').forEach(function (pane) {
+        var groupTitle = pane.get('groupTitle');
+        var item = pane.getProperties('elementId', 'title');
+        if (Ember.isPresent(groupTitle)) {
+          var group = items.findBy('groupTitle', groupTitle);
+          if (group) {
+            group.children.push(item);
+            group.childIds.push(item.elementId);
+          } else {
+            items.push({
+              isGroup: true,
+              groupTitle: groupTitle,
+              children: Ember.A([item]),
+              childIds: Ember.A([item.elementId])
+            });
+          }
+        } else {
+          items.push(item);
+        }
+      });
+      return items;
+    }),
+
+    actions: {
+      select: function select(id) {
+        var previous = this.get('isActiveId');
+        if (this.get('onChange')(id, previous) !== false) {
+          // change active tab when `onChange` does not return false
+          this.set('isActiveId', id);
+        }
+      }
+    }
+  });
+});
+;define('ember-bootstrap/components/base/bs-tab/pane', ['exports', 'ember-bootstrap/templates/components/bs-tab/pane', 'ember-bootstrap/mixins/component-child', 'ember-bootstrap/mixins/transition-support', 'ember-bootstrap/utils/transition-end'], function (exports, _pane, _componentChild, _transitionSupport, _transitionEnd) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = Ember.Component.extend(_componentChild.default, _transitionSupport.default, {
+    layout: _pane.default,
+    classNameBindings: ['active', 'usesTransition:fade'],
+    classNames: ['tab-pane'],
+    ariaRole: 'tabpanel',
+
+    /**
+     * @property activeId
+     * @private
+     */
+    activeId: null,
+
+    /**
+     * True if this pane is active (visible)
+     *
+     * @property isActive
+     * @type boolean
+     * @readonly
+     * @private
+     */
+    isActive: Ember.computed('activeId', 'elementId', function () {
+      return this.get('activeId') === this.get('elementId');
+    }).readOnly(),
+
+    /**
+     * Used to apply Bootstrap's "active" class
+     *
+     * @property active
+     * @type boolean
+     * @default false
+     * @private
+     */
+    active: false,
+
+    /**
+     * Used to trigger the Bootstrap visibility classes.
+     *
+     * @property showContent
+     * @type boolean
+     * @default false
+     * @private
+     */
+    showContent: false,
+
+    /**
+     * The title for this tab pane. This is used by the `bs-tab` component to automatically generate
+     * the tab navigation.
+     * See the [Components.Tab](Components.Tab.html) for examples.
+     *
+     * @property title
+     * @type string
+     * @default null
+     * @public
+     */
+    title: null,
+
+    /**
+     * An optional group title used by the `bs-tab` component to group all panes with the same group title
+     * under a common drop down in the tab navigation.
+     * See the [Components.Tab](Components.Tab.html) for examples.
+     *
+     * @property groupTitle
+     * @type string
+     * @default null
+     * @public
+     */
+    groupTitle: null,
+
+    /**
+     * Use fade animation when switching tabs.
+     *
+     * @property fade
+     * @type boolean
+     * @private
+     */
+    fade: true,
+
+    /**
+     * The duration of the fade out animation
+     *
+     * @property fadeDuration
+     * @type integer
+     * @default 150
+     * @private
+     */
+    fadeDuration: 150,
+
+    /**
+     * Show the pane
+     *
+     * @method show
+     * @protected
+     */
+    show: function show() {
+      if (this.get('usesTransition')) {
+        (0, _transitionEnd.default)(this.get('element'), function () {
+          if (!this.get('isDestroyed')) {
+            this.setProperties({
+              active: true,
+              showContent: true
+            });
+          }
+        }, this, this.get('fadeDuration'));
+      } else {
+        this.set('active', true);
+      }
+    },
+
+
+    /**
+     * Hide the pane
+     *
+     * @method hide
+     * @protected
+     */
+    hide: function hide() {
+      if (this.get('usesTransition')) {
+        (0, _transitionEnd.default)(this.get('element'), function () {
+          if (!this.get('isDestroyed')) {
+            this.set('active', false);
+          }
+        }, this, this.get('fadeDuration'));
+        this.set('showContent', false);
+      } else {
+        this.set('active', false);
+      }
+    },
+
+
+    _showHide: Ember.observer('isActive', function () {
+      if (this.get('isActive')) {
+        this.show();
+      } else {
+        this.hide();
+      }
+    }),
+
+    init: function init() {
+      this._super.apply(this, arguments);
+      Ember.run.scheduleOnce('afterRender', this, function () {
+        // isActive comes from parent component, so only available after render...
+        this.set('active', this.get('isActive'));
+        this.set('showContent', this.get('isActive') && this.get('fade'));
+      });
+    }
+  });
+});
+;define('ember-bootstrap/components/base/bs-tooltip', ['exports', 'ember-bootstrap/components/base/bs-contextual-help', 'ember-bootstrap/templates/components/bs-tooltip'], function (exports, _bsContextualHelp, _bsTooltip) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = _bsContextualHelp.default.extend({
+    layout: _bsTooltip.default,
+
+    /**
+     * The DOM element of the arrow element.
+     *
+     * @property arrowElement
+     * @type object
+     * @readonly
+     * @private
+     */
+    arrowElement: Ember.computed('overlayElement', function () {
+      return this.get('overlayElement').querySelector('.tooltip-arrow');
+    }).volatile()
+  });
+});
+;define('ember-bootstrap/components/base/bs-tooltip/element', ['exports', 'ember-bootstrap/templates/components/bs-tooltip/element', 'ember-bootstrap/components/base/bs-contextual-help/element'], function (exports, _element, _element2) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = _element2.default.extend({
+    layout: _element.default
+  });
+});
+;define('ember-bootstrap/components/bs-accordion', ['exports', 'ember-bootstrap/components/base/bs-accordion'], function (exports, _bsAccordion) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = _bsAccordion.default.extend({
+    classNames: ['panel-group']
+  });
+});
+;define('ember-bootstrap/components/bs-accordion/item', ['exports', 'ember-bootstrap/components/base/bs-accordion/item'], function (exports, _item) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = _item.default.extend({
+    classNames: ['panel'],
+
+    /**
+     * @property classTypePrefix
+     * @type String
+     * @default 'panel'
+     * @protected
+     */
+    classTypePrefix: 'panel'
+  });
+});
+;define('ember-bootstrap/components/bs-accordion/item/body', ['exports', 'ember-bootstrap/components/base/bs-accordion/item/body'], function (exports, _body) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  Object.defineProperty(exports, 'default', {
+    enumerable: true,
+    get: function () {
+      return _body.default;
+    }
+  });
+});
+;define('ember-bootstrap/components/bs-accordion/item/title', ['exports', 'ember-bootstrap/components/base/bs-accordion/item/title'], function (exports, _title) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = _title.default.extend({
+    classNames: ['panel-heading']
+  });
+});
+;define('ember-bootstrap/components/bs-alert', ['exports', 'ember-bootstrap/components/base/bs-alert'], function (exports, _bsAlert) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = _bsAlert.default.extend({
+    classNameBindings: ['showAlert:in']
+  });
+});
+;define('ember-bootstrap/components/bs-button-group', ['exports', 'ember-bootstrap/components/base/bs-button-group'], function (exports, _bsButtonGroup) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  Object.defineProperty(exports, 'default', {
+    enumerable: true,
+    get: function () {
+      return _bsButtonGroup.default;
+    }
+  });
+});
+;define('ember-bootstrap/components/bs-button-group/button', ['exports', 'ember-bootstrap/components/base/bs-button-group/button'], function (exports, _button) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  Object.defineProperty(exports, 'default', {
+    enumerable: true,
+    get: function () {
+      return _button.default;
+    }
+  });
+});
+;define('ember-bootstrap/components/bs-button', ['exports', 'ember-bootstrap/components/base/bs-button'], function (exports, _bsButton) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  Object.defineProperty(exports, 'default', {
+    enumerable: true,
+    get: function () {
+      return _bsButton.default;
+    }
+  });
+});
+;define('ember-bootstrap/components/bs-carousel', ['exports', 'ember-bootstrap/components/base/bs-carousel'], function (exports, _bsCarousel) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = _bsCarousel.default.extend({
+    nextControlClassName: 'carousel-control right',
+    nextControlIcon: 'icon-next',
+    prevControlClassName: 'carousel-control left',
+    prevControlIcon: 'icon-prev'
+  });
+});
+;define('ember-bootstrap/components/bs-carousel/slide', ['exports', 'ember-bootstrap/components/base/bs-carousel/slide'], function (exports, _slide) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = _slide.default.extend({
+    classNameBindings: ['left', 'next', 'prev', 'right'],
+    classNames: ['item']
+  });
+});
+;define('ember-bootstrap/components/bs-collapse', ['exports', 'ember-bootstrap/components/base/bs-collapse'], function (exports, _bsCollapse) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = _bsCollapse.default.extend({
+    classNameBindings: ['showContent:in']
+  });
+});
+;define('ember-bootstrap/components/bs-dropdown', ['exports', 'ember-bootstrap/components/base/bs-dropdown'], function (exports, _bsDropdown) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = _bsDropdown.default.extend({
+    classNameBindings: ['isOpen:open']
+  });
+});
+;define('ember-bootstrap/components/bs-dropdown/button', ['exports', 'ember-bootstrap/components/base/bs-dropdown/button'], function (exports, _button) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  Object.defineProperty(exports, 'default', {
+    enumerable: true,
+    get: function () {
+      return _button.default;
+    }
+  });
+});
+;define('ember-bootstrap/components/bs-dropdown/menu', ['exports', 'ember-bootstrap/components/base/bs-dropdown/menu'], function (exports, _menu) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = _menu.default.extend({
+    tagName: 'ul',
+
+    classNames: ['dropdown-menu'],
+    classNameBindings: ['alignClass']
+  });
+});
+;define('ember-bootstrap/components/bs-dropdown/menu/divider', ['exports', 'ember-bootstrap/components/base/bs-dropdown/menu/divider'], function (exports, _divider) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = _divider.default.extend({
+    classNames: ['divider']
+  });
+});
+;define('ember-bootstrap/components/bs-dropdown/menu/item', ['exports', 'ember-bootstrap/components/base/bs-dropdown/menu/item'], function (exports, _item) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = _item.default.extend({
+    tagName: 'li'
+  });
+});
+;define('ember-bootstrap/components/bs-dropdown/menu/link-to', ['exports', 'ember-bootstrap/components/base/bs-dropdown/menu/link-to'], function (exports, _linkTo) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  Object.defineProperty(exports, 'default', {
+    enumerable: true,
+    get: function () {
+      return _linkTo.default;
+    }
+  });
+});
+;define('ember-bootstrap/components/bs-dropdown/toggle', ['exports', 'ember-bootstrap/components/base/bs-dropdown/toggle'], function (exports, _toggle) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  Object.defineProperty(exports, 'default', {
+    enumerable: true,
+    get: function () {
+      return _toggle.default;
+    }
+  });
+});
+;define('ember-bootstrap/components/bs-form', ['exports', 'ember-bootstrap/components/base/bs-form'], function (exports, _bsForm) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = _bsForm.default.extend({
+    layoutClass: Ember.computed('formLayout', function () {
+      var layout = this.get('formLayout');
+      var supportedTypes = ['vertical', 'horizontal', 'inline'];
+      (true && !(supportedTypes.indexOf(layout) >= 0) && Ember.assert('must provide a valid `formLayout` attribute.', supportedTypes.indexOf(layout) >= 0));
+
+      return layout === 'vertical' ? 'form' : 'form-' + layout;
+    }).readOnly()
+  });
+});
+;define('ember-bootstrap/components/bs-form/element', ['exports', 'ember-bootstrap/components/base/bs-form/element'], function (exports, _element) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  Object.defineProperty(exports, 'default', {
+    enumerable: true,
+    get: function () {
+      return _element.default;
+    }
+  });
+});
+;define('ember-bootstrap/components/bs-form/element/control', ['exports', 'ember-bootstrap/components/base/bs-form/element/control'], function (exports, _control) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  Object.defineProperty(exports, 'default', {
+    enumerable: true,
+    get: function () {
+      return _control.default;
+    }
+  });
+});
+;define('ember-bootstrap/components/bs-form/element/control/checkbox', ['exports', 'ember-bootstrap/components/base/bs-form/element/control/checkbox'], function (exports, _checkbox) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  Object.defineProperty(exports, 'default', {
+    enumerable: true,
+    get: function () {
+      return _checkbox.default;
+    }
+  });
+});
+;define('ember-bootstrap/components/bs-form/element/control/input', ['exports', 'ember-bootstrap/components/base/bs-form/element/control/input'], function (exports, _input) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  Object.defineProperty(exports, 'default', {
+    enumerable: true,
+    get: function () {
+      return _input.default;
+    }
+  });
+});
+;define('ember-bootstrap/components/bs-form/element/control/textarea', ['exports', 'ember-bootstrap/components/base/bs-form/element/control/textarea'], function (exports, _textarea) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  Object.defineProperty(exports, 'default', {
+    enumerable: true,
+    get: function () {
+      return _textarea.default;
+    }
+  });
+});
+;define('ember-bootstrap/components/bs-form/element/errors', ['exports', 'ember-bootstrap/components/base/bs-form/element/errors'], function (exports, _errors) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = _errors.default.extend({
+    feedbackClass: 'help-block'
+  });
+});
+;define('ember-bootstrap/components/bs-form/element/feedback-icon', ['exports', 'ember-bootstrap/components/base/bs-form/element/feedback-icon'], function (exports, _feedbackIcon) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  Object.defineProperty(exports, 'default', {
+    enumerable: true,
+    get: function () {
+      return _feedbackIcon.default;
+    }
+  });
+});
+;define('ember-bootstrap/components/bs-form/element/help-text', ['exports', 'ember-bootstrap/components/base/bs-form/element/help-text'], function (exports, _helpText) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = _helpText.default.extend({
+    classNames: ['help-block']
+  });
+});
+;define('ember-bootstrap/components/bs-form/element/label', ['exports', 'ember-bootstrap/components/base/bs-form/element/label'], function (exports, _label) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = _label.default.extend({
+    tagName: ''
+  });
+});
+;define('ember-bootstrap/components/bs-form/element/layout', ['exports', 'ember-bootstrap/components/base/bs-form/element/layout'], function (exports, _layout) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  Object.defineProperty(exports, 'default', {
+    enumerable: true,
+    get: function () {
+      return _layout.default;
+    }
+  });
+});
+;define('ember-bootstrap/components/bs-form/element/layout/horizontal', ['exports', 'ember-bootstrap/components/base/bs-form/element/layout/horizontal'], function (exports, _horizontal) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  Object.defineProperty(exports, 'default', {
+    enumerable: true,
+    get: function () {
+      return _horizontal.default;
+    }
+  });
+});
+;define('ember-bootstrap/components/bs-form/element/layout/horizontal/checkbox', ['exports', 'ember-bootstrap/components/base/bs-form/element/layout/horizontal/checkbox'], function (exports, _checkbox) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  Object.defineProperty(exports, 'default', {
+    enumerable: true,
+    get: function () {
+      return _checkbox.default;
+    }
+  });
+});
+;define('ember-bootstrap/components/bs-form/element/layout/inline', ['exports', 'ember-bootstrap/components/base/bs-form/element/layout/inline'], function (exports, _inline) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  Object.defineProperty(exports, 'default', {
+    enumerable: true,
+    get: function () {
+      return _inline.default;
+    }
+  });
+});
+;define('ember-bootstrap/components/bs-form/element/layout/inline/checkbox', ['exports', 'ember-bootstrap/components/base/bs-form/element/layout/inline/checkbox'], function (exports, _checkbox) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  Object.defineProperty(exports, 'default', {
+    enumerable: true,
+    get: function () {
+      return _checkbox.default;
+    }
+  });
+});
+;define('ember-bootstrap/components/bs-form/element/layout/vertical', ['exports', 'ember-bootstrap/components/base/bs-form/element/layout/vertical'], function (exports, _vertical) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  Object.defineProperty(exports, 'default', {
+    enumerable: true,
+    get: function () {
+      return _vertical.default;
+    }
+  });
+});
+;define('ember-bootstrap/components/bs-form/element/layout/vertical/checkbox', ['exports', 'ember-bootstrap/components/base/bs-form/element/layout/vertical/checkbox'], function (exports, _checkbox) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  Object.defineProperty(exports, 'default', {
+    enumerable: true,
+    get: function () {
+      return _checkbox.default;
+    }
+  });
+});
+;define('ember-bootstrap/components/bs-form/group', ['exports', 'ember-bootstrap/components/base/bs-form/group', 'ember-bootstrap/config', 'ember-bootstrap/mixins/size-class'], function (exports, _group, _config, _sizeClass) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = _group.default.extend(_sizeClass.default, {
+    classNames: ['form-group'],
+    classNameBindings: ['validationClass', 'hasFeedback'],
+
+    classTypePrefix: 'form-group',
+
+    /**
+     * Whether to show validation state icons.
+     * See http://getbootstrap.com/css/#forms-control-validation
+     *
+     * @property useIcons
+     * @type boolean
+     * @default true
+     * @public
+     */
+    useIcons: true,
+
+    /**
+     * Computed property which is true if the form group is showing a validation icon
+     *
+     * @property hasFeedback
+     * @type boolean
+     * @private
+     * @readonly
+     */
+    hasFeedback: Ember.computed.and('hasValidation', 'useIcons', 'hasIconForValidationState').readOnly(),
+
+    /**
+     * The icon classes to be used for a feedback icon in a "success" validation state.
+     * Defaults to the usual glyphicon classes. This is ignored, and no feedback icon is
+     * rendered if `useIcons` is false.
+     *
+     * You can change this globally by setting the `formValidationSuccessIcon` property of
+     * the ember-bootstrap configuration in your config/environment.js file. If your are
+     * using FontAwesome for example:
+     *
+     * ```js
+     * ENV['ember-bootstrap'] = {
+       *   formValidationSuccessIcon: 'fa fa-check'
+       * }
+     * ```
+     *
+     * @property successIcon
+     * @type string
+     * @default 'glyphicon glyphicon-ok'
+     * @public
+     */
+    successIcon: _config.default.formValidationSuccessIcon,
+
+    /**
+     * The icon classes to be used for a feedback icon in a "error" validation state.
+     * Defaults to the usual glyphicon classes. This is ignored, and no feedback icon is
+     * rendered if `useIcons` is false.
+     *
+     * You can change this globally by setting the `formValidationErrorIcon` property of
+     * the ember-bootstrap configuration in your config/environment.js file. If your are
+     * using FontAwesome for example:
+     *
+     * ```js
+     * ENV['ember-bootstrap'] = {
+       *   formValidationErrorIcon: 'fa fa-times'
+       * }
+     * ```
+     *
+     * @property errorIcon
+     * @type string
+     * @public
+     */
+    errorIcon: _config.default.formValidationErrorIcon,
+
+    /**
+     * The icon classes to be used for a feedback icon in a "warning" validation state.
+     * Defaults to the usual glyphicon classes. This is ignored, and no feedback icon is
+     * rendered if `useIcons` is false.
+     *
+     * You can change this globally by setting the `formValidationWarningIcon` property of
+     * the ember-bootstrap configuration in your config/environment.js file. If your are
+     * using FontAwesome for example:
+     *
+     * ```js
+     * ENV['ember-bootstrap'] = {
+       *   formValidationWarningIcon: 'fa fa-warning'
+       * }
+     * ```
+     *
+     * @property warningIcon
+     * @type string
+     * @public
+     */
+    warningIcon: _config.default.formValidationWarningIcon,
+
+    /**
+     * The icon classes to be used for a feedback icon in a "info" validation state.
+     * Defaults to the usual glyphicon classes. This is ignored, and no feedback icon is
+     * rendered if `useIcons` is false.
+     *
+     * You can change this globally by setting the `formValidationInfoIcon` property of
+     * the ember-bootstrap configuration in your config/environment.js file. If your are
+     * using FontAwesome for example:
+     *
+     * ```js
+     * ENV['ember-bootstrap'] = {
+       *   formValidationInfoIcon: 'fa fa-info-circle
+       * }
+     * ```
+     *
+     * The "info" validation state is not supported in Bootstrap CSS, but can be easily added
+     * using the following LESS style:
+     * ```less
+     * .has-info {
+       *   .form-control-validation(@state-info-text; @state-info-text; @state-info-bg);
+       * }
+     * ```
+     *
+     * @property infoIcon
+     * @type string
+     * @public
+     */
+    infoIcon: _config.default.formValidationInfoIcon,
+
+    /**
+     * @property iconName
+     * @type string
+     * @readonly
+     * @private
+     */
+    iconName: Ember.computed('validation', function () {
+      var validation = this.get('validation') || 'success';
+      return this.get(validation + 'Icon');
+    }).readOnly(),
+
+    /**
+     * @property hasIconForValidationState
+     * @type boolean
+     * @readonly
+     * @private
+     */
+    hasIconForValidationState: Ember.computed.notEmpty('iconName').readOnly(),
+
+    /**
+     * @property validationClass
+     * @type string
+     * @readonly
+     * @private
+     */
+    validationClass: Ember.computed('validation', function () {
+      var validation = this.get('validation');
+      if (!Ember.isBlank(validation)) {
+        return 'has-' + validation;
+      }
+    }).readOnly()
+  });
+});
+;define('ember-bootstrap/components/bs-modal-simple', ['exports', 'ember-bootstrap/components/base/bs-modal-simple'], function (exports, _bsModalSimple) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  Object.defineProperty(exports, 'default', {
+    enumerable: true,
+    get: function () {
+      return _bsModalSimple.default;
+    }
+  });
+});
+;define('ember-bootstrap/components/bs-modal', ['exports', 'ember-bootstrap/components/base/bs-modal'], function (exports, _bsModal) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = _bsModal.default.extend({
+    showClass: 'in'
+  });
+});
+;define('ember-bootstrap/components/bs-modal/body', ['exports', 'ember-bootstrap/components/base/bs-modal/body'], function (exports, _body) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  Object.defineProperty(exports, 'default', {
+    enumerable: true,
+    get: function () {
+      return _body.default;
+    }
+  });
+});
+;define('ember-bootstrap/components/bs-modal/dialog', ['exports', 'ember-bootstrap/components/base/bs-modal/dialog'], function (exports, _dialog) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = _dialog.default.extend({
+    classNameBindings: ['showModal:in']
+  });
+});
+;define('ember-bootstrap/components/bs-modal/footer', ['exports', 'ember-bootstrap/components/base/bs-modal/footer'], function (exports, _footer) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  Object.defineProperty(exports, 'default', {
+    enumerable: true,
+    get: function () {
+      return _footer.default;
+    }
+  });
+});
+;define('ember-bootstrap/components/bs-modal/header', ['exports', 'ember-bootstrap/components/base/bs-modal/header'], function (exports, _header) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  Object.defineProperty(exports, 'default', {
+    enumerable: true,
+    get: function () {
+      return _header.default;
+    }
+  });
+});
+;define('ember-bootstrap/components/bs-modal/header/close', ['exports', 'ember-bootstrap/components/base/bs-modal/header/close'], function (exports, _close) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  Object.defineProperty(exports, 'default', {
+    enumerable: true,
+    get: function () {
+      return _close.default;
+    }
+  });
+});
+;define('ember-bootstrap/components/bs-modal/header/title', ['exports', 'ember-bootstrap/components/base/bs-modal/header/title'], function (exports, _title) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  Object.defineProperty(exports, 'default', {
+    enumerable: true,
+    get: function () {
+      return _title.default;
+    }
+  });
+});
+;define('ember-bootstrap/components/bs-nav', ['exports', 'ember-bootstrap/components/base/bs-nav'], function (exports, _bsNav) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = _bsNav.default.extend({
+    classNameBindings: ['stacked:nav-stacked']
+  });
+});
+;define('ember-bootstrap/components/bs-nav/item', ['exports', 'ember-bootstrap/components/base/bs-nav/item'], function (exports, _item) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  Object.defineProperty(exports, 'default', {
+    enumerable: true,
+    get: function () {
+      return _item.default;
+    }
+  });
+});
+;define('ember-bootstrap/components/bs-nav/link-to', ['exports', 'ember-bootstrap/components/base/bs-nav/link-to'], function (exports, _linkTo) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  Object.defineProperty(exports, 'default', {
+    enumerable: true,
+    get: function () {
+      return _linkTo.default;
+    }
+  });
+});
+;define('ember-bootstrap/components/bs-navbar', ['exports', 'ember-bootstrap/components/base/bs-navbar'], function (exports, _bsNavbar) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = _bsNavbar.default.extend({
+    _positionPrefix: 'navbar-',
+
+    init: function init() {
+      this._super.apply(this, arguments);
+      this.set('_validPositions', ['fixed-top', 'fixed-bottom', 'static-top']);
+    }
+  });
+});
+;define('ember-bootstrap/components/bs-navbar/content', ['exports', 'ember-bootstrap/components/base/bs-navbar/content'], function (exports, _content) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  Object.defineProperty(exports, 'default', {
+    enumerable: true,
+    get: function () {
+      return _content.default;
+    }
+  });
+});
+;define('ember-bootstrap/components/bs-navbar/link-to', ['exports', 'ember-bootstrap/components/base/bs-navbar/link-to'], function (exports, _linkTo) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  Object.defineProperty(exports, 'default', {
+    enumerable: true,
+    get: function () {
+      return _linkTo.default;
+    }
+  });
+});
+;define('ember-bootstrap/components/bs-navbar/nav', ['exports', 'ember-bootstrap/components/base/bs-navbar/nav'], function (exports, _nav) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  Object.defineProperty(exports, 'default', {
+    enumerable: true,
+    get: function () {
+      return _nav.default;
+    }
+  });
+});
+;define('ember-bootstrap/components/bs-navbar/toggle', ['exports', 'ember-bootstrap/components/base/bs-navbar/toggle'], function (exports, _toggle) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = _toggle.default.extend({
+    classNames: ['navbar-toggle']
+  });
+});
+;define('ember-bootstrap/components/bs-popover', ['exports', 'ember-bootstrap/components/base/bs-popover'], function (exports, _bsPopover) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  Object.defineProperty(exports, 'default', {
+    enumerable: true,
+    get: function () {
+      return _bsPopover.default;
+    }
+  });
+});
+;define('ember-bootstrap/components/bs-popover/element', ['exports', 'ember-bootstrap/components/base/bs-popover/element'], function (exports, _element) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = _element.default.extend({
+    popperClassNames: Ember.computed('fade', 'actualPlacement', 'showHelp', function () {
+      var classes = ['popover', 'ember-bootstrap-popover', this.get('actualPlacement')];
+      if (this.get('fade')) {
+        classes.push('fade');
+      }
+      if (this.get('showHelp')) {
+        classes.push('in');
+      }
+      return classes;
+    }),
+
+    /**
+     * @property titleClass
+     * @private
+     */
+    titleClass: 'popover-title',
+
+    /**
+     * @property contentClass
+     * @private
+     */
+    contentClass: 'popover-content'
+  });
+});
+;define('ember-bootstrap/components/bs-progress', ['exports', 'ember-bootstrap/components/base/bs-progress'], function (exports, _bsProgress) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  Object.defineProperty(exports, 'default', {
+    enumerable: true,
+    get: function () {
+      return _bsProgress.default;
+    }
+  });
+});
+;define('ember-bootstrap/components/bs-progress/bar', ['exports', 'ember-bootstrap/components/base/bs-progress/bar'], function (exports, _bar) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = _bar.default.extend({
+    classNameBindings: ['progressBarAnimate:active'],
+
+    /**
+     * @property classTypePrefix
+     * @type String
+     * @default 'progress-bar'
+     * @protected
+     */
+    classTypePrefix: 'progress-bar'
+  });
+});
+;define('ember-bootstrap/components/bs-tab', ['exports', 'ember-bootstrap/components/base/bs-tab'], function (exports, _bsTab) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  Object.defineProperty(exports, 'default', {
+    enumerable: true,
+    get: function () {
+      return _bsTab.default;
+    }
+  });
+});
+;define('ember-bootstrap/components/bs-tab/pane', ['exports', 'ember-bootstrap/components/base/bs-tab/pane'], function (exports, _pane) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = _pane.default.extend({
+    classNameBindings: ['showContent:in']
+  });
+});
+;define('ember-bootstrap/components/bs-tooltip', ['exports', 'ember-bootstrap/components/base/bs-tooltip'], function (exports, _bsTooltip) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  Object.defineProperty(exports, 'default', {
+    enumerable: true,
+    get: function () {
+      return _bsTooltip.default;
+    }
+  });
+});
+;define('ember-bootstrap/components/bs-tooltip/element', ['exports', 'ember-bootstrap/components/base/bs-tooltip/element'], function (exports, _element) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = _element.default.extend({
+    /**
+     * @property arrowClass
+     * @private
+     */
+    arrowClass: 'tooltip-arrow',
+
+    popperClassNames: Ember.computed('fade', 'actualPlacement', 'showHelp', function () {
+      var classes = ['tooltip', 'ember-bootstrap-tooltip', this.get('actualPlacement')];
+      if (this.get('fade')) {
+        classes.push('fade');
+      }
+      if (this.get('showHelp')) {
+        classes.push('in');
+      }
+      return classes;
+    })
+  });
+});
+;define('ember-bootstrap/config', ['exports'], function (exports) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+
+
+  var Config = Ember.Object.extend();
+
+  Config.reopenClass({
+    formValidationSuccessIcon: 'glyphicon glyphicon-ok',
+    formValidationErrorIcon: 'glyphicon glyphicon-remove',
+    formValidationWarningIcon: 'glyphicon glyphicon-warning-sign',
+    formValidationInfoIcon: 'glyphicon glyphicon-info-sign',
+    insertEmberWormholeElementToDom: true,
+
+    load: function load() {
+      var config = arguments.length > 0 && arguments[0] !== undefined ? arguments[0] : {};
+
+      for (var property in config) {
+        if (this.hasOwnProperty(property) && typeof this[property] !== 'function') {
+          this[property] = config[property];
+        }
+      }
+    }
+  });
+
+  exports.default = Config;
+});
+;define('ember-bootstrap/helpers/bs-contains', ['exports'], function (exports) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.bsContains = bsContains;
+  function bsContains(params /* , hash*/) {
+    return Ember.isArray(params[0]) ? Ember.A(params[0]).includes(params[1]) : false;
+  }
+
+  exports.default = Ember.Helper.helper(bsContains);
+});
+;define('ember-bootstrap/helpers/bs-eq', ['exports'], function (exports) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.eq = eq;
+  function eq(params) {
+    return params[0] === params[1];
+  }
+
+  exports.default = Ember.Helper.helper(eq);
+});
+;define('ember-bootstrap/mixins/component-child', ['exports', 'ember-bootstrap/mixins/component-parent'], function (exports, _componentParent) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = Ember.Mixin.create({
+
+    /**
+     * The parent component
+     *
+     * @property _parent
+     * @private
+     */
+    _parent: Ember.computed(function () {
+      return this.nearestOfType(_componentParent.default);
+    }),
+
+    /**
+     * flag to check if component has already been registered
+     * @property _didRegister
+     * @type boolean
+     * @private
+     */
+    _didRegister: false,
+
+    /**
+     * Register ourself as a child at the parent component
+     * We use the `willRender` event here to also support the fastboot environment, where there is no `didInsertElement`
+     *
+     * @method _registerWithParent
+     * @private
+     */
+    _registerWithParent: function _registerWithParent() {
+      if (!this._didRegister) {
+        var parent = this.get('_parent');
+        if (parent) {
+          parent.registerChild(this);
+          this._didRegister = true;
+        }
+      }
+    },
+
+
+    /**
+     * Unregister from the parent component
+     *
+     * @method _unregisterFromParent
+     * @private
+     */
+    _unregisterFromParent: function _unregisterFromParent() {
+      var parent = this.get('_parent');
+      if (this._didRegister && parent) {
+        parent.removeChild(this);
+        this._didRegister = false;
+      }
+    },
+    didReceiveAttrs: function didReceiveAttrs() {
+      this._super.apply(this, arguments);
+      this._registerWithParent();
+    },
+    willRender: function willRender() {
+      this._super.apply(this, arguments);
+      this._registerWithParent();
+    },
+    willDestroyElement: function willDestroyElement() {
+      this._super.apply(this, arguments);
+      this._unregisterFromParent();
+    }
+  });
+});
+;define('ember-bootstrap/mixins/component-parent', ['exports'], function (exports) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = Ember.Mixin.create({
+
+    /**
+     * Array of registered child components
+     *
+     * @property children
+     * @type array
+     * @protected
+     */
+    children: null,
+
+    init: function init() {
+      this._super.apply(this, arguments);
+      this.set('children', Ember.A());
+    },
+
+
+    /**
+     * Register a component as a child of this parent
+     *
+     * @method registerChild
+     * @param child
+     * @public
+     */
+    registerChild: function registerChild(child) {
+      Ember.run.schedule('actions', this, function () {
+        this.get('children').addObject(child);
+      });
+    },
+
+
+    /**
+     * Remove the child component from this parent component
+     *
+     * @method removeChild
+     * @param child
+     * @public
+     */
+    removeChild: function removeChild(child) {
+      Ember.run.schedule('actions', this, function () {
+        this.get('children').removeObject(child);
+      });
+    }
+  });
+});
+;define('ember-bootstrap/mixins/control-attributes', ['exports'], function (exports) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = Ember.Mixin.create({
+    attributeBindings: ['name', 'autofocus', 'disabled', 'readonly', 'required', 'tabindex', 'form', 'title', 'ariaDescribedBy:aria-describedby'],
+    tagName: 'input'
+  });
+});
+;define('ember-bootstrap/mixins/control-validation', ['exports'], function (exports) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = Ember.Mixin.create({
+    classNameBindings: ['formFeedbackClass'],
+
+    validationType: null,
+
+    formFeedbackClass: Ember.computed('validationType', function () {
+      var validationType = this.get('validationType');
+      switch (validationType) {
+        case 'error':
+          return 'is-invalid';
+        case 'success':
+          return 'is-valid';
+        case 'warning':
+          return 'is-warning'; // not officially supported in BS4 :(
+      }
+    })
+  });
+});
+;define('ember-bootstrap/mixins/dropdown-toggle', ['exports'], function (exports) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = Ember.Mixin.create({
+    classNames: ['dropdown-toggle'],
+
+    /**
+     * @property ariaRole
+     * @default button
+     * @type string
+     * @protected
+     */
+    ariaRole: 'button',
+
+    /**
+     * Reference to the parent dropdown component
+     *
+     * @property dropdown
+     * @type {Components.Dropdown}
+     * @private
+     */
+    dropdown: null,
+
+    didReceiveAttrs: function didReceiveAttrs() {
+      this._super.apply(this, arguments);
+      var dropdown = this.get('dropdown');
+      if (dropdown) {
+        Ember.run.schedule('actions', this, function () {
+          if (!this.get('isDestroyed')) {
+            dropdown.set('toggle', this);
+          }
+        });
+      }
+    }
+  });
+});
+;define('ember-bootstrap/mixins/size-class', ['exports'], function (exports) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = Ember.Mixin.create({
+    /**
+     * Prefix for the size class, e.g. "btn" for button size classes ("btn-lg", "btn-sm" etc.)
+     *
+     * @property classTypePrefix
+     * @type string
+     * @required
+     * @protected
+     */
+    classTypePrefix: null,
+
+    classNameBindings: ['sizeClass'],
+
+    sizeClass: Ember.computed('size', function () {
+      var prefix = this.get('classTypePrefix');
+      var size = this.get('size');
+      return Ember.isBlank(size) ? null : prefix + '-' + size;
+    }),
+
+    /**
+     * Property for size styling, set to 'lg', 'sm' or 'xs'
+     *
+     * Also see the [Bootstrap docs](http://getbootstrap.com/css/#buttons-sizes)
+     *
+     * @property size
+     * @type String
+     * @public
+     */
+    size: null
+  });
+});
+;define('ember-bootstrap/mixins/sub-component', ['exports'], function (exports) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = Ember.Mixin.create({
+    targetObject: Ember.computed.alias('parentView')
+  });
+});
+;define('ember-bootstrap/mixins/transition-support', ['exports', 'ember-bootstrap/utils/transition-support'], function (exports, _transitionSupport) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = Ember.Mixin.create({
+
+    /**
+     * @property transitionsEnabled
+     * @type boolean
+     * @private
+     */
+    transitionsEnabled: Ember.computed.reads('fade'),
+
+    /**
+     * Access to the fastboot service if available
+     *
+     * @property fastboot
+     * @type {Ember.Service}
+     * @private
+     */
+    fastboot: Ember.computed(function () {
+      var owner = Ember.getOwner(this);
+      return owner.lookup('service:fastboot');
+    }),
+
+    /**
+     * Use CSS transitions?
+     *
+     * @property usesTransition
+     * @type boolean
+     * @readonly
+     * @private
+     */
+    usesTransition: Ember.computed('fade', 'fastboot.isFastBoot', function () {
+      return !this.get('fastboot.isFastBoot') && !!_transitionSupport.default && this.get('transitionsEnabled');
+    })
+  });
+});
+;define('ember-bootstrap/mixins/type-class', ['exports'], function (exports) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = Ember.Mixin.create({
+    /**
+     * Prefix for the type class, e.g. "btn" for button type classes ("btn-primary2 etc.)
+     *
+     * @property classTypePrefix
+     * @type string
+     * @required
+     * @protected
+     */
+    classTypePrefix: null,
+
+    classNameBindings: ['typeClass'],
+
+    typeClass: Ember.computed('type', function () {
+      var prefix = this.get('classTypePrefix');
+      var type = this.get('type') || 'default';
+      return prefix + '-' + type;
+    }),
+
+    /**
+     * Property for type styling
+     *
+     * For the available types see the [Bootstrap docs](http://getbootstrap.com/css/#buttons-options) (use without "btn-" prefix)
+     *
+     * @property type
+     * @type String
+     * @default 'default'
+     * @public
+     */
+    type: 'default'
+  });
+});
+;define("ember-bootstrap/templates/components/bs-accordion", ["exports"], function (exports) {
+  "use strict";
+
+  exports.__esModule = true;
+  exports.default = Ember.HTMLBars.template({ "id": "/xfqfc+P", "block": "{\"statements\":[[18,\"default\",[[33,[\"hash\"],null,[[\"item\",\"change\"],[[33,[\"component\"],[\"bs-accordion/item\"],[[\"selected\",\"onClick\"],[[28,[\"isSelected\"]],[33,[\"action\"],[[28,[null]],\"change\"],null]]]],[33,[\"action\"],[[28,[null]],\"change\"],null]]]]]]],\"locals\":[],\"named\":[],\"yields\":[\"default\"],\"hasPartials\":false}", "meta": { "moduleName": "ember-bootstrap/templates/components/bs-accordion.hbs" } });
+});
+;define("ember-bootstrap/templates/components/bs-accordion/body", ["exports"], function (exports) {
+  "use strict";
+
+  exports.__esModule = true;
+  exports.default = Ember.HTMLBars.template({ "id": "oV8vPG9z", "block": "{\"statements\":[[6,[\"bs-collapse\"],null,[[\"ariaRole\",\"collapsed\",\"class\"],[\"tabpanel\",[28,[\"collapsed\"]],\"panel-collapse\"]],{\"statements\":[[0,\"  \"],[11,\"div\",[]],[16,\"class\",[34,[\"panel-body \",[26,[\"class\"]]]]],[13],[0,\"\\n    \"],[18,\"default\"],[0,\"\\n  \"],[14],[0,\"\\n\"]],\"locals\":[]},null]],\"locals\":[],\"named\":[],\"yields\":[\"default\"],\"hasPartials\":false}", "meta": { "moduleName": "ember-bootstrap/templates/components/bs-accordion/body.hbs" } });
+});
+;define("ember-bootstrap/templates/components/bs-accordion/item", ["exports"], function (exports) {
+  "use strict";
+
+  exports.__esModule = true;
+  exports.default = Ember.HTMLBars.template({ "id": "KCh8PbX5", "block": "{\"statements\":[[6,[\"if\"],[[30,\"default\"]],null,{\"statements\":[[0,\"  \"],[18,\"default\",[[33,[\"hash\"],null,[[\"title\",\"body\"],[[33,[\"component\"],[\"bs-accordion/item/title\"],[[\"collapsed\",\"onClick\"],[[28,[\"collapsed\"]],[33,[\"action\"],[[28,[null]],[28,[\"onClick\"]],[28,[\"value\"]]],null]]]],[33,[\"component\"],[\"bs-accordion/item/body\"],[[\"collapsed\"],[[28,[\"collapsed\"]]]]]]]]]],[0,\"\\n\"]],\"locals\":[]},{\"statements\":[[6,[\"bs-accordion/item/title\"],null,[[\"collapsed\",\"onClick\"],[[28,[\"collapsed\"]],[33,[\"action\"],[[28,[null]],[28,[\"onClick\"]],[28,[\"value\"]]],null]]],{\"statements\":[[0,\"    \"],[1,[26,[\"title\"]],false],[0,\"\\n\"]],\"locals\":[]},null],[6,[\"bs-accordion/item/body\"],null,[[\"collapsed\"],[[28,[\"collapsed\"]]]],{\"statements\":[[0,\"    \"],[18,\"default\"],[0,\"\\n\"]],\"locals\":[]},null]],\"locals\":[]}]],\"locals\":[],\"named\":[],\"yields\":[\"default\"],\"hasPartials\":false}", "meta": { "moduleName": "ember-bootstrap/templates/components/bs-accordion/item.hbs" } });
+});
+;define("ember-bootstrap/templates/components/bs-accordion/title", ["exports"], function (exports) {
+  "use strict";
+
+  exports.__esModule = true;
+  exports.default = Ember.HTMLBars.template({ "id": "aaGNBktL", "block": "{\"statements\":[[11,\"h4\",[]],[15,\"class\",\"panel-title\"],[13],[0,\"\\n  \"],[11,\"a\",[]],[15,\"href\",\"#\"],[13],[0,\"\\n    \"],[18,\"default\"],[0,\"\\n  \"],[14],[0,\"\\n\"],[14],[0,\"\\n\"]],\"locals\":[],\"named\":[],\"yields\":[\"default\"],\"hasPartials\":false}", "meta": { "moduleName": "ember-bootstrap/templates/components/bs-accordion/title.hbs" } });
+});
+;define("ember-bootstrap/templates/components/bs-alert", ["exports"], function (exports) {
+  "use strict";
+
+  exports.__esModule = true;
+  exports.default = Ember.HTMLBars.template({ "id": "pFnA5yh9", "block": "{\"statements\":[[6,[\"unless\"],[[28,[\"hidden\"]]],null,{\"statements\":[[6,[\"if\"],[[28,[\"dismissible\"]]],null,{\"statements\":[[0,\"    \"],[11,\"button\",[]],[15,\"type\",\"button\"],[15,\"class\",\"close\"],[15,\"aria-label\",\"Close\"],[5,[\"action\"],[[28,[null]],\"dismiss\"]],[13],[0,\"\\n      \"],[11,\"span\",[]],[15,\"aria-hidden\",\"true\"],[13],[0,\"×\"],[14],[0,\"\\n    \"],[14],[0,\"\\n\"]],\"locals\":[]},null],[0,\"  \"],[18,\"default\"],[0,\"\\n\"]],\"locals\":[]},null]],\"locals\":[],\"named\":[],\"yields\":[\"default\"],\"hasPartials\":false}", "meta": { "moduleName": "ember-bootstrap/templates/components/bs-alert.hbs" } });
+});
+;define("ember-bootstrap/templates/components/bs-button-group", ["exports"], function (exports) {
+  "use strict";
+
+  exports.__esModule = true;
+  exports.default = Ember.HTMLBars.template({ "id": "myc1fMPU", "block": "{\"statements\":[[18,\"default\",[[33,[\"hash\"],null,[[\"button\"],[[33,[\"component\"],[\"bs-button-group/button\"],[[\"buttonGroupType\",\"groupValue\",\"onClick\"],[[28,[\"type\"]],[28,[\"value\"]],[33,[\"action\"],[[28,[null]],\"buttonPressed\"],null]]]]]]]]]],\"locals\":[],\"named\":[],\"yields\":[\"default\"],\"hasPartials\":false}", "meta": { "moduleName": "ember-bootstrap/templates/components/bs-button-group.hbs" } });
+});
+;define("ember-bootstrap/templates/components/bs-button", ["exports"], function (exports) {
+  "use strict";
+
+  exports.__esModule = true;
+  exports.default = Ember.HTMLBars.template({ "id": "2XGZoEGB", "block": "{\"statements\":[[6,[\"if\"],[[28,[\"icon\"]]],null,{\"statements\":[[11,\"i\",[]],[16,\"class\",[34,[[26,[\"icon\"]]]]],[13],[14],[0,\" \"]],\"locals\":[]},null],[1,[26,[\"text\"]],false],[18,\"default\"]],\"locals\":[],\"named\":[],\"yields\":[\"default\"],\"hasPartials\":false}", "meta": { "moduleName": "ember-bootstrap/templates/components/bs-button.hbs" } });
+});
+;define("ember-bootstrap/templates/components/bs-carousel", ["exports"], function (exports) {
+  "use strict";
+
+  exports.__esModule = true;
+  exports.default = Ember.HTMLBars.template({ "id": "4vCxvtm1", "block": "{\"statements\":[[6,[\"if\"],[[28,[\"showIndicators\"]]],null,{\"statements\":[[0,\"  \"],[11,\"ol\",[]],[15,\"class\",\"carousel-indicators\"],[13],[0,\"\\n\"],[6,[\"each\"],[[28,[\"indicators\"]]],null,{\"statements\":[[0,\"      \"],[11,\"li\",[]],[16,\"class\",[34,[[33,[\"if\"],[[33,[\"bs-eq\"],[[28,[\"currentIndex\"]],[28,[\"_index\"]]],null],\"active\"],null]]]],[16,\"onclick\",[33,[\"action\"],[[28,[null]],\"toSlide\",[28,[\"_index\"]]],null],null],[15,\"role\",\"button\"],[13],[14],[0,\"\\n\"]],\"locals\":[\"indicator\",\"_index\"]},null],[0,\"  \"],[14],[0,\"\\n\"]],\"locals\":[]},null],[0,\"\\n\"],[11,\"div\",[]],[15,\"class\",\"carousel-inner\"],[15,\"role\",\"listbox\"],[13],[0,\"\\n  \"],[18,\"default\",[[33,[\"hash\"],null,[[\"slide\"],[[33,[\"component\"],[\"bs-carousel/slide\"],[[\"currentSlide\",\"directionalClassName\",\"followingSlide\",\"orderClassName\",\"presentationState\"],[[28,[\"currentSlide\"]],[28,[\"directionalClassName\"]],[28,[\"followingSlide\"]],[28,[\"orderClassName\"]],[28,[\"presentationState\"]]]]]]]]]],[0,\"\\n\"],[14],[0,\"\\n\\n\"],[6,[\"if\"],[[28,[\"showControls\"]]],null,{\"statements\":[[0,\"  \"],[11,\"a\",[]],[16,\"class\",[34,[[26,[\"prevControlClassName\"]]]]],[16,\"href\",[34,[\"#\",[26,[\"elementId\"]]]]],[15,\"role\",\"button\"],[5,[\"action\"],[[28,[null]],\"toPrevSlide\"]],[13],[0,\"\\n    \"],[11,\"span\",[]],[15,\"aria-hidden\",\"true\"],[16,\"class\",[34,[[26,[\"prevControlIcon\"]]]]],[13],[14],[0,\"\\n    \"],[11,\"span\",[]],[15,\"class\",\"sr-only\"],[13],[1,[26,[\"prevControlLabel\"]],false],[14],[0,\"\\n  \"],[14],[0,\"\\n  \"],[11,\"a\",[]],[16,\"class\",[34,[[26,[\"nextControlClassName\"]]]]],[16,\"href\",[34,[\"#\",[26,[\"elementId\"]]]]],[15,\"role\",\"button\"],[5,[\"action\"],[[28,[null]],\"toNextSlide\"]],[13],[0,\"\\n    \"],[11,\"span\",[]],[15,\"aria-hidden\",\"true\"],[16,\"class\",[34,[[26,[\"nextControlIcon\"]]]]],[13],[14],[0,\"\\n    \"],[11,\"span\",[]],[15,\"class\",\"sr-only\"],[13],[1,[26,[\"nextControlLabel\"]],false],[14],[0,\"\\n  \"],[14],[0,\"\\n\"]],\"locals\":[]},null]],\"locals\":[],\"named\":[],\"yields\":[\"default\"],\"hasPartials\":false}", "meta": { "moduleName": "ember-bootstrap/templates/components/bs-carousel.hbs" } });
+});
+;define("ember-bootstrap/templates/components/bs-carousel/slide", ["exports"], function (exports) {
+  "use strict";
+
+  exports.__esModule = true;
+  exports.default = Ember.HTMLBars.template({ "id": "f3tzvpEl", "block": "{\"statements\":[[18,\"default\"]],\"locals\":[],\"named\":[],\"yields\":[\"default\"],\"hasPartials\":false}", "meta": { "moduleName": "ember-bootstrap/templates/components/bs-carousel/slide.hbs" } });
+});
+;define("ember-bootstrap/templates/components/bs-dropdown", ["exports"], function (exports) {
+  "use strict";
+
+  exports.__esModule = true;
+  exports.default = Ember.HTMLBars.template({ "id": "LPypNcZX", "block": "{\"statements\":[[18,\"default\",[[33,[\"hash\"],null,[[\"button\",\"toggle\",\"menu\",\"isOpen\"],[[33,[\"component\"],[\"bs-dropdown/button\"],[[\"dropdown\",\"onClick\"],[[28,[null]],[33,[\"action\"],[[28,[null]],\"toggleDropdown\"],null]]]],[33,[\"component\"],[\"bs-dropdown/toggle\"],[[\"dropdown\",\"inNav\",\"onClick\"],[[28,[null]],[28,[\"inNav\"]],[33,[\"action\"],[[28,[null]],\"toggleDropdown\"],null]]]],[33,[\"component\"],[\"bs-dropdown/menu\"],[[\"isOpen\",\"direction\",\"inNav\",\"toggleElement\"],[[28,[\"isOpen\"]],[28,[\"direction\"]],[28,[\"inNav\"]],[28,[\"toggleElement\"]]]]],[28,[\"isOpen\"]]]]]]]],\"locals\":[],\"named\":[],\"yields\":[\"default\"],\"hasPartials\":false}", "meta": { "moduleName": "ember-bootstrap/templates/components/bs-dropdown.hbs" } });
+});
+;define("ember-bootstrap/templates/components/bs-dropdown/menu", ["exports"], function (exports) {
+  "use strict";
+
+  exports.__esModule = true;
+  exports.default = Ember.HTMLBars.template({ "id": "WyeuPdsF", "block": "{\"statements\":[[18,\"default\",[[33,[\"hash\"],null,[[\"item\",\"link-to\",\"divider\"],[[33,[\"component\"],[\"bs-dropdown/menu/item\"],null],[33,[\"component\"],[\"bs-dropdown/menu/link-to\"],null],[33,[\"component\"],[\"bs-dropdown/menu/divider\"],null]]]]]],[0,\"\\n\"]],\"locals\":[],\"named\":[],\"yields\":[\"default\"],\"hasPartials\":false}", "meta": { "moduleName": "ember-bootstrap/templates/components/bs-dropdown/menu.hbs" } });
+});
+;define("ember-bootstrap/templates/components/bs-form", ["exports"], function (exports) {
+  "use strict";
+
+  exports.__esModule = true;
+  exports.default = Ember.HTMLBars.template({ "id": "BGuiXVEe", "block": "{\"statements\":[[18,\"default\",[[33,[\"hash\"],null,[[\"element\",\"group\"],[[33,[\"component\"],[\"bs-form/element\"],[[\"model\",\"formLayout\",\"horizontalLabelGridClass\",\"showAllValidations\",\"onChange\"],[[28,[\"model\"]],[28,[\"formLayout\"]],[28,[\"horizontalLabelGridClass\"]],[28,[\"showAllValidations\"]],[33,[\"action\"],[[28,[null]],\"change\"],null]]]],[33,[\"component\"],[\"bs-form/group\"],[[\"formLayout\"],[[28,[\"formLayout\"]]]]]]]]]]],\"locals\":[],\"named\":[],\"yields\":[\"default\"],\"hasPartials\":false}", "meta": { "moduleName": "ember-bootstrap/templates/components/bs-form.hbs" } });
+});
+;define("ember-bootstrap/templates/components/bs-form/element", ["exports"], function (exports) {
+  "use strict";
+
+  exports.__esModule = true;
+  exports.default = Ember.HTMLBars.template({ "id": "rDRv5AM+", "block": "{\"statements\":[[6,[\"component\"],[[28,[\"layoutComponent\"]]],[[\"hasLabel\",\"formElementId\",\"horizontalLabelGridClass\",\"errorsComponent\",\"feedbackIconComponent\",\"labelComponent\",\"helpTextComponent\"],[[28,[\"hasLabel\"]],[28,[\"formElementId\"]],[28,[\"horizontalLabelGridClass\"]],[33,[\"component\"],[[28,[\"errorsComponent\"]]],[[\"messages\",\"show\",\"showMultipleErrors\"],[[28,[\"validationMessages\"]],[28,[\"showValidationMessages\"]],[28,[\"showMultipleErrors\"]]]]],[33,[\"component\"],[[28,[\"feedbackIconComponent\"]]],[[\"iconName\",\"show\"],[[28,[\"iconName\"]],[28,[\"hasFeedback\"]]]]],[33,[\"component\"],[[28,[\"labelComponent\"]]],[[\"label\",\"invisibleLabel\",\"formElementId\",\"controlType\",\"formLayout\",\"size\"],[[28,[\"label\"]],[28,[\"invisibleLabel\"]],[28,[\"formElementId\"]],[28,[\"controlType\"]],[28,[\"formLayout\"]],[28,[\"size\"]]]]],[33,[\"if\"],[[28,[\"hasHelpText\"]],[33,[\"component\"],[[28,[\"helpTextComponent\"]]],[[\"text\",\"id\"],[[28,[\"helpText\"]],[28,[\"ariaDescribedBy\"]]]]]],null]]],{\"statements\":[[6,[\"with\"],[[33,[\"component\"],[[28,[\"controlComponent\"]]],[[\"value\",\"id\",\"name\",\"type\",\"label\",\"placeholder\",\"autofocus\",\"disabled\",\"readonly\",\"required\",\"controlSize\",\"tabindex\",\"minlength\",\"maxlength\",\"min\",\"max\",\"pattern\",\"accept\",\"autocomplete\",\"autosave\",\"inputmode\",\"multiple\",\"step\",\"form\",\"spellcheck\",\"cols\",\"rows\",\"wrap\",\"title\",\"options\",\"optionLabelPath\",\"ariaDescribedBy\",\"onChange\",\"validationType\",\"size\"],[[28,[\"value\"]],[28,[\"formElementId\"]],[28,[\"name\"]],[28,[\"controlType\"]],[28,[\"label\"]],[28,[\"placeholder\"]],[28,[\"autofocus\"]],[28,[\"disabled\"]],[28,[\"readonly\"]],[28,[\"required\"]],[28,[\"controlSize\"]],[28,[\"tabindex\"]],[28,[\"minlength\"]],[28,[\"maxlength\"]],[28,[\"min\"]],[28,[\"max\"]],[28,[\"pattern\"]],[28,[\"accept\"]],[28,[\"autocomplete\"]],[28,[\"autosave\"]],[28,[\"inputmode\"]],[28,[\"multiple\"]],[28,[\"step\"]],[28,[\"form\"]],[28,[\"spellcheck\"]],[28,[\"cols\"]],[28,[\"rows\"]],[28,[\"wrap\"]],[28,[\"title\"]],[28,[\"options\"]],[28,[\"optionLabelPath\"]],[33,[\"if\"],[[28,[\"hasHelpText\"]],[28,[\"ariaDescribedBy\"]]],null],[33,[\"action\"],[[28,[null]],\"change\"],null],[28,[\"validation\"]],[28,[\"size\"]]]]]],null,{\"statements\":[[6,[\"if\"],[[29,\"default\"]],null,{\"statements\":[[0,\"      \"],[18,\"default\",[[33,[\"hash\"],null,[[\"value\",\"id\",\"validation\",\"control\"],[[28,[\"value\"]],[28,[\"formElementId\"]],[28,[\"validation\"]],[28,[\"control\"]]]]]]],[0,\"\\n\"]],\"locals\":[]},{\"statements\":[[0,\"      \"],[1,[33,[\"component\"],[[28,[\"control\"]]],null],false],[0,\"\\n\"]],\"locals\":[]}]],\"locals\":[\"control\"]},null]],\"locals\":[]},null]],\"locals\":[],\"named\":[],\"yields\":[\"default\"],\"hasPartials\":false}", "meta": { "moduleName": "ember-bootstrap/templates/components/bs-form/element.hbs" } });
+});
+;define("ember-bootstrap/templates/components/bs-form/element/errors", ["exports"], function (exports) {
+  "use strict";
+
+  exports.__esModule = true;
+  exports.default = Ember.HTMLBars.template({ "id": "DC8OpzF4", "block": "{\"statements\":[[6,[\"if\"],[[28,[\"show\"]]],null,{\"statements\":[[6,[\"if\"],[[28,[\"showMultipleErrors\"]]],null,{\"statements\":[[0,\"    \"],[11,\"div\",[]],[15,\"class\",\"pre-scrollable\"],[13],[0,\"\\n\"],[6,[\"each\"],[[28,[\"messages\"]]],null,{\"statements\":[[0,\"        \"],[11,\"div\",[]],[16,\"class\",[34,[[26,[\"feedbackClass\"]]]]],[13],[1,[28,[\"message\"]],false],[14],[0,\"\\n\"]],\"locals\":[\"message\"]},null],[0,\"    \"],[14],[0,\"\\n\"]],\"locals\":[]},{\"statements\":[[0,\"    \"],[11,\"div\",[]],[16,\"class\",[26,[\"feedbackClass\"]],null],[13],[1,[28,[\"messages\",\"firstObject\"]],false],[14],[0,\"\\n\"]],\"locals\":[]}]],\"locals\":[]},null]],\"locals\":[],\"named\":[],\"yields\":[],\"hasPartials\":false}", "meta": { "moduleName": "ember-bootstrap/templates/components/bs-form/element/errors.hbs" } });
+});
+;define("ember-bootstrap/templates/components/bs-form/element/feedback-icon", ["exports"], function (exports) {
+  "use strict";
+
+  exports.__esModule = true;
+  exports.default = Ember.HTMLBars.template({ "id": "SXp1m4Kc", "block": "{\"statements\":[[6,[\"if\"],[[28,[\"show\"]]],null,{\"statements\":[[0,\"  \"],[11,\"span\",[]],[16,\"class\",[34,[\"form-control-feedback \",[26,[\"iconName\"]]]]],[15,\"aria-hidden\",\"true\"],[13],[14],[0,\"\\n\"]],\"locals\":[]},null]],\"locals\":[],\"named\":[],\"yields\":[],\"hasPartials\":false}", "meta": { "moduleName": "ember-bootstrap/templates/components/bs-form/element/feedback-icon.hbs" } });
+});
+;define("ember-bootstrap/templates/components/bs-form/element/help-text", ["exports"], function (exports) {
+  "use strict";
+
+  exports.__esModule = true;
+  exports.default = Ember.HTMLBars.template({ "id": "Ci47Mw4t", "block": "{\"statements\":[[1,[26,[\"text\"]],false]],\"locals\":[],\"named\":[],\"yields\":[],\"hasPartials\":false}", "meta": { "moduleName": "ember-bootstrap/templates/components/bs-form/element/help-text.hbs" } });
+});
+;define("ember-bootstrap/templates/components/bs-form/element/label", ["exports"], function (exports) {
+  "use strict";
+
+  exports.__esModule = true;
+  exports.default = Ember.HTMLBars.template({ "id": "Q2AeWbOg", "block": "{\"statements\":[[6,[\"if\"],[[29,\"default\"]],null,{\"statements\":[[0,\"  \"],[11,\"label\",[]],[13],[0,\"\\n    \"],[18,\"default\"],[0,\"\\n    \"],[1,[26,[\"label\"]],false],[0,\"\\n  \"],[14],[0,\"\\n\"]],\"locals\":[]},{\"statements\":[[0,\"  \"],[11,\"label\",[]],[16,\"class\",[34,[\"control-label \",[33,[\"if\"],[[28,[\"invisibleLabel\"]],\"sr-only\"],null],\" \",[26,[\"labelClass\"]]]]],[16,\"for\",[34,[[26,[\"formElementId\"]]]]],[13],[1,[26,[\"label\"]],false],[14],[0,\"\\n\"]],\"locals\":[]}]],\"locals\":[],\"named\":[],\"yields\":[\"default\"],\"hasPartials\":false}", "meta": { "moduleName": "ember-bootstrap/templates/components/bs-form/element/label.hbs" } });
+});
+;define("ember-bootstrap/templates/components/bs-form/element/layout/horizontal", ["exports"], function (exports) {
+  "use strict";
+
+  exports.__esModule = true;
+  exports.default = Ember.HTMLBars.template({ "id": "A3dCEUp/", "block": "{\"statements\":[[6,[\"if\"],[[28,[\"hasLabel\"]]],null,{\"statements\":[[0,\"  \"],[1,[33,[\"component\"],[[28,[\"labelComponent\"]]],[[\"labelClass\"],[[28,[\"horizontalLabelGridClass\"]]]]],false],[0,\"\\n  \"],[11,\"div\",[]],[16,\"class\",[34,[[26,[\"horizontalInputGridClass\"]]]]],[13],[0,\"\\n    \"],[18,\"default\"],[0,\"\\n    \"],[1,[33,[\"component\"],[[28,[\"feedbackIconComponent\"]]],null],false],[0,\"\\n    \"],[1,[33,[\"component\"],[[28,[\"errorsComponent\"]]],null],false],[0,\"\\n    \"],[1,[33,[\"component\"],[[28,[\"helpTextComponent\"]]],null],false],[0,\"\\n  \"],[14],[0,\"\\n\"]],\"locals\":[]},{\"statements\":[[0,\"  \"],[11,\"div\",[]],[16,\"class\",[34,[[26,[\"horizontalInputGridClass\"]],\" \",[26,[\"horizontalInputOffsetGridClass\"]]]]],[13],[0,\"\\n    \"],[18,\"default\"],[0,\"\\n    \"],[1,[33,[\"component\"],[[28,[\"feedbackIconComponent\"]]],null],false],[0,\"\\n    \"],[1,[33,[\"component\"],[[28,[\"errorsComponent\"]]],null],false],[0,\"\\n    \"],[1,[33,[\"component\"],[[28,[\"helpTextComponent\"]]],null],false],[0,\"\\n  \"],[14],[0,\"\\n\"]],\"locals\":[]}]],\"locals\":[],\"named\":[],\"yields\":[\"default\"],\"hasPartials\":false}", "meta": { "moduleName": "ember-bootstrap/templates/components/bs-form/element/layout/horizontal.hbs" } });
+});
+;define("ember-bootstrap/templates/components/bs-form/element/layout/horizontal/checkbox", ["exports"], function (exports) {
+  "use strict";
+
+  exports.__esModule = true;
+  exports.default = Ember.HTMLBars.template({ "id": "0YIQ9Bou", "block": "{\"statements\":[[11,\"div\",[]],[16,\"class\",[34,[[26,[\"horizontalInputGridClass\"]],\" \",[26,[\"horizontalInputOffsetGridClass\"]]]]],[13],[0,\"\\n  \"],[11,\"div\",[]],[15,\"class\",\"checkbox\"],[13],[0,\"\\n\"],[6,[\"component\"],[[28,[\"labelComponent\"]]],null,{\"statements\":[[0,\"      \"],[18,\"default\"],[0,\"\\n\"]],\"locals\":[]},null],[0,\"  \"],[14],[0,\"\\n  \"],[1,[33,[\"component\"],[[28,[\"errorsComponent\"]]],null],false],[0,\"\\n  \"],[1,[33,[\"component\"],[[28,[\"helpTextComponent\"]]],null],false],[0,\"\\n\"],[14]],\"locals\":[],\"named\":[],\"yields\":[\"default\"],\"hasPartials\":false}", "meta": { "moduleName": "ember-bootstrap/templates/components/bs-form/element/layout/horizontal/checkbox.hbs" } });
+});
+;define("ember-bootstrap/templates/components/bs-form/element/layout/vertical", ["exports"], function (exports) {
+  "use strict";
+
+  exports.__esModule = true;
+  exports.default = Ember.HTMLBars.template({ "id": "bBF+9lCQ", "block": "{\"statements\":[[6,[\"if\"],[[28,[\"hasLabel\"]]],null,{\"statements\":[[0,\"  \"],[1,[33,[\"component\"],[[28,[\"labelComponent\"]]],null],false],[0,\"\\n\"]],\"locals\":[]},null],[18,\"default\"],[0,\"\\n\"],[1,[33,[\"component\"],[[28,[\"feedbackIconComponent\"]]],null],false],[0,\"\\n\"],[1,[33,[\"component\"],[[28,[\"errorsComponent\"]]],null],false],[0,\"\\n\"],[1,[33,[\"component\"],[[28,[\"helpTextComponent\"]]],null],false]],\"locals\":[],\"named\":[],\"yields\":[\"default\"],\"hasPartials\":false}", "meta": { "moduleName": "ember-bootstrap/templates/components/bs-form/element/layout/vertical.hbs" } });
+});
+;define("ember-bootstrap/templates/components/bs-form/element/layout/vertical/checkbox", ["exports"], function (exports) {
+  "use strict";
+
+  exports.__esModule = true;
+  exports.default = Ember.HTMLBars.template({ "id": "WNL7kRtr", "block": "{\"statements\":[[11,\"div\",[]],[15,\"class\",\"checkbox\"],[13],[0,\"\\n\"],[6,[\"component\"],[[28,[\"labelComponent\"]]],null,{\"statements\":[[0,\"    \"],[18,\"default\"],[0,\"\\n\"]],\"locals\":[]},null],[14],[0,\"\\n\"],[1,[33,[\"component\"],[[28,[\"errorsComponent\"]]],null],false],[0,\"\\n\"],[1,[33,[\"component\"],[[28,[\"helpTextComponent\"]]],null],false]],\"locals\":[],\"named\":[],\"yields\":[\"default\"],\"hasPartials\":false}", "meta": { "moduleName": "ember-bootstrap/templates/components/bs-form/element/layout/vertical/checkbox.hbs" } });
+});
+;define("ember-bootstrap/templates/components/bs-form/group", ["exports"], function (exports) {
+  "use strict";
+
+  exports.__esModule = true;
+  exports.default = Ember.HTMLBars.template({ "id": "x2GjMX7h", "block": "{\"statements\":[[18,\"default\"],[0,\"\\n\"],[6,[\"if\"],[[28,[\"hasFeedback\"]]],null,{\"statements\":[[0,\"  \"],[11,\"span\",[]],[16,\"class\",[34,[\"form-control-feedback \",[26,[\"iconName\"]]]]],[15,\"aria-hidden\",\"true\"],[13],[14],[0,\"\\n\"]],\"locals\":[]},null]],\"locals\":[],\"named\":[],\"yields\":[\"default\"],\"hasPartials\":false}", "meta": { "moduleName": "ember-bootstrap/templates/components/bs-form/group.hbs" } });
+});
+;define("ember-bootstrap/templates/components/bs-modal-simple", ["exports"], function (exports) {
+  "use strict";
+
+  exports.__esModule = true;
+  exports.default = Ember.HTMLBars.template({ "id": "e19BIARz", "block": "{\"statements\":[[6,[\"if\"],[[28,[\"inDom\"]]],null,{\"statements\":[[6,[\"if\"],[[28,[\"_renderInPlace\"]]],null,{\"statements\":[[6,[\"bs-modal/dialog\"],null,[[\"onClose\",\"fade\",\"showModal\",\"id\",\"keyboard\",\"size\",\"backdropClose\",\"class\",\"inDom\",\"paddingLeft\",\"paddingRight\",\"centered\"],[[33,[\"action\"],[[28,[null]],\"close\"],null],[28,[\"fade\"]],[28,[\"showModal\"]],[28,[\"modalId\"]],[28,[\"keyboard\"]],[28,[\"size\"]],[28,[\"backdropClose\"]],[28,[\"class\"]],[28,[\"inDom\"]],[28,[\"paddingLeft\"]],[28,[\"paddingRight\"]],[33,[\"bs-eq\"],[[28,[\"position\"]],\"center\"],null]]],{\"statements\":[[0,\"      \"],[1,[33,[\"bs-modal/header\"],null,[[\"title\",\"closeButton\",\"onClose\"],[[28,[\"title\"]],[28,[\"closeButton\"]],[33,[\"action\"],[[28,[null]],\"close\"],null]]]],false],[0,\"\\n\"],[6,[\"bs-modal/body\"],null,null,{\"statements\":[[0,\"        \"],[18,\"default\",[[33,[\"hash\"],null,[[\"close\",\"submit\"],[[33,[\"action\"],[[28,[null]],\"close\"],null],[33,[\"action\"],[[28,[null]],\"submit\"],null]]]]]],[0,\"\\n\"]],\"locals\":[]},null],[0,\"      \"],[1,[33,[\"bs-modal/footer\"],null,[[\"closeTitle\",\"submitTitle\",\"submitButtonType\",\"onClose\",\"onSubmit\"],[[28,[\"closeTitle\"]],[28,[\"submitTitle\"]],[28,[\"submitButtonType\"]],[33,[\"action\"],[[28,[null]],\"close\"],null],[33,[\"action\"],[[28,[null]],\"submit\"],null]]]],false],[0,\"\\n\"]],\"locals\":[]},null],[0,\"\\n    \"],[11,\"div\",[]],[13],[0,\"\\n\"],[6,[\"if\"],[[28,[\"showBackdrop\"]]],null,{\"statements\":[[0,\"        \"],[11,\"div\",[]],[16,\"class\",[34,[\"modal-backdrop \",[33,[\"if\"],[[28,[\"fade\"]],\"fade\"],null],\" \",[33,[\"if\"],[[28,[\"showModal\"]],[28,[\"showClass\"]]],null]]]],[16,\"id\",[34,[[26,[\"backdropId\"]]]]],[13],[14],[0,\"\\n\"]],\"locals\":[]},null],[0,\"    \"],[14],[0,\"\\n\"]],\"locals\":[]},{\"statements\":[[6,[\"-in-element\"],[[28,[\"destinationElement\"]]],null,{\"statements\":[[6,[\"bs-modal/dialog\"],null,[[\"onClose\",\"fade\",\"showModal\",\"id\",\"keyboard\",\"size\",\"backdropClose\",\"class\",\"inDom\",\"paddingLeft\",\"paddingRight\",\"centered\"],[[33,[\"action\"],[[28,[null]],\"close\"],null],[28,[\"fade\"]],[28,[\"showModal\"]],[28,[\"modalId\"]],[28,[\"keyboard\"]],[28,[\"size\"]],[28,[\"backdropClose\"]],[28,[\"class\"]],[28,[\"inDom\"]],[28,[\"paddingLeft\"]],[28,[\"paddingRight\"]],[33,[\"bs-eq\"],[[28,[\"position\"]],\"center\"],null]]],{\"statements\":[[0,\"      \"],[1,[33,[\"bs-modal/header\"],null,[[\"title\",\"closeButton\",\"onClose\"],[[28,[\"title\"]],[28,[\"closeButton\"]],[33,[\"action\"],[[28,[null]],\"close\"],null]]]],false],[0,\"\\n\"],[6,[\"bs-modal/body\"],null,null,{\"statements\":[[0,\"        \"],[18,\"default\",[[33,[\"hash\"],null,[[\"close\",\"submit\"],[[33,[\"action\"],[[28,[null]],\"close\"],null],[33,[\"action\"],[[28,[null]],\"submit\"],null]]]]]],[0,\"\\n\"]],\"locals\":[]},null],[0,\"      \"],[1,[33,[\"bs-modal/footer\"],null,[[\"closeTitle\",\"submitTitle\",\"submitButtonType\",\"onClose\",\"onSubmit\"],[[28,[\"closeTitle\"]],[28,[\"submitTitle\"]],[28,[\"submitButtonType\"]],[33,[\"action\"],[[28,[null]],\"close\"],null],[33,[\"action\"],[[28,[null]],\"submit\"],null]]]],false],[0,\"\\n\"]],\"locals\":[]},null],[0,\"\\n    \"],[11,\"div\",[]],[13],[0,\"\\n\"],[6,[\"if\"],[[28,[\"showBackdrop\"]]],null,{\"statements\":[[0,\"        \"],[11,\"div\",[]],[16,\"class\",[34,[\"modal-backdrop \",[33,[\"if\"],[[28,[\"fade\"]],\"fade\"],null],\" \",[33,[\"if\"],[[28,[\"showModal\"]],[28,[\"showClass\"]]],null]]]],[16,\"id\",[34,[[26,[\"backdropId\"]]]]],[13],[14],[0,\"\\n\"]],\"locals\":[]},null],[0,\"    \"],[14],[0,\"\\n\"]],\"locals\":[]},null]],\"locals\":[]}]],\"locals\":[]},null]],\"locals\":[],\"named\":[],\"yields\":[\"default\"],\"hasPartials\":false}", "meta": { "moduleName": "ember-bootstrap/templates/components/bs-modal-simple.hbs" } });
+});
+;define("ember-bootstrap/templates/components/bs-modal", ["exports"], function (exports) {
+  "use strict";
+
+  exports.__esModule = true;
+  exports.default = Ember.HTMLBars.template({ "id": "X3NVOoyZ", "block": "{\"statements\":[[6,[\"if\"],[[28,[\"inDom\"]]],null,{\"statements\":[[6,[\"if\"],[[28,[\"_renderInPlace\"]]],null,{\"statements\":[[6,[\"bs-modal/dialog\"],null,[[\"onClose\",\"fade\",\"showModal\",\"id\",\"keyboard\",\"size\",\"backdropClose\",\"class\",\"inDom\",\"paddingLeft\",\"paddingRight\",\"centered\"],[[33,[\"action\"],[[28,[null]],\"close\"],null],[28,[\"fade\"]],[28,[\"showModal\"]],[28,[\"modalId\"]],[28,[\"keyboard\"]],[28,[\"size\"]],[28,[\"backdropClose\"]],[28,[\"class\"]],[28,[\"inDom\"]],[28,[\"paddingLeft\"]],[28,[\"paddingRight\"]],[33,[\"bs-eq\"],[[28,[\"position\"]],\"center\"],null]]],{\"statements\":[[0,\"      \"],[18,\"default\",[[33,[\"hash\"],null,[[\"header\",\"body\",\"footer\",\"close\",\"submit\"],[[33,[\"component\"],[\"bs-modal/header\"],[[\"title\",\"onClose\"],[[28,[\"title\"]],[33,[\"action\"],[[28,[null]],\"close\"],null]]]],[33,[\"component\"],[\"bs-modal/body\"],null],[33,[\"component\"],[\"bs-modal/footer\"],[[\"onClose\",\"onSubmit\"],[[33,[\"action\"],[[28,[null]],\"close\"],null],[33,[\"action\"],[[28,[null]],\"submit\"],null]]]],[33,[\"action\"],[[28,[null]],\"close\"],null],[33,[\"action\"],[[28,[null]],\"submit\"],null]]]]]],[0,\"\\n\"]],\"locals\":[]},null],[0,\"\\n    \"],[11,\"div\",[]],[13],[0,\"\\n\"],[6,[\"if\"],[[28,[\"showBackdrop\"]]],null,{\"statements\":[[0,\"        \"],[11,\"div\",[]],[16,\"class\",[34,[\"modal-backdrop \",[33,[\"if\"],[[28,[\"fade\"]],\"fade\"],null],\" \",[33,[\"if\"],[[28,[\"showModal\"]],[28,[\"showClass\"]]],null]]]],[16,\"id\",[34,[[26,[\"backdropId\"]]]]],[13],[14],[0,\"\\n\"]],\"locals\":[]},null],[0,\"    \"],[14],[0,\"\\n\"]],\"locals\":[]},{\"statements\":[[6,[\"-in-element\"],[[28,[\"destinationElement\"]]],null,{\"statements\":[[6,[\"bs-modal/dialog\"],null,[[\"onClose\",\"fade\",\"showModal\",\"id\",\"keyboard\",\"size\",\"backdropClose\",\"class\",\"inDom\",\"paddingLeft\",\"paddingRight\",\"centered\"],[[33,[\"action\"],[[28,[null]],\"close\"],null],[28,[\"fade\"]],[28,[\"showModal\"]],[28,[\"modalId\"]],[28,[\"keyboard\"]],[28,[\"size\"]],[28,[\"backdropClose\"]],[28,[\"class\"]],[28,[\"inDom\"]],[28,[\"paddingLeft\"]],[28,[\"paddingRight\"]],[33,[\"bs-eq\"],[[28,[\"position\"]],\"center\"],null]]],{\"statements\":[[0,\"      \"],[18,\"default\",[[33,[\"hash\"],null,[[\"header\",\"body\",\"footer\",\"close\",\"submit\"],[[33,[\"component\"],[\"bs-modal/header\"],[[\"title\",\"onClose\"],[[28,[\"title\"]],[33,[\"action\"],[[28,[null]],\"close\"],null]]]],[33,[\"component\"],[\"bs-modal/body\"],null],[33,[\"component\"],[\"bs-modal/footer\"],[[\"onClose\",\"onSubmit\"],[[33,[\"action\"],[[28,[null]],\"close\"],null],[33,[\"action\"],[[28,[null]],\"submit\"],null]]]],[33,[\"action\"],[[28,[null]],\"close\"],null],[33,[\"action\"],[[28,[null]],\"submit\"],null]]]]]],[0,\"\\n\"]],\"locals\":[]},null],[0,\"\\n    \"],[11,\"div\",[]],[13],[0,\"\\n\"],[6,[\"if\"],[[28,[\"showBackdrop\"]]],null,{\"statements\":[[0,\"        \"],[11,\"div\",[]],[16,\"class\",[34,[\"modal-backdrop \",[33,[\"if\"],[[28,[\"fade\"]],\"fade\"],null],\" \",[33,[\"if\"],[[28,[\"showModal\"]],[28,[\"showClass\"]]],null]]]],[16,\"id\",[34,[[26,[\"backdropId\"]]]]],[13],[14],[0,\"\\n\"]],\"locals\":[]},null],[0,\"    \"],[14],[0,\"\\n\"]],\"locals\":[]},null]],\"locals\":[]}]],\"locals\":[]},null]],\"locals\":[],\"named\":[],\"yields\":[\"default\"],\"hasPartials\":false}", "meta": { "moduleName": "ember-bootstrap/templates/components/bs-modal.hbs" } });
+});
+;define("ember-bootstrap/templates/components/bs-modal/body", ["exports"], function (exports) {
+  "use strict";
+
+  exports.__esModule = true;
+  exports.default = Ember.HTMLBars.template({ "id": "0e7anqUg", "block": "{\"statements\":[[18,\"default\"]],\"locals\":[],\"named\":[],\"yields\":[\"default\"],\"hasPartials\":false}", "meta": { "moduleName": "ember-bootstrap/templates/components/bs-modal/body.hbs" } });
+});
+;define("ember-bootstrap/templates/components/bs-modal/dialog", ["exports"], function (exports) {
+  "use strict";
+
+  exports.__esModule = true;
+  exports.default = Ember.HTMLBars.template({ "id": "HmxBpNX+", "block": "{\"statements\":[[11,\"div\",[]],[16,\"class\",[34,[\"modal-dialog \",[26,[\"sizeClass\"]],\" \",[33,[\"if\"],[[28,[\"centered\"]],\"modal-dialog-centered\"],null]]]],[13],[0,\"\\n  \"],[11,\"div\",[]],[15,\"class\",\"modal-content\"],[13],[0,\"\\n    \"],[18,\"default\"],[0,\"\\n  \"],[14],[0,\"\\n\"],[14]],\"locals\":[],\"named\":[],\"yields\":[\"default\"],\"hasPartials\":false}", "meta": { "moduleName": "ember-bootstrap/templates/components/bs-modal/dialog.hbs" } });
+});
+;define("ember-bootstrap/templates/components/bs-modal/footer", ["exports"], function (exports) {
+  "use strict";
+
+  exports.__esModule = true;
+  exports.default = Ember.HTMLBars.template({ "id": "vWYdi7tc", "block": "{\"statements\":[[6,[\"if\"],[[29,\"default\"]],null,{\"statements\":[[0,\"  \"],[18,\"default\"],[0,\"\\n\"]],\"locals\":[]},{\"statements\":[[6,[\"if\"],[[28,[\"hasSubmitButton\"]]],null,{\"statements\":[[0,\"    \"],[6,[\"bs-button\"],null,[[\"onClick\"],[[33,[\"action\"],[[28,[null]],[28,[\"onClose\"]]],null]]],{\"statements\":[[1,[26,[\"closeTitle\"]],false]],\"locals\":[]},null],[0,\"\\n    \"],[6,[\"bs-button\"],null,[[\"type\",\"onClick\",\"disabled\"],[[28,[\"submitButtonType\"]],[33,[\"action\"],[[28,[null]],[28,[\"onSubmit\"]]],null],[28,[\"submitDisabled\"]]]],{\"statements\":[[1,[26,[\"submitTitle\"]],false]],\"locals\":[]},null],[0,\"\\n\"]],\"locals\":[]},{\"statements\":[[0,\"    \"],[6,[\"bs-button\"],null,[[\"type\",\"onClick\"],[\"primary\",[33,[\"action\"],[[28,[null]],[28,[\"onClose\"]]],null]]],{\"statements\":[[1,[26,[\"closeTitle\"]],false]],\"locals\":[]},null],[0,\"\\n\"]],\"locals\":[]}]],\"locals\":[]}]],\"locals\":[],\"named\":[],\"yields\":[\"default\"],\"hasPartials\":false}", "meta": { "moduleName": "ember-bootstrap/templates/components/bs-modal/footer.hbs" } });
+});
+;define("ember-bootstrap/templates/components/bs-modal/header", ["exports"], function (exports) {
+  "use strict";
+
+  exports.__esModule = true;
+  exports.default = Ember.HTMLBars.template({ "id": "Ojbhq/hF", "block": "{\"statements\":[[6,[\"if\"],[[28,[\"closeButton\"]]],null,{\"statements\":[[0,\"  \"],[1,[33,[\"bs-modal/header/close\"],null,[[\"onClick\"],[[33,[\"action\"],[[28,[null]],[28,[\"onClose\"]]],null]]]],false],[0,\"\\n\"]],\"locals\":[]},null],[6,[\"if\"],[[29,\"default\"]],null,{\"statements\":[[0,\"  \"],[18,\"default\"],[0,\"\\n\"]],\"locals\":[]},{\"statements\":[[0,\"  \"],[6,[\"bs-modal/header/title\"],null,null,{\"statements\":[[1,[26,[\"title\"]],false]],\"locals\":[]},null],[0,\"\\n\"]],\"locals\":[]}]],\"locals\":[],\"named\":[],\"yields\":[\"default\"],\"hasPartials\":false}", "meta": { "moduleName": "ember-bootstrap/templates/components/bs-modal/header.hbs" } });
+});
+;define("ember-bootstrap/templates/components/bs-modal/header/close", ["exports"], function (exports) {
+  "use strict";
+
+  exports.__esModule = true;
+  exports.default = Ember.HTMLBars.template({ "id": "NXfd7DsE", "block": "{\"statements\":[[11,\"span\",[]],[15,\"aria-hidden\",\"true\"],[13],[0,\"×\"],[14]],\"locals\":[],\"named\":[],\"yields\":[],\"hasPartials\":false}", "meta": { "moduleName": "ember-bootstrap/templates/components/bs-modal/header/close.hbs" } });
+});
+;define("ember-bootstrap/templates/components/bs-modal/header/title", ["exports"], function (exports) {
+  "use strict";
+
+  exports.__esModule = true;
+  exports.default = Ember.HTMLBars.template({ "id": "tYljS3hO", "block": "{\"statements\":[[18,\"default\"],[0,\"\\n\"]],\"locals\":[],\"named\":[],\"yields\":[\"default\"],\"hasPartials\":false}", "meta": { "moduleName": "ember-bootstrap/templates/components/bs-modal/header/title.hbs" } });
+});
+;define("ember-bootstrap/templates/components/bs-nav", ["exports"], function (exports) {
+  "use strict";
+
+  exports.__esModule = true;
+  exports.default = Ember.HTMLBars.template({ "id": "BDf+efc1", "block": "{\"statements\":[[18,\"default\",[[33,[\"hash\"],null,[[\"item\",\"link-to\",\"dropdown\"],[[33,[\"component\"],[[28,[\"itemComponent\"]]],null],[33,[\"component\"],[[28,[\"linkToComponent\"]]],null],[33,[\"component\"],[[28,[\"dropdownComponent\"]]],[[\"inNav\",\"tagName\"],[true,\"li\"]]]]]]]],[0,\"\\n\"]],\"locals\":[],\"named\":[],\"yields\":[\"default\"],\"hasPartials\":false}", "meta": { "moduleName": "ember-bootstrap/templates/components/bs-nav.hbs" } });
+});
+;define("ember-bootstrap/templates/components/bs-nav/item", ["exports"], function (exports) {
+  "use strict";
+
+  exports.__esModule = true;
+  exports.default = Ember.HTMLBars.template({ "id": "IcDyt1ij", "block": "{\"statements\":[[18,\"default\"],[0,\"\\n\"]],\"locals\":[],\"named\":[],\"yields\":[\"default\"],\"hasPartials\":false}", "meta": { "moduleName": "ember-bootstrap/templates/components/bs-nav/item.hbs" } });
+});
+;define("ember-bootstrap/templates/components/bs-navbar", ["exports"], function (exports) {
+  "use strict";
+
+  exports.__esModule = true;
+  exports.default = Ember.HTMLBars.template({ "id": "gaxz51Rl", "block": "{\"statements\":[[11,\"div\",[]],[16,\"class\",[33,[\"if\"],[[28,[\"fluid\"]],\"container-fluid\",\"container\"],null],null],[13],[0,\"\\n  \"],[18,\"default\",[[33,[\"hash\"],null,[[\"toggle\",\"content\",\"nav\",\"collapse\",\"expand\"],[[33,[\"component\"],[\"bs-navbar/toggle\"],[[\"onClick\",\"collapsed\"],[[33,[\"action\"],[[28,[null]],\"toggleNavbar\"],null],[28,[\"_collapsed\"]]]]],[33,[\"component\"],[\"bs-navbar/content\"],[[\"collapsed\",\"onHidden\",\"onShown\"],[[28,[\"_collapsed\"]],[28,[\"onCollapsed\"]],[28,[\"onExpanded\"]]]]],[33,[\"component\"],[\"bs-navbar/nav\"],[[\"linkToComponent\"],[[33,[\"component\"],[\"bs-navbar/link-to\"],[[\"onCollapse\"],[[33,[\"action\"],[[28,[null]],\"collapse\"],null]]]]]]],[33,[\"action\"],[[28,[null]],\"collapse\"],null],[33,[\"action\"],[[28,[null]],\"expand\"],null]]]]]],[0,\"\\n\"],[14],[0,\"\\n\"]],\"locals\":[],\"named\":[],\"yields\":[\"default\"],\"hasPartials\":false}", "meta": { "moduleName": "ember-bootstrap/templates/components/bs-navbar.hbs" } });
+});
+;define("ember-bootstrap/templates/components/bs-navbar/content", ["exports"], function (exports) {
+  "use strict";
+
+  exports.__esModule = true;
+  exports.default = Ember.HTMLBars.template({ "id": "oiybeQUt", "block": "{\"statements\":[[18,\"default\"],[0,\"\\n\"]],\"locals\":[],\"named\":[],\"yields\":[\"default\"],\"hasPartials\":false}", "meta": { "moduleName": "ember-bootstrap/templates/components/bs-navbar/content.hbs" } });
+});
+;define("ember-bootstrap/templates/components/bs-navbar/toggle", ["exports"], function (exports) {
+  "use strict";
+
+  exports.__esModule = true;
+  exports.default = Ember.HTMLBars.template({ "id": "MzE6jnx7", "block": "{\"statements\":[[6,[\"if\"],[[29,\"default\"]],null,{\"statements\":[[0,\"  \"],[18,\"default\"],[0,\"\\n\"]],\"locals\":[]},{\"statements\":[[0,\"  \"],[11,\"span\",[]],[15,\"class\",\"sr-only\"],[13],[0,\"Toggle navigation\"],[14],[0,\"\\n  \"],[11,\"span\",[]],[15,\"class\",\"icon-bar\"],[13],[14],[0,\"\\n  \"],[11,\"span\",[]],[15,\"class\",\"icon-bar\"],[13],[14],[0,\"\\n  \"],[11,\"span\",[]],[15,\"class\",\"icon-bar\"],[13],[14],[0,\"\\n\"]],\"locals\":[]}]],\"locals\":[],\"named\":[],\"yields\":[\"default\"],\"hasPartials\":false}", "meta": { "moduleName": "ember-bootstrap/templates/components/bs-navbar/toggle.hbs" } });
+});
+;define("ember-bootstrap/templates/components/bs-popover", ["exports"], function (exports) {
+  "use strict";
+
+  exports.__esModule = true;
+  exports.default = Ember.HTMLBars.template({ "id": "t1RKhiAZ", "block": "{\"statements\":[[6,[\"if\"],[[28,[\"inDom\"]]],null,{\"statements\":[[6,[\"bs-popover/element\"],null,[[\"id\",\"parent\",\"placement\",\"fade\",\"showHelp\",\"title\",\"class\",\"renderInPlace\",\"popperTarget\",\"autoPlacement\",\"viewportElement\",\"viewportPadding\"],[[28,[\"overlayId\"]],[28,[null]],[28,[\"placement\"]],[28,[\"fade\"]],[28,[\"showHelp\"]],[28,[\"title\"]],[28,[\"class\"]],[28,[\"_renderInPlace\"]],[28,[\"triggerTargetElement\"]],[28,[\"autoPlacement\"]],[28,[\"viewportElement\"]],[28,[\"viewportPadding\"]]]],{\"statements\":[[0,\"    \"],[18,\"default\"],[0,\"\\n\"]],\"locals\":[]},null]],\"locals\":[]},null]],\"locals\":[],\"named\":[],\"yields\":[\"default\"],\"hasPartials\":false}", "meta": { "moduleName": "ember-bootstrap/templates/components/bs-popover.hbs" } });
+});
+;define("ember-bootstrap/templates/components/bs-popover/element", ["exports"], function (exports) {
+  "use strict";
+
+  exports.__esModule = true;
+  exports.default = Ember.HTMLBars.template({ "id": "dNPMajX9", "block": "{\"statements\":[[6,[\"ember-popper\"],null,[[\"id\",\"class\",\"ariaRole\",\"placement\",\"renderInPlace\",\"popperTarget\",\"modifiers\",\"popperContainer\",\"onCreate\",\"onUpdate\"],[[28,[\"id\"]],[28,[\"popperClass\"]],[28,[\"ariaRole\"]],[28,[\"placement\"]],[28,[\"renderInPlace\"]],[28,[\"popperTarget\"]],[28,[\"popperModifiers\"]],\"#ember-bootstrap-wormhole\",[33,[\"action\"],[[28,[null]],\"updatePlacement\"],null],[33,[\"action\"],[[28,[null]],\"updatePlacement\"],null]]],{\"statements\":[[0,\"  \"],[11,\"div\",[]],[16,\"class\",[26,[\"arrowClass\"]],null],[13],[14],[0,\"\\n\"],[6,[\"if\"],[[28,[\"hasTitle\"]]],null,{\"statements\":[[0,\"    \"],[11,\"h3\",[]],[16,\"class\",[26,[\"titleClass\"]],null],[13],[1,[26,[\"title\"]],false],[14],[0,\"\\n\"]],\"locals\":[]},null],[0,\"  \"],[11,\"div\",[]],[16,\"class\",[26,[\"contentClass\"]],null],[13],[18,\"default\"],[14],[0,\"\\n\"]],\"locals\":[]},null]],\"locals\":[],\"named\":[],\"yields\":[\"default\"],\"hasPartials\":false}", "meta": { "moduleName": "ember-bootstrap/templates/components/bs-popover/element.hbs" } });
+});
+;define("ember-bootstrap/templates/components/bs-progress", ["exports"], function (exports) {
+  "use strict";
+
+  exports.__esModule = true;
+  exports.default = Ember.HTMLBars.template({ "id": "FmZn+kLX", "block": "{\"statements\":[[18,\"default\",[[33,[\"hash\"],null,[[\"bar\"],[[33,[\"component\"],[\"bs-progress/bar\"],null]]]]]],[0,\"\\n\"]],\"locals\":[],\"named\":[],\"yields\":[\"default\"],\"hasPartials\":false}", "meta": { "moduleName": "ember-bootstrap/templates/components/bs-progress.hbs" } });
+});
+;define("ember-bootstrap/templates/components/bs-progress/bar", ["exports"], function (exports) {
+  "use strict";
+
+  exports.__esModule = true;
+  exports.default = Ember.HTMLBars.template({ "id": "esrLGFaU", "block": "{\"statements\":[[6,[\"if\"],[[28,[\"showLabel\"]]],null,{\"statements\":[[6,[\"if\"],[[29,\"default\"]],null,{\"statements\":[[0,\"    \"],[18,\"default\",[[28,[\"percentRounded\"]]]],[0,\"\\n\"]],\"locals\":[]},{\"statements\":[[0,\"    \"],[1,[26,[\"percentRounded\"]],false],[0,\"%\\n\"]],\"locals\":[]}]],\"locals\":[]},{\"statements\":[[6,[\"if\"],[[29,\"default\"]],null,{\"statements\":[[0,\"    \"],[11,\"span\",[]],[15,\"class\",\"sr-only\"],[13],[18,\"default\",[[28,[\"percentRounded\"]]]],[14],[0,\"\\n\"]],\"locals\":[]},{\"statements\":[[0,\"    \"],[11,\"span\",[]],[15,\"class\",\"sr-only\"],[13],[1,[26,[\"percentRounded\"]],false],[0,\"%\"],[14],[0,\"\\n\"]],\"locals\":[]}],[0,\"\\n\"]],\"locals\":[]}]],\"locals\":[],\"named\":[],\"yields\":[\"default\"],\"hasPartials\":false}", "meta": { "moduleName": "ember-bootstrap/templates/components/bs-progress/bar.hbs" } });
+});
+;define("ember-bootstrap/templates/components/bs-tab", ["exports"], function (exports) {
+  "use strict";
+
+  exports.__esModule = true;
+  exports.default = Ember.HTMLBars.template({ "id": "froanCR8", "block": "{\"statements\":[[6,[\"if\"],[[28,[\"customTabs\"]]],null,{\"statements\":[[0,\"  \"],[18,\"default\",[[33,[\"hash\"],null,[[\"pane\",\"activeId\",\"select\"],[[33,[\"component\"],[\"bs-tab/pane\"],[[\"parent\",\"activeId\",\"fade\",\"fadeTransition\"],[[28,[null]],[28,[\"isActiveId\"]],[28,[\"fade\"]],[28,[\"fadeTransition\"]]]]],[28,[\"isActiveId\"]],[33,[\"action\"],[[28,[null]],\"select\"],null]]]]]],[0,\"\\n\"]],\"locals\":[]},{\"statements\":[[6,[\"bs-nav\"],null,[[\"type\"],[[28,[\"type\"]]]],{\"statements\":[[6,[\"each\"],[[28,[\"navItems\"]]],null,{\"statements\":[[6,[\"if\"],[[28,[\"item\",\"isGroup\"]]],null,{\"statements\":[[6,[\"component\"],[[28,[\"nav\",\"dropdown\"]]],[[\"class\"],[[33,[\"if\"],[[33,[\"bs-contains\"],[[28,[\"item\",\"childIds\"]],[28,[\"isActiveId\"]]],null],\"active\"],null]]],{\"statements\":[[0,\"          \"],[6,[\"component\"],[[28,[\"dd\",\"toggle\"]]],null,{\"statements\":[[1,[28,[\"item\",\"groupTitle\"]],false],[0,\" \"],[11,\"span\",[]],[15,\"class\",\"caret\"],[13],[14]],\"locals\":[]},null],[0,\"\\n\"],[6,[\"component\"],[[28,[\"dd\",\"menu\"]]],null,{\"statements\":[[6,[\"each\"],[[28,[\"item\",\"children\"]]],null,{\"statements\":[[6,[\"component\"],[[28,[\"menu\",\"item\"]]],[[\"class\"],[[33,[\"if\"],[[33,[\"bs-eq\"],[[28,[\"isActiveId\"]],[28,[\"subItem\",\"elementId\"]]],null],\"active\"],null]]],{\"statements\":[[0,\"                \"],[11,\"a\",[]],[16,\"href\",[34,[\"#\",[28,[\"subItem\",\"elementId\"]]]]],[15,\"role\",\"tab\"],[16,\"class\",[33,[\"if\"],[[33,[\"bs-eq\"],[[28,[\"isActiveId\"]],[28,[\"subItem\",\"elementId\"]]],null],\"nav-link active\",\"nav-link\"],null],null],[5,[\"action\"],[[28,[null]],\"select\",[28,[\"subItem\",\"elementId\"]]]],[13],[0,\"\\n                  \"],[1,[28,[\"subItem\",\"title\"]],false],[0,\"\\n                \"],[14],[0,\"\\n\"]],\"locals\":[]},null]],\"locals\":[\"subItem\"]},null]],\"locals\":[\"menu\"]},null]],\"locals\":[\"dd\"]},null]],\"locals\":[]},{\"statements\":[[6,[\"component\"],[[28,[\"nav\",\"item\"]]],[[\"active\"],[[33,[\"bs-eq\"],[[28,[\"item\",\"elementId\"]],[28,[\"isActiveId\"]]],null]]],{\"statements\":[[0,\"          \"],[11,\"a\",[]],[16,\"href\",[34,[\"#\",[28,[\"item\",\"elementId\"]]]]],[15,\"role\",\"tab\"],[16,\"class\",[33,[\"if\"],[[33,[\"bs-eq\"],[[28,[\"isActiveId\"]],[28,[\"item\",\"elementId\"]]],null],\"nav-link active\",\"nav-link\"],null],null],[5,[\"action\"],[[28,[null]],\"select\",[28,[\"item\",\"elementId\"]]]],[13],[0,\"\\n            \"],[1,[28,[\"item\",\"title\"]],false],[0,\"\\n          \"],[14],[0,\"\\n\"]],\"locals\":[]},null]],\"locals\":[]}]],\"locals\":[\"item\"]},null]],\"locals\":[\"nav\"]},null],[0,\"\\n  \"],[11,\"div\",[]],[15,\"class\",\"tab-content\"],[13],[0,\"\\n    \"],[18,\"default\",[[33,[\"hash\"],null,[[\"pane\",\"activeId\",\"select\"],[[33,[\"component\"],[\"bs-tab/pane\"],[[\"parent\",\"activeId\",\"fade\",\"fadeTransition\"],[[28,[null]],[28,[\"isActiveId\"]],[28,[\"fade\"]],[28,[\"fadeTransition\"]]]]],[28,[\"isActiveId\"]],[33,[\"action\"],[[28,[null]],\"select\"],null]]]]]],[0,\"\\n  \"],[14],[0,\"\\n\"]],\"locals\":[]}]],\"locals\":[],\"named\":[],\"yields\":[\"default\"],\"hasPartials\":false}", "meta": { "moduleName": "ember-bootstrap/templates/components/bs-tab.hbs" } });
+});
+;define("ember-bootstrap/templates/components/bs-tab/pane", ["exports"], function (exports) {
+  "use strict";
+
+  exports.__esModule = true;
+  exports.default = Ember.HTMLBars.template({ "id": "BFDb2ch/", "block": "{\"statements\":[[18,\"default\"],[0,\"\\n\"]],\"locals\":[],\"named\":[],\"yields\":[\"default\"],\"hasPartials\":false}", "meta": { "moduleName": "ember-bootstrap/templates/components/bs-tab/pane.hbs" } });
+});
+;define("ember-bootstrap/templates/components/bs-tooltip", ["exports"], function (exports) {
+  "use strict";
+
+  exports.__esModule = true;
+  exports.default = Ember.HTMLBars.template({ "id": "nhTTn3Z9", "block": "{\"statements\":[[6,[\"if\"],[[28,[\"inDom\"]]],null,{\"statements\":[[6,[\"bs-tooltip/element\"],null,[[\"id\",\"placement\",\"fade\",\"showHelp\",\"class\",\"renderInPlace\",\"popperTarget\",\"autoPlacement\",\"viewportElement\",\"viewportPadding\"],[[28,[\"overlayId\"]],[28,[\"placement\"]],[28,[\"fade\"]],[28,[\"showHelp\"]],[28,[\"class\"]],[28,[\"_renderInPlace\"]],[28,[\"triggerTargetElement\"]],[28,[\"autoPlacement\"]],[28,[\"viewportElement\"]],[28,[\"viewportPadding\"]]]],{\"statements\":[[6,[\"if\"],[[29,\"default\"]],null,{\"statements\":[[0,\"      \"],[18,\"default\"],[0,\"\\n\"]],\"locals\":[]},{\"statements\":[[0,\"      \"],[1,[26,[\"title\"]],false],[0,\"\\n\"]],\"locals\":[]}]],\"locals\":[]},null]],\"locals\":[]},null]],\"locals\":[],\"named\":[],\"yields\":[\"default\"],\"hasPartials\":false}", "meta": { "moduleName": "ember-bootstrap/templates/components/bs-tooltip.hbs" } });
+});
+;define("ember-bootstrap/templates/components/bs-tooltip/element", ["exports"], function (exports) {
+  "use strict";
+
+  exports.__esModule = true;
+  exports.default = Ember.HTMLBars.template({ "id": "30K0f30f", "block": "{\"statements\":[[6,[\"ember-popper\"],null,[[\"id\",\"class\",\"ariaRole\",\"placement\",\"renderInPlace\",\"popperTarget\",\"modifiers\",\"popperContainer\",\"onCreate\",\"onUpdate\"],[[28,[\"id\"]],[28,[\"popperClass\"]],[28,[\"ariaRole\"]],[28,[\"placement\"]],[28,[\"renderInPlace\"]],[28,[\"popperTarget\"]],[28,[\"popperModifiers\"]],\"#ember-bootstrap-wormhole\",[33,[\"action\"],[[28,[null]],\"updatePlacement\"],null],[33,[\"action\"],[[28,[null]],\"updatePlacement\"],null]]],{\"statements\":[[0,\"  \"],[11,\"div\",[]],[16,\"class\",[26,[\"arrowClass\"]],null],[13],[14],[0,\"\\n  \"],[11,\"div\",[]],[15,\"class\",\"tooltip-inner\"],[13],[0,\"\\n    \"],[18,\"default\"],[0,\"\\n  \"],[14],[0,\"\\n\"]],\"locals\":[]},null]],\"locals\":[],\"named\":[],\"yields\":[\"default\"],\"hasPartials\":false}", "meta": { "moduleName": "ember-bootstrap/templates/components/bs-tooltip/element.hbs" } });
+});
+;define('ember-bootstrap/utils/dom', ['exports'], function (exports) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.findElementById = findElementById;
+  exports.getDOM = getDOM;
+
+
+  function childNodesOfElement(element) {
+    var children = [];
+    var child = element.firstChild;
+    while (child) {
+      children.push(child);
+      child = child.nextSibling;
+    }
+    return children;
+  } /*
+     * Implement some helpers methods for interacting with the DOM,
+     * be it Fastboot's SimpleDOM or the browser's version.
+     *
+     * Credit to https://github.com/yapplabs/ember-wormhole, from where this has been shamelessly stolen.
+     */
+
+  function findElementById(doc, id) {
+    if (doc.getElementById) {
+      return doc.getElementById(id);
+    }
+
+    var nodes = childNodesOfElement(doc);
+    var node = void 0;
+
+    while (nodes.length) {
+      node = nodes.shift();
+
+      if (node.getAttribute && node.getAttribute('id') === id) {
+        return node;
+      }
+      nodes = childNodesOfElement(node).concat(nodes);
+    }
+  }
+
+  // Private Ember API usage. Get the dom implementation used by the current
+  // renderer, be it native browser DOM or Fastboot SimpleDOM
+  function getDOM(context) {
+    var renderer = context.renderer;
+
+    if (!renderer._dom) {
+      // pre glimmer2
+      var container = Ember.getOwner ? Ember.getOwner(context) : context.container;
+      var documentService = container.lookup('service:-document');
+
+      if (documentService) {
+        return documentService;
+      }
+
+      renderer = container.lookup('renderer:-dom');
+    }
+
+    if (renderer._dom && renderer._dom.document) {
+      return renderer._dom.document;
+    } else {
+      throw new Error('Could not get DOM');
+    }
+  }
+});
+;define('ember-bootstrap/utils/get-parent', ['exports'], function (exports) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = getParent;
+  function getParent(view) {
+    if (Ember.get(view, 'tagName') === '') {
+      // Beware: use of private API! :(
+      if (Ember.ViewUtils && Ember.ViewUtils.getViewBounds) {
+        return Ember.ViewUtils.getViewBounds(view).parentElement;
+      } else {
+        return view._renderNode.contextualElement;
+      }
+    } else {
+      return Ember.get(view, 'element').parentNode;
+    }
+  }
+});
+;define('ember-bootstrap/utils/listen-to-cp', ['exports'], function (exports) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+
+  exports.default = function (dependentKey) {
+    var defaultValue = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : null;
+
+    return Ember.computed(dependentKey, {
+      get: function get() {
+        return Ember.getWithDefault(this, dependentKey, defaultValue);
+      },
+      set: function set(key, value) {
+        // eslint-disable-line no-unused-vars
+        return value;
+      }
+    });
+  };
+});
+;define('ember-bootstrap/utils/transition-end', ['exports', 'ember-bootstrap/utils/transition-support'], function (exports, _transitionSupport) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = onTransitionEnd;
+  function onTransitionEnd(node, handler, context) {
+    var duration = arguments.length > 3 && arguments[3] !== undefined ? arguments[3] : 0;
+
+    if (!node) {
+      return;
+    }
+    var fakeEvent = {
+      target: node,
+      currentTarget: node
+    };
+    var backup = void 0;
+
+    if (_transitionSupport.default) {
+      node.addEventListener(_transitionSupport.default, done, false);
+
+      backup = Ember.run.later(this, done, fakeEvent, duration);
+    } else {
+      Ember.run.later(this, done, fakeEvent, 0);
+    }
+
+    function done(event) {
+      if (backup) {
+        Ember.run.cancel(backup);
+      }
+      node.removeEventListener(_transitionSupport.default, done);
+      Ember.run.join(context, handler, event);
+    }
+  }
+});
+;define('ember-bootstrap/utils/transition-support', ['exports'], function (exports) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  function transitionSupport() {
+    var el = document.createElement('bootstrap');
+
+    var transEndEventNames = {
+      transition: 'transitionend',
+      WebkitTransition: 'webkitTransitionEnd',
+      MozTransition: 'transitionend',
+      OTransition: 'oTransitionEnd otransitionend'
+    };
+
+    for (var name in transEndEventNames) {
+      if (el.style[name] !== undefined) {
+        return transEndEventNames[name];
+      }
+    }
+
+    return false;
+  }
+
+  exports.default = typeof document !== 'undefined' && transitionSupport();
+});
 ;define('ember-cli-app-version/initializer-factory', ['exports'], function (exports) {
   'use strict';
 
@@ -73186,6 +88332,3232 @@ createDeprecatedModule('resolver');
     }
   });
 });
+;define('ember-concurrency/-buffer-policy', ['exports'], function (exports) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+
+  function _toConsumableArray(arr) {
+    if (Array.isArray(arr)) {
+      for (var i = 0, arr2 = Array(arr.length); i < arr.length; i++) {
+        arr2[i] = arr[i];
+      }
+
+      return arr2;
+    } else {
+      return Array.from(arr);
+    }
+  }
+
+  var saturateActiveQueue = function saturateActiveQueue(scheduler) {
+    while (scheduler.activeTaskInstances.length < scheduler.maxConcurrency) {
+      var taskInstance = scheduler.queuedTaskInstances.shift();
+      if (!taskInstance) {
+        break;
+      }
+      scheduler.activeTaskInstances.push(taskInstance);
+    }
+  };
+
+  function numPerformSlots(scheduler) {
+    return scheduler.maxConcurrency - scheduler.queuedTaskInstances.length - scheduler.activeTaskInstances.length;
+  }
+
+  var enqueueTasksPolicy = exports.enqueueTasksPolicy = {
+    requiresUnboundedConcurrency: true,
+    schedule: function schedule(scheduler) {
+      // [a,b,_] [c,d,e,f] becomes
+      // [a,b,c] [d,e,f]
+      saturateActiveQueue(scheduler);
+    },
+    getNextPerformStatus: function getNextPerformStatus(scheduler) {
+      return numPerformSlots(scheduler) > 0 ? 'succeed' : 'enqueue';
+    }
+  };
+
+  var dropQueuedTasksPolicy = exports.dropQueuedTasksPolicy = {
+    cancelReason: 'it belongs to a \'drop\' Task that was already running',
+    schedule: function schedule(scheduler) {
+      // [a,b,_] [c,d,e,f] becomes
+      // [a,b,c] []
+      saturateActiveQueue(scheduler);
+      scheduler.spliceTaskInstances(this.cancelReason, scheduler.queuedTaskInstances, 0, scheduler.queuedTaskInstances.length);
+    },
+    getNextPerformStatus: function getNextPerformStatus(scheduler) {
+      return numPerformSlots(scheduler) > 0 ? 'succeed' : 'drop';
+    }
+  };
+
+  var cancelOngoingTasksPolicy = exports.cancelOngoingTasksPolicy = {
+    cancelReason: 'it belongs to a \'restartable\' Task that was .perform()ed again',
+    schedule: function schedule(scheduler) {
+      // [a,b,_] [c,d,e,f] becomes
+      // [d,e,f] []
+      var activeTaskInstances = scheduler.activeTaskInstances;
+      var queuedTaskInstances = scheduler.queuedTaskInstances;
+      activeTaskInstances.push.apply(activeTaskInstances, _toConsumableArray(queuedTaskInstances));
+      queuedTaskInstances.length = 0;
+
+      var numToShift = Math.max(0, activeTaskInstances.length - scheduler.maxConcurrency);
+      scheduler.spliceTaskInstances(this.cancelReason, activeTaskInstances, 0, numToShift);
+    },
+    getNextPerformStatus: function getNextPerformStatus(scheduler) {
+      return numPerformSlots(scheduler) > 0 ? 'succeed' : 'cancel_previous';
+    }
+  };
+
+  var dropButKeepLatestPolicy = exports.dropButKeepLatestPolicy = {
+    cancelReason: 'it belongs to a \'keepLatest\' Task that was already running',
+    schedule: function schedule(scheduler) {
+      // [a,b,_] [c,d,e,f] becomes
+      // [d,e,f] []
+      saturateActiveQueue(scheduler);
+      scheduler.spliceTaskInstances(this.cancelReason, scheduler.queuedTaskInstances, 0, scheduler.queuedTaskInstances.length - 1);
+    }
+  };
+});
+;define('ember-concurrency/-cancelable-promise-helpers', ['exports', 'ember-concurrency/-task-instance', 'ember-concurrency/utils'], function (exports, _taskInstance, _utils) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.hash = exports.race = exports.allSettled = exports.all = undefined;
+
+  var _marked = regeneratorRuntime.mark(resolver);
+
+  var asyncAll = taskAwareVariantOf(Ember.RSVP.Promise, 'all', identity);
+
+  function resolver(value) {
+    return regeneratorRuntime.wrap(function resolver$(_context) {
+      while (1) {
+        switch (_context.prev = _context.next) {
+          case 0:
+            return _context.abrupt('return', value);
+
+          case 1:
+          case 'end':
+            return _context.stop();
+        }
+      }
+    }, _marked, this);
+  }
+
+  /**
+   * A cancelation-aware variant of [Promise.all](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Promise/all).
+   * The normal version of a `Promise.all` just returns a regular, uncancelable
+   * Promise. The `ember-concurrency` variant of `all()` has the following
+   * additional behavior:
+   *
+   * - if the task that `yield`ed `all()` is canceled, any of the
+   *   {@linkcode TaskInstance}s passed in to `all` will be canceled
+   * - if any of the {@linkcode TaskInstance}s (or regular promises) passed in reject (or
+   *   are canceled), all of the other unfinished `TaskInstance`s will
+   *   be automatically canceled.
+   *
+   * [Check out the "Awaiting Multiple Child Tasks example"](/#/docs/examples/joining-tasks)
+   */
+  var all = exports.all = function all(things) {
+    if (things.length === 0) {
+      return things;
+    }
+
+    for (var i = 0; i < things.length; ++i) {
+      var t = things[i];
+      if (!(t && t[_utils.yieldableSymbol])) {
+        return asyncAll(things);
+      }
+    }
+
+    var isAsync = false;
+    var taskInstances = things.map(function (thing) {
+      var ti = _taskInstance.default.create({
+        // TODO: consider simpler iterator than full on generator fn?
+        fn: resolver,
+        args: [thing]
+      })._start();
+
+      if (ti._completionState !== 1) {
+        isAsync = true;
+      }
+      return ti;
+    });
+
+    if (isAsync) {
+      return asyncAll(taskInstances);
+    } else {
+      return taskInstances.map(function (ti) {
+        return ti.value;
+      });
+    }
+  };
+
+  /**
+   * A cancelation-aware variant of [RSVP.allSettled](http://emberjs.com/api/classes/RSVP.html#method_allSettled).
+   * The normal version of a `RSVP.allSettled` just returns a regular, uncancelable
+   * Promise. The `ember-concurrency` variant of `allSettled()` has the following
+   * additional behavior:
+   *
+   * - if the task that `yield`ed `allSettled()` is canceled, any of the
+   *   {@linkcode TaskInstance}s passed in to `allSettled` will be canceled
+   */
+  var allSettled = exports.allSettled = taskAwareVariantOf(Ember.RSVP, 'allSettled', identity);
+
+  /**
+   * A cancelation-aware variant of [Promise.race](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Promise/race).
+   * The normal version of a `Promise.race` just returns a regular, uncancelable
+   * Promise. The `ember-concurrency` variant of `race()` has the following
+   * additional behavior:
+   *
+   * - if the task that `yield`ed `race()` is canceled, any of the
+   *   {@linkcode TaskInstance}s passed in to `race` will be canceled
+   * - once any of the tasks/promises passed in complete (either success, failure,
+   *   or cancelation), any of the {@linkcode TaskInstance}s passed in will be canceled
+   *
+   * [Check out the "Awaiting Multiple Child Tasks example"](/#/docs/examples/joining-tasks)
+   */
+  var race = exports.race = taskAwareVariantOf(Ember.RSVP.Promise, 'race', identity);
+
+  /**
+   * A cancelation-aware variant of [RSVP.hash](http://emberjs.com/api/classes/RSVP.html#hash).
+   * The normal version of a `RSVP.hash` just returns a regular, uncancelable
+   * Promise. The `ember-concurrency` variant of `hash()` has the following
+   * additional behavior:
+   *
+   * - if the task that `yield`ed `hash()` is canceled, any of the
+   *   {@linkcode TaskInstance}s passed in to `allSettled` will be canceled
+   * - if any of the items rejects/cancels, all other cancelable items
+   *   (e.g. {@linkcode TaskInstance}s) will be canceled
+   */
+  var hash = exports.hash = taskAwareVariantOf(Ember.RSVP, 'hash', getValues);
+
+  function identity(obj) {
+    return obj;
+  }
+
+  function getValues(obj) {
+    return Object.keys(obj).map(function (k) {
+      return obj[k];
+    });
+  }
+
+  function taskAwareVariantOf(obj, method, getItems) {
+    return function (thing) {
+      var items = getItems(thing);
+      var defer = Ember.RSVP.defer();
+
+      obj[method](thing).then(defer.resolve, defer.reject);
+
+      var hasCancelled = false;
+      var cancelAll = function cancelAll() {
+        if (hasCancelled) {
+          return;
+        }
+        hasCancelled = true;
+        items.forEach(function (it) {
+          if (it) {
+            if (it instanceof _taskInstance.default) {
+              it.cancel();
+            } else if (typeof it.__ec_cancel__ === 'function') {
+              it.__ec_cancel__();
+            }
+          }
+        });
+      };
+
+      var promise = defer.promise.finally(cancelAll);
+      promise.__ec_cancel__ = cancelAll;
+      return promise;
+    };
+  }
+});
+;define('ember-concurrency/-encapsulated-task', ['exports', 'ember-concurrency/-task-instance'], function (exports, _taskInstance) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = _taskInstance.default.extend({
+    _makeIterator: function _makeIterator() {
+      var perform = this.get('perform');
+      (true && !(typeof perform === 'function') && Ember.assert("The object passed to `task()` must define a `perform` generator function, e.g. `perform: function * (a,b,c) {...}`, or better yet `*perform(a,b,c) {...}`", typeof perform === 'function'));
+
+      return perform.apply(this, this.args);
+    },
+
+
+    perform: null
+  });
+});
+;define('ember-concurrency/-helpers', ['exports'], function (exports) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.taskHelperClosure = taskHelperClosure;
+
+  function _toConsumableArray(arr) {
+    if (Array.isArray(arr)) {
+      for (var i = 0, arr2 = Array(arr.length); i < arr.length; i++) {
+        arr2[i] = arr[i];
+      }
+
+      return arr2;
+    } else {
+      return Array.from(arr);
+    }
+  }
+
+  function taskHelperClosure(helperName, taskMethod, _args, hash) {
+    var task = _args[0];
+    var outerArgs = _args.slice(1);
+
+    return Ember.run.bind(null, function () {
+      if (!task || typeof task[taskMethod] !== 'function') {
+        (true && !(false) && Ember.assert('The first argument passed to the `' + helperName + '` helper should be a Task object (without quotes); you passed ' + task, false));
+
+        return;
+      }
+
+      for (var _len = arguments.length, innerArgs = Array(_len), _key = 0; _key < _len; _key++) {
+        innerArgs[_key] = arguments[_key];
+      }
+
+      if (hash && hash.value) {
+        var event = innerArgs.pop();
+        innerArgs.push(Ember.get(event, hash.value));
+      }
+
+      return task[taskMethod].apply(task, _toConsumableArray(outerArgs).concat(innerArgs));
+    });
+  }
+});
+;define('ember-concurrency/-property-modifiers-mixin', ['exports', 'ember-concurrency/-scheduler', 'ember-concurrency/-buffer-policy'], function (exports, _scheduler, _bufferPolicy) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.propertyModifiers = undefined;
+  exports.resolveScheduler = resolveScheduler;
+  var propertyModifiers = exports.propertyModifiers = {
+    // by default, task(...) expands to task(...).enqueue().maxConcurrency(Infinity)
+    _bufferPolicy: _bufferPolicy.enqueueTasksPolicy,
+    _maxConcurrency: Infinity,
+    _taskGroupPath: null,
+    _hasUsedModifier: false,
+    _hasSetBufferPolicy: false,
+    _hasEnabledEvents: false,
+
+    restartable: function restartable() {
+      return setBufferPolicy(this, _bufferPolicy.cancelOngoingTasksPolicy);
+    },
+    enqueue: function enqueue() {
+      return setBufferPolicy(this, _bufferPolicy.enqueueTasksPolicy);
+    },
+    drop: function drop() {
+      return setBufferPolicy(this, _bufferPolicy.dropQueuedTasksPolicy);
+    },
+    keepLatest: function keepLatest() {
+      return setBufferPolicy(this, _bufferPolicy.dropButKeepLatestPolicy);
+    },
+    maxConcurrency: function maxConcurrency(n) {
+      this._hasUsedModifier = true;
+      this._maxConcurrency = n;
+      assertModifiersNotMixedWithGroup(this);
+      return this;
+    },
+    group: function group(taskGroupPath) {
+      this._taskGroupPath = taskGroupPath;
+      assertModifiersNotMixedWithGroup(this);
+      return this;
+    },
+    evented: function evented() {
+      this._hasEnabledEvents = true;
+      return this;
+    },
+    debug: function debug() {
+      this._debug = true;
+      return this;
+    }
+  };
+
+  function setBufferPolicy(obj, policy) {
+    obj._hasSetBufferPolicy = true;
+    obj._hasUsedModifier = true;
+    obj._bufferPolicy = policy;
+    assertModifiersNotMixedWithGroup(obj);
+
+    if (obj._maxConcurrency === Infinity) {
+      obj._maxConcurrency = 1;
+    }
+
+    return obj;
+  }
+
+  function assertModifiersNotMixedWithGroup(obj) {
+    (true && !(!obj._hasUsedModifier || !obj._taskGroupPath) && Ember.assert('ember-concurrency does not currently support using both .group() with other task modifiers (e.g. drop(), enqueue(), restartable())', !obj._hasUsedModifier || !obj._taskGroupPath));
+  }
+
+  function resolveScheduler(propertyObj, obj, TaskGroup) {
+    if (propertyObj._taskGroupPath) {
+      var taskGroup = obj.get(propertyObj._taskGroupPath);
+      (true && !(taskGroup instanceof TaskGroup) && Ember.assert('Expected path \'' + propertyObj._taskGroupPath + '\' to resolve to a TaskGroup object, but instead was ' + taskGroup, taskGroup instanceof TaskGroup));
+
+      return taskGroup._scheduler;
+    } else {
+      return _scheduler.default.create({
+        bufferPolicy: propertyObj._bufferPolicy,
+        maxConcurrency: propertyObj._maxConcurrency
+      });
+    }
+  }
+});
+;define('ember-concurrency/-scheduler', ['exports'], function (exports) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+
+
+  var SEEN_INDEX = 0;
+
+  var Scheduler = Ember.Object.extend({
+    lastPerformed: null,
+    lastStarted: null,
+    lastRunning: null,
+    lastSuccessful: null,
+    lastComplete: null,
+    lastErrored: null,
+    lastCanceled: null,
+    lastIncomplete: null,
+    performCount: 0,
+
+    boundHandleFulfill: null,
+    boundHandleReject: null,
+
+    init: function init() {
+      this._super.apply(this, arguments);
+      this.activeTaskInstances = [];
+      this.queuedTaskInstances = [];
+    },
+    cancelAll: function cancelAll(reason) {
+      var seen = [];
+      this.spliceTaskInstances(reason, this.activeTaskInstances, 0, this.activeTaskInstances.length, seen);
+      this.spliceTaskInstances(reason, this.queuedTaskInstances, 0, this.queuedTaskInstances.length, seen);
+      flushTaskCounts(seen);
+    },
+    spliceTaskInstances: function spliceTaskInstances(cancelReason, taskInstances, index, count, seen) {
+      for (var i = index; i < index + count; ++i) {
+        var taskInstance = taskInstances[i];
+
+        if (!taskInstance.hasStarted) {
+          // This tracking logic is kinda spread all over the place...
+          // maybe TaskInstances themselves could notify
+          // some delegate of queued state changes upon cancelation?
+          taskInstance.task.decrementProperty('numQueued');
+        }
+
+        taskInstance.cancel(cancelReason);
+        if (seen) {
+          seen.push(taskInstance.task);
+        }
+      }
+      taskInstances.splice(index, count);
+    },
+    schedule: function schedule(taskInstance) {
+      Ember.set(this, 'lastPerformed', taskInstance);
+      this.incrementProperty('performCount');
+      taskInstance.task.incrementProperty('numQueued');
+      this.queuedTaskInstances.push(taskInstance);
+      this._flushQueues();
+    },
+    _flushQueues: function _flushQueues() {
+      var seen = [];
+
+      for (var i = 0; i < this.activeTaskInstances.length; ++i) {
+        seen.push(this.activeTaskInstances[i].task);
+      }
+
+      this.activeTaskInstances = filterFinished(this.activeTaskInstances);
+
+      this.bufferPolicy.schedule(this);
+
+      var lastStarted = null;
+      for (var _i = 0; _i < this.activeTaskInstances.length; ++_i) {
+        var taskInstance = this.activeTaskInstances[_i];
+        if (!taskInstance.hasStarted) {
+          this._startTaskInstance(taskInstance);
+          lastStarted = taskInstance;
+        }
+        seen.push(taskInstance.task);
+      }
+
+      if (lastStarted) {
+        Ember.set(this, 'lastStarted', lastStarted);
+      }
+      Ember.set(this, 'lastRunning', lastStarted);
+
+      for (var _i2 = 0; _i2 < this.queuedTaskInstances.length; ++_i2) {
+        seen.push(this.queuedTaskInstances[_i2].task);
+      }
+
+      flushTaskCounts(seen);
+      Ember.set(this, 'concurrency', this.activeTaskInstances.length);
+    },
+    _startTaskInstance: function _startTaskInstance(taskInstance) {
+      var _this = this;
+
+      var task = taskInstance.task;
+      task.decrementProperty('numQueued');
+      task.incrementProperty('numRunning');
+
+      taskInstance._start()._onFinalize(function () {
+        task.decrementProperty('numRunning');
+        var state = taskInstance._completionState;
+        Ember.set(_this, 'lastComplete', taskInstance);
+        if (state === 1) {
+          Ember.set(_this, 'lastSuccessful', taskInstance);
+        } else {
+          if (state === 2) {
+            Ember.set(_this, 'lastErrored', taskInstance);
+          } else if (state === 3) {
+            Ember.set(_this, 'lastCanceled', taskInstance);
+          }
+          Ember.set(_this, 'lastIncomplete', taskInstance);
+        }
+        Ember.run.once(_this, _this._flushQueues);
+      });
+    }
+  });
+
+  function flushTaskCounts(tasks) {
+    SEEN_INDEX++;
+    for (var i = 0, l = tasks.length; i < l; ++i) {
+      var task = tasks[i];
+      if (task._seenIndex < SEEN_INDEX) {
+        task._seenIndex = SEEN_INDEX;
+        updateTaskChainCounts(task);
+      }
+    }
+  }
+
+  function updateTaskChainCounts(task) {
+    var numRunning = task.numRunning;
+    var numQueued = task.numQueued;
+    var taskGroup = task.get('group');
+
+    while (taskGroup) {
+      Ember.set(taskGroup, 'numRunning', numRunning);
+      Ember.set(taskGroup, 'numQueued', numQueued);
+      taskGroup = taskGroup.get('group');
+    }
+  }
+
+  function filterFinished(taskInstances) {
+    var ret = [];
+    for (var i = 0, l = taskInstances.length; i < l; ++i) {
+      var taskInstance = taskInstances[i];
+      if (Ember.get(taskInstance, 'isFinished') === false) {
+        ret.push(taskInstance);
+      }
+    }
+    return ret;
+  }
+
+  exports.default = Scheduler;
+});
+;define('ember-concurrency/-task-group', ['exports', 'ember-concurrency/utils', 'ember-concurrency/-task-state-mixin', 'ember-concurrency/-property-modifiers-mixin'], function (exports, _utils, _taskStateMixin, _propertyModifiersMixin) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.TaskGroup = undefined;
+  exports.TaskGroupProperty = TaskGroupProperty;
+  var TaskGroup = exports.TaskGroup = Ember.Object.extend(_taskStateMixin.default, {
+    isTaskGroup: true,
+
+    toString: function toString() {
+      return '<TaskGroup:' + this._propertyName + '>';
+    },
+
+
+    _numRunningOrNumQueued: Ember.computed.or('numRunning', 'numQueued'),
+    isRunning: Ember.computed.bool('_numRunningOrNumQueued'),
+    isQueued: false
+  });
+
+  function TaskGroupProperty() {
+    for (var _len = arguments.length, decorators = Array(_len), _key = 0; _key < _len; _key++) {
+      decorators[_key] = arguments[_key];
+    }
+
+    var taskFn = decorators.pop();
+    var tp = this;
+    _utils._ComputedProperty.call(this, function (_propertyName) {
+      return TaskGroup.create({
+        fn: taskFn,
+        context: this,
+        _origin: this,
+        _taskGroupPath: tp._taskGroupPath,
+        _scheduler: (0, _propertyModifiersMixin.resolveScheduler)(tp, this, TaskGroup),
+        _propertyName: _propertyName
+      });
+    });
+  }
+
+  TaskGroupProperty.prototype = Object.create(_utils._ComputedProperty.prototype);
+  (0, _utils.objectAssign)(TaskGroupProperty.prototype, _propertyModifiersMixin.propertyModifiers, {
+    constructor: TaskGroupProperty
+  });
+});
+;define('ember-concurrency/-task-instance', ['exports', 'ember-concurrency/utils'], function (exports, _utils) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.PERFORM_TYPE_LINKED = exports.PERFORM_TYPE_UNLINKED = exports.PERFORM_TYPE_DEFAULT = undefined;
+  exports.getRunningInstance = getRunningInstance;
+  exports.didCancel = didCancel;
+  exports.go = go;
+  exports.wrap = wrap;
+
+  function _toConsumableArray(arr) {
+    if (Array.isArray(arr)) {
+      for (var i = 0, arr2 = Array(arr.length); i < arr.length; i++) {
+        arr2[i] = arr[i];
+      }
+
+      return arr2;
+    } else {
+      return Array.from(arr);
+    }
+  }
+
+  var TASK_CANCELATION_NAME = 'TaskCancelation';
+
+  var COMPLETION_PENDING = 0;
+  var COMPLETION_SUCCESS = 1;
+  var COMPLETION_ERROR = 2;
+  var COMPLETION_CANCEL = 3;
+
+  var GENERATOR_STATE_BEFORE_CREATE = "BEFORE_CREATE";
+  var GENERATOR_STATE_HAS_MORE_VALUES = "HAS_MORE_VALUES";
+  var GENERATOR_STATE_DONE = "DONE";
+  var GENERATOR_STATE_ERRORED = "ERRORED";
+
+  var PERFORM_TYPE_DEFAULT = exports.PERFORM_TYPE_DEFAULT = "PERFORM_TYPE_DEFAULT";
+  var PERFORM_TYPE_UNLINKED = exports.PERFORM_TYPE_UNLINKED = "PERFORM_TYPE_UNLINKED";
+  var PERFORM_TYPE_LINKED = exports.PERFORM_TYPE_LINKED = "PERFORM_TYPE_LINKED";
+
+  var TASK_INSTANCE_STACK = [];
+
+  function getRunningInstance() {
+    return TASK_INSTANCE_STACK[TASK_INSTANCE_STACK.length - 1];
+  }
+
+  function handleYieldedUnknownThenable(thenable, taskInstance, resumeIndex) {
+    thenable.then(function (value) {
+      taskInstance.proceed(resumeIndex, _utils.YIELDABLE_CONTINUE, value);
+    }, function (error) {
+      taskInstance.proceed(resumeIndex, _utils.YIELDABLE_THROW, error);
+    });
+  }
+
+  /**
+   * Returns true if the object passed to it is a TaskCancelation error.
+   * If you call `someTask.perform().catch(...)` or otherwise treat
+   * a {@linkcode TaskInstance} like a promise, you may need to
+   * handle the cancelation of a TaskInstance differently from
+   * other kinds of errors it might throw, and you can use this
+   * convenience function to distinguish cancelation from errors.
+   *
+   * ```js
+   * click() {
+   *   this.get('myTask').perform().catch(e => {
+   *     if (!didCancel(e)) { throw e; }
+   *   });
+   * }
+   * ```
+   *
+   * @param {Object} error the caught error, which might be a TaskCancelation
+   * @returns {Boolean}
+   */
+  function didCancel(e) {
+    return e && e.name === TASK_CANCELATION_NAME;
+  }
+
+  function forwardToInternalPromise(method) {
+    return function () {
+      var _get;
+
+      this._hasSubscribed = true;
+      return (_get = this.get('_promise'))[method].apply(_get, arguments);
+    };
+  }
+
+  function spliceSlice(str, index, count, add) {
+    return str.slice(0, index) + (add || "") + str.slice(index + count);
+  }
+
+  /**
+    A `TaskInstance` represent a single execution of a
+    {@linkcode Task}. Every call to {@linkcode Task#perform} returns
+    a `TaskInstance`.
+  
+    `TaskInstance`s are cancelable, either explicitly
+    via {@linkcode TaskInstance#cancel} or {@linkcode Task#cancelAll},
+    or automatically due to the host object being destroyed, or
+    because concurrency policy enforced by a
+    {@linkcode TaskProperty Task Modifier} canceled the task instance.
+  
+    <style>
+      .ignore-this--this-is-here-to-hide-constructor,
+      #TaskInstance { display: none }
+    </style>
+  
+    @class TaskInstance
+  */
+  var taskInstanceAttrs = {
+    iterator: null,
+    _disposer: null,
+    _completionState: COMPLETION_PENDING,
+    task: null,
+    args: [],
+    _hasSubscribed: false,
+    _runLoop: true,
+    _debug: false,
+    _hasEnabledEvents: false,
+    cancelReason: null,
+    _performType: PERFORM_TYPE_DEFAULT,
+    _expectsLinkedYield: false,
+
+    /**
+     * If this TaskInstance runs to completion by returning a property
+     * other than a rejecting promise, this property will be set
+     * with that value.
+     *
+     * @memberof TaskInstance
+     * @instance
+     * @readOnly
+     */
+    value: null,
+
+    /**
+     * If this TaskInstance is canceled or throws an error (or yields
+     * a promise that rejects), this property will be set with that error.
+     * Otherwise, it is null.
+     *
+     * @memberof TaskInstance
+     * @instance
+     * @readOnly
+     */
+    error: null,
+
+    /**
+     * True if the task instance is fulfilled.
+     *
+     * @memberof TaskInstance
+     * @instance
+     * @readOnly
+     */
+    isSuccessful: false,
+
+    /**
+     * True if the task instance resolves to a rejection.
+     *
+     * @memberof TaskInstance
+     * @instance
+     * @readOnly
+     */
+    isError: false,
+
+    /**
+     * True if the task instance was canceled before it could run to completion.
+     *
+     * @memberof TaskInstance
+     * @instance
+     * @readOnly
+     */
+    isCanceled: Ember.computed.and('isCanceling', 'isFinished'),
+    isCanceling: false,
+
+    /**
+     * True if the task instance has started, else false.
+     *
+     * @memberof TaskInstance
+     * @instance
+     * @readOnly
+     */
+    hasStarted: false,
+
+    /**
+     * True if the task has run to completion.
+     *
+     * @memberof TaskInstance
+     * @instance
+     * @readOnly
+     */
+    isFinished: false,
+
+    /**
+     * True if the task is still running.
+     *
+     * @memberof TaskInstance
+     * @instance
+     * @readOnly
+     */
+    isRunning: Ember.computed.not('isFinished'),
+
+    /**
+     * Describes the state that the task instance is in. Can be used for debugging,
+     * or potentially driving some UI state. Possible values are:
+     *
+     * - `"dropped"`: task instance was canceled before it started
+     * - `"canceled"`: task instance was canceled before it could finish
+     * - `"finished"`: task instance ran to completion (even if an exception was thrown)
+     * - `"running"`: task instance is currently running (returns true even if
+     *     is paused on a yielded promise)
+     * - `"waiting"`: task instance hasn't begun running yet (usually
+     *     because the task is using the {@linkcode TaskProperty#enqueue .enqueue()}
+     *     task modifier)
+     *
+     * The animated timeline examples on the [Task Concurrency](/#/docs/task-concurrency)
+     * docs page make use of this property.
+     *
+     * @memberof TaskInstance
+     * @instance
+     * @readOnly
+     */
+    state: Ember.computed('isDropped', 'isCanceling', 'hasStarted', 'isFinished', function () {
+      if (Ember.get(this, 'isDropped')) {
+        return 'dropped';
+      } else if (Ember.get(this, 'isCanceling')) {
+        return 'canceled';
+      } else if (Ember.get(this, 'isFinished')) {
+        return 'finished';
+      } else if (Ember.get(this, 'hasStarted')) {
+        return 'running';
+      } else {
+        return 'waiting';
+      }
+    }),
+
+    /**
+     * True if the TaskInstance was canceled before it could
+     * ever start running. For example, calling
+     * {@linkcode Task#perform .perform()} twice on a
+     * task with the {@linkcode TaskProperty#drop .drop()} modifier applied
+     * will result in the second task instance being dropped.
+     *
+     * @memberof TaskInstance
+     * @instance
+     * @readOnly
+     */
+    isDropped: Ember.computed('isCanceling', 'hasStarted', function () {
+      return Ember.get(this, 'isCanceling') && !Ember.get(this, 'hasStarted');
+    }),
+
+    /**
+     * Event emitted when a new {@linkcode TaskInstance} starts executing.
+     *
+     * `on` from `@ember/object/evented` may be used to create a binding on the host object to the event.
+     *
+     * ```js
+     * export default Ember.Component.extend({
+     *   doSomething: task(function * () {
+     *     // ... does something
+     *   }),
+     *
+     *   onDoSomethingStarted: on('doSomething:started', function (taskInstance) {
+     *     // ...
+     *   })
+     * });
+     * ```
+     *
+     * @event TaskInstance#TASK_NAME:started
+     * @param {TaskInstance} taskInstance - Task instance that was started
+     */
+
+    /**
+     * Event emitted when a {@linkcode TaskInstance} succeeds.
+     *
+     * `on` from `@ember/object/evented` may be used to create a binding on the host object to the event.
+     *
+     * ```js
+     * export default Ember.Component.extend({
+     *   doSomething: task(function * () {
+     *     // ... does something
+     *   }),
+     *
+     *   onDoSomethingSucceeded: on('doSomething:succeeded', function (taskInstance) {
+     *     // ...
+     *   })
+     * });
+     * ```
+     *
+     * @event TaskInstance#TASK_NAME:succeeded
+     * @param {TaskInstance} taskInstance - Task instance that was succeeded
+     */
+
+    /**
+     * Event emitted when a {@linkcode TaskInstance} throws an an error that is
+     * not handled within the task itself.
+     *
+     * `on` from `@ember/object/evented` may be used to create a binding on the host object to the event.
+     *
+     * ```js
+     * export default Ember.Component.extend({
+     *   doSomething: task(function * () {
+     *     // ... does something
+     *   }),
+     *
+     *   onDoSomethingErrored: on('doSomething:errored', function (taskInstance, error) {
+     *     // ...
+     *   })
+     * });
+     * ```
+     *
+     * @event TaskInstance#TASK_NAME:errored
+     * @param {TaskInstance} taskInstance - Task instance that was started
+     * @param {Error} error - Error that was thrown by the task instance
+     */
+
+    /**
+     * Event emitted when a {@linkcode TaskInstance} is canceled.
+     *
+     * `on` from `@ember/object/evented` may be used to create a binding on the host object to the event.
+     *
+     * ```js
+     * export default Ember.Component.extend({
+     *   doSomething: task(function * () {
+     *     // ... does something
+     *   }),
+     *
+     *   onDoSomethingCanceled: on('doSomething:canceled', function (taskInstance, cancelationReason) {
+     *     // ...
+     *   })
+     * });
+     * ```
+     *
+     * @event TaskInstance#TASK_NAME:canceled
+     * @param {TaskInstance} taskInstance - Task instance that was started
+     * @param {string} cancelationReason - Cancelation reason that was was provided to {@linkcode TaskInstance#cancel}
+     */
+
+    _index: 1,
+
+    _start: function _start() {
+      if (this.hasStarted || this.isCanceling) {
+        return this;
+      }
+      Ember.set(this, 'hasStarted', true);
+      this._scheduleProceed(_utils.YIELDABLE_CONTINUE, undefined);
+      this._triggerEvent('started', this);
+      return this;
+    },
+    toString: function toString() {
+      var taskString = "" + this.task;
+      return spliceSlice(taskString, -1, 0, '.perform()');
+    },
+    cancel: function cancel() {
+      var cancelReason = arguments.length > 0 && arguments[0] !== undefined ? arguments[0] : ".cancel() was explicitly called";
+
+      if (this.isCanceling || Ember.get(this, 'isFinished')) {
+        return;
+      }
+      Ember.set(this, 'isCanceling', true);
+
+      var name = Ember.get(this, 'task._propertyName') || "<unknown>";
+      Ember.set(this, 'cancelReason', 'TaskInstance \'' + name + '\' was canceled because ' + cancelReason + '. For more information, see: http://ember-concurrency.com/docs/task-cancelation-help');
+
+      if (this.hasStarted) {
+        this._proceedSoon(_utils.YIELDABLE_CANCEL, null);
+      } else {
+        this._finalize(null, COMPLETION_CANCEL);
+      }
+    },
+
+
+    _defer: null,
+    _promise: Ember.computed(function () {
+      this._defer = Ember.RSVP.defer();
+      this._maybeResolveDefer();
+      return this._defer.promise;
+    }),
+
+    _maybeResolveDefer: function _maybeResolveDefer() {
+      if (!this._defer || !this._completionState) {
+        return;
+      }
+
+      if (this._completionState === COMPLETION_SUCCESS) {
+        this._defer.resolve(this.value);
+      } else {
+        this._defer.reject(this.error);
+      }
+    },
+
+
+    /**
+     * Returns a promise that resolves with the value returned
+     * from the task's (generator) function, or rejects with
+     * either the exception thrown from the task function, or
+     * an error with a `.name` property with value `"TaskCancelation"`.
+     *
+     * @method then
+     * @memberof TaskInstance
+     * @instance
+     * @return {Promise}
+     */
+    then: forwardToInternalPromise('then'),
+
+    /**
+     * @method catch
+     * @memberof TaskInstance
+     * @instance
+     * @return {Promise}
+     */
+    catch: forwardToInternalPromise('catch'),
+
+    /**
+     * @method finally
+     * @memberof TaskInstance
+     * @instance
+     * @return {Promise}
+     */
+    finally: forwardToInternalPromise('finally'),
+
+    _finalize: function _finalize(_value, _completionState) {
+      var completionState = _completionState;
+      var value = _value;
+      this._index++;
+
+      if (this.isCanceling) {
+        completionState = COMPLETION_CANCEL;
+        value = new Error(this.cancelReason);
+
+        if (this._debug || Ember.ENV.DEBUG_TASKS) {
+          Ember.Logger.log(this.cancelReason);
+        }
+
+        value.name = TASK_CANCELATION_NAME;
+        value.taskInstance = this;
+      }
+
+      Ember.set(this, '_completionState', completionState);
+      Ember.set(this, '_result', value);
+
+      if (completionState === COMPLETION_SUCCESS) {
+        Ember.set(this, 'isSuccessful', true);
+        Ember.set(this, 'value', value);
+      } else if (completionState === COMPLETION_ERROR) {
+        Ember.set(this, 'isError', true);
+        Ember.set(this, 'error', value);
+      } else if (completionState === COMPLETION_CANCEL) {
+        Ember.set(this, 'error', value);
+      }
+
+      Ember.set(this, 'isFinished', true);
+
+      this._dispose();
+      this._runFinalizeCallbacks();
+      this._dispatchFinalizeEvents();
+    },
+
+
+    _finalizeCallbacks: null,
+    _onFinalize: function _onFinalize(callback) {
+      if (!this._finalizeCallbacks) {
+        this._finalizeCallbacks = [];
+      }
+      this._finalizeCallbacks.push(callback);
+
+      if (this._completionState) {
+        this._runFinalizeCallbacks();
+      }
+    },
+    _runFinalizeCallbacks: function _runFinalizeCallbacks() {
+      this._maybeResolveDefer();
+      if (this._finalizeCallbacks) {
+        for (var i = 0, l = this._finalizeCallbacks.length; i < l; ++i) {
+          this._finalizeCallbacks[i]();
+        }
+        this._finalizeCallbacks = null;
+      }
+
+      this._maybeThrowUnhandledTaskErrorLater();
+    },
+    _maybeThrowUnhandledTaskErrorLater: function _maybeThrowUnhandledTaskErrorLater() {
+      var _this = this;
+
+      // this backports the Ember 2.0+ RSVP _onError 'after' microtask behavior to Ember < 2.0
+      if (!this._hasSubscribed && this._completionState === COMPLETION_ERROR) {
+        Ember.run.schedule(Ember.run.backburner.queueNames[Ember.run.backburner.queueNames.length - 1], function () {
+          if (!_this._hasSubscribed && !didCancel(_this.error)) {
+            Ember.RSVP.reject(_this.error);
+          }
+        });
+      }
+    },
+    _dispatchFinalizeEvents: function _dispatchFinalizeEvents() {
+      switch (this._completionState) {
+        case COMPLETION_SUCCESS:
+          this._triggerEvent('succeeded', this);
+          break;
+        case COMPLETION_ERROR:
+          this._triggerEvent('errored', this, Ember.get(this, 'error'));
+          break;
+        case COMPLETION_CANCEL:
+          this._triggerEvent('canceled', this, Ember.get(this, 'cancelReason'));
+          break;
+      }
+    },
+    _dispose: function _dispose() {
+      if (this._disposer) {
+        var disposer = this._disposer;
+        this._disposer = null;
+
+        // TODO: test erroring disposer
+        disposer();
+      }
+    },
+    _isGeneratorDone: function _isGeneratorDone() {
+      var state = this._generatorState;
+      return state === GENERATOR_STATE_DONE || state === GENERATOR_STATE_ERRORED;
+    },
+    _resumeGenerator: function _resumeGenerator(nextValue, iteratorMethod) {
+      (true && !(!this._isGeneratorDone()) && Ember.assert("The task generator function has already run to completion. This is probably an ember-concurrency bug.", !this._isGeneratorDone()));
+
+
+      try {
+        TASK_INSTANCE_STACK.push(this);
+
+        var iterator = this._getIterator();
+        var result = iterator[iteratorMethod](nextValue);
+
+        this._generatorValue = result.value;
+        if (result.done) {
+          this._generatorState = GENERATOR_STATE_DONE;
+        } else {
+          this._generatorState = GENERATOR_STATE_HAS_MORE_VALUES;
+        }
+      } catch (e) {
+        this._generatorValue = e;
+        this._generatorState = GENERATOR_STATE_ERRORED;
+      } finally {
+        if (this._expectsLinkedYield) {
+          if (!this._generatorValue || this._generatorValue._performType !== PERFORM_TYPE_LINKED) {
+            Ember.Logger.warn("You performed a .linked() task without immediately yielding/returning it. This is currently unsupported (but might be supported in future version of ember-concurrency).");
+          }
+          this._expectsLinkedYield = false;
+        }
+
+        TASK_INSTANCE_STACK.pop();
+      }
+    },
+    _getIterator: function _getIterator() {
+      if (!this.iterator) {
+        this.iterator = this._makeIterator();
+      }
+      return this.iterator;
+    },
+    _makeIterator: function _makeIterator() {
+      return this.fn.apply(this.context, this.args);
+    },
+    _advanceIndex: function _advanceIndex(index) {
+      if (this._index === index) {
+        return ++this._index;
+      }
+    },
+    _proceedSoon: function _proceedSoon(yieldResumeType, value) {
+      var _this2 = this;
+
+      this._advanceIndex(this._index);
+      if (this._runLoop) {
+        Ember.run.join(function () {
+          Ember.run.schedule('actions', _this2, _this2._proceed, yieldResumeType, value);
+        });
+      } else {
+        setTimeout(function () {
+          return _this2._proceed(yieldResumeType, value);
+        }, 1);
+      }
+    },
+    proceed: function proceed(index, yieldResumeType, value) {
+      if (this._completionState) {
+        return;
+      }
+      if (!this._advanceIndex(index)) {
+        return;
+      }
+      this._proceedSoon(yieldResumeType, value);
+    },
+    _scheduleProceed: function _scheduleProceed(yieldResumeType, value) {
+      var _this3 = this;
+
+      if (this._completionState) {
+        return;
+      }
+
+      if (this._runLoop && !Ember.run.currentRunLoop) {
+        Ember.run(this, this._proceed, yieldResumeType, value);
+        return;
+      } else if (!this._runLoop && Ember.run.currentRunLoop) {
+        setTimeout(function () {
+          return _this3._proceed(yieldResumeType, value);
+        }, 1);
+        return;
+      } else {
+        this._proceed(yieldResumeType, value);
+      }
+    },
+    _proceed: function _proceed(yieldResumeType, value) {
+      if (this._completionState) {
+        return;
+      }
+
+      if (this._generatorState === GENERATOR_STATE_DONE) {
+        this._handleResolvedReturnedValue(yieldResumeType, value);
+      } else {
+        this._handleResolvedContinueValue(yieldResumeType, value);
+      }
+    },
+    _handleResolvedReturnedValue: function _handleResolvedReturnedValue(yieldResumeType, value) {
+      (true && !(this._completionState === COMPLETION_PENDING) && Ember.assert("expected completion state to be pending", this._completionState === COMPLETION_PENDING));
+      (true && !(this._generatorState === GENERATOR_STATE_DONE) && Ember.assert("expected generator to be done", this._generatorState === GENERATOR_STATE_DONE));
+
+
+      switch (yieldResumeType) {
+        case _utils.YIELDABLE_CONTINUE:
+        case _utils.YIELDABLE_RETURN:
+          this._finalize(value, COMPLETION_SUCCESS);
+          break;
+        case _utils.YIELDABLE_THROW:
+          this._finalize(value, COMPLETION_ERROR);
+          break;
+        case _utils.YIELDABLE_CANCEL:
+          Ember.set(this, 'isCanceling', true);
+          this._finalize(null, COMPLETION_CANCEL);
+          break;
+      }
+    },
+
+
+    _generatorState: GENERATOR_STATE_BEFORE_CREATE,
+    _generatorValue: null,
+    _handleResolvedContinueValue: function _handleResolvedContinueValue(_yieldResumeType, resumeValue) {
+      var iteratorMethod = _yieldResumeType;
+      if (iteratorMethod === _utils.YIELDABLE_CANCEL) {
+        Ember.set(this, 'isCanceling', true);
+        iteratorMethod = _utils.YIELDABLE_RETURN;
+      }
+
+      this._dispose();
+
+      var beforeIndex = this._index;
+      this._resumeGenerator(resumeValue, iteratorMethod);
+
+      if (!this._advanceIndex(beforeIndex)) {
+        return;
+      }
+
+      if (this._generatorState === GENERATOR_STATE_ERRORED) {
+        this._finalize(this._generatorValue, COMPLETION_ERROR);
+        return;
+      }
+
+      this._handleYieldedValue();
+    },
+    _handleYieldedValue: function _handleYieldedValue() {
+      var yieldedValue = this._generatorValue;
+      if (!yieldedValue) {
+        this._proceedWithSimpleValue(yieldedValue);
+        return;
+      }
+
+      if (yieldedValue instanceof _utils.RawValue) {
+        this._proceedWithSimpleValue(yieldedValue.value);
+        return;
+      }
+
+      this._addDisposer(yieldedValue.__ec_cancel__);
+
+      if (yieldedValue[_utils.yieldableSymbol]) {
+        this._invokeYieldable(yieldedValue);
+      } else if (typeof yieldedValue.then === 'function') {
+        handleYieldedUnknownThenable(yieldedValue, this, this._index);
+      } else {
+        this._proceedWithSimpleValue(yieldedValue);
+      }
+    },
+    _proceedWithSimpleValue: function _proceedWithSimpleValue(yieldedValue) {
+      this.proceed(this._index, _utils.YIELDABLE_CONTINUE, yieldedValue);
+    },
+    _addDisposer: function _addDisposer(maybeDisposer) {
+      if (typeof maybeDisposer === 'function') {
+        var priorDisposer = this._disposer;
+        if (priorDisposer) {
+          this._disposer = function () {
+            priorDisposer();
+            maybeDisposer();
+          };
+        } else {
+          this._disposer = maybeDisposer;
+        }
+      }
+    },
+    _invokeYieldable: function _invokeYieldable(yieldedValue) {
+      try {
+        var maybeDisposer = yieldedValue[_utils.yieldableSymbol](this, this._index);
+        this._addDisposer(maybeDisposer);
+      } catch (e) {
+        // TODO: handle erroneous yieldable implementation
+      }
+    },
+    _triggerEvent: function _triggerEvent(eventType) {
+      if (!this._hasEnabledEvents) {
+        return;
+      }
+
+      var host = Ember.get(this, 'task.context');
+      var eventNamespace = Ember.get(this, 'task._propertyName');
+
+      if (host && host.trigger && eventNamespace) {
+        for (var _len = arguments.length, args = Array(_len > 1 ? _len - 1 : 0), _key = 1; _key < _len; _key++) {
+          args[_key - 1] = arguments[_key];
+        }
+
+        host.trigger.apply(host, [eventNamespace + ':' + eventType].concat(_toConsumableArray(args)));
+      }
+    }
+  };
+
+  taskInstanceAttrs[_utils.yieldableSymbol] = function handleYieldedTaskInstance(parentTaskInstance, resumeIndex) {
+    var yieldedTaskInstance = this;
+    yieldedTaskInstance._hasSubscribed = true;
+
+    yieldedTaskInstance._onFinalize(function () {
+      var state = yieldedTaskInstance._completionState;
+      if (state === COMPLETION_SUCCESS) {
+        parentTaskInstance.proceed(resumeIndex, _utils.YIELDABLE_CONTINUE, yieldedTaskInstance.value);
+      } else if (state === COMPLETION_ERROR) {
+        parentTaskInstance.proceed(resumeIndex, _utils.YIELDABLE_THROW, yieldedTaskInstance.error);
+      } else if (state === COMPLETION_CANCEL) {
+        parentTaskInstance.proceed(resumeIndex, _utils.YIELDABLE_CANCEL, null);
+      }
+    });
+
+    return function disposeYieldedTaskInstance() {
+      if (yieldedTaskInstance._performType !== PERFORM_TYPE_UNLINKED) {
+        if (yieldedTaskInstance._performType === PERFORM_TYPE_DEFAULT) {
+          var parentObj = Ember.get(parentTaskInstance, 'task.context');
+          var childObj = Ember.get(yieldedTaskInstance, 'task.context');
+          if (parentObj && childObj && parentObj !== childObj && parentObj.isDestroying && Ember.get(yieldedTaskInstance, 'isRunning')) {
+            var parentName = '`' + parentTaskInstance.task._propertyName + '`';
+            var childName = '`' + yieldedTaskInstance.task._propertyName + '`';
+            Ember.Logger.warn('ember-concurrency detected a potentially hazardous "self-cancel loop" between parent task ' + parentName + ' and child task ' + childName + '. If you want child task ' + childName + ' to be canceled when parent task ' + parentName + ' is canceled, please change `.perform()` to `.linked().perform()`. If you want child task ' + childName + ' to keep running after parent task ' + parentName + ' is canceled, change it to `.unlinked().perform()`');
+          }
+        }
+        yieldedTaskInstance.cancel();
+      }
+    };
+  };
+
+  var TaskInstance = Ember.Object.extend(taskInstanceAttrs);
+
+  function go(args, fn) {
+    var attrs = arguments.length > 2 && arguments[2] !== undefined ? arguments[2] : {};
+
+    return TaskInstance.create(Object.assign({ args: args, fn: fn, context: this }, attrs))._start();
+  }
+
+  function wrap(fn) {
+    var attrs = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : {};
+
+    return function wrappedRunnerFunction() {
+      for (var _len2 = arguments.length, args = Array(_len2), _key2 = 0; _key2 < _len2; _key2++) {
+        args[_key2] = arguments[_key2];
+      }
+
+      return go.call(this, args, fn, attrs);
+    };
+  }
+
+  exports.default = TaskInstance;
+});
+;define('ember-concurrency/-task-property', ['exports', 'ember-concurrency/-task-instance', 'ember-concurrency/-task-state-mixin', 'ember-concurrency/-task-group', 'ember-concurrency/-property-modifiers-mixin', 'ember-concurrency/utils', 'ember-concurrency/-encapsulated-task'], function (exports, _taskInstance, _taskStateMixin, _taskGroup, _propertyModifiersMixin, _utils, _encapsulatedTask) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.Task = undefined;
+  exports.TaskProperty = TaskProperty;
+
+  function _defineProperty(obj, key, value) {
+    if (key in obj) {
+      Object.defineProperty(obj, key, {
+        value: value,
+        enumerable: true,
+        configurable: true,
+        writable: true
+      });
+    } else {
+      obj[key] = value;
+    }
+
+    return obj;
+  }
+
+  function _toConsumableArray(arr) {
+    if (Array.isArray(arr)) {
+      for (var i = 0, arr2 = Array(arr.length); i < arr.length; i++) {
+        arr2[i] = arr[i];
+      }
+
+      return arr2;
+    } else {
+      return Array.from(arr);
+    }
+  }
+
+  var _typeof = typeof Symbol === "function" && typeof Symbol.iterator === "symbol" ? function (obj) {
+    return typeof obj;
+  } : function (obj) {
+    return obj && typeof Symbol === "function" && obj.constructor === Symbol && obj !== Symbol.prototype ? "symbol" : typeof obj;
+  };
+
+  var PerformProxy = Ember.Object.extend({
+    _task: null,
+    _performType: null,
+    _linkedObject: null,
+
+    perform: function perform() {
+      for (var _len = arguments.length, args = Array(_len), _key = 0; _key < _len; _key++) {
+        args[_key] = arguments[_key];
+      }
+
+      return this._task._performShared(args, this._performType, this._linkedObject);
+    }
+  });
+
+  /**
+    The `Task` object lives on a host Ember object (e.g.
+    a Component, Route, or Controller). You call the
+    {@linkcode Task#perform .perform()} method on this object
+    to create run individual {@linkcode TaskInstance}s,
+    and at any point, you can call the {@linkcode Task#cancelAll .cancelAll()}
+    method on this object to cancel all running or enqueued
+    {@linkcode TaskInstance}s.
+  
+  
+    <style>
+      .ignore-this--this-is-here-to-hide-constructor,
+      #Task{ display: none }
+    </style>
+  
+    @class Task
+  */
+  var Task = exports.Task = Ember.Object.extend(_taskStateMixin.default, _defineProperty({
+    /**
+     * `true` if any current task instances are running.
+     *
+     * @memberof Task
+     * @member {boolean} isRunning
+     * @instance
+     * @readOnly
+     */
+
+    /**
+     * `true` if any future task instances are queued.
+     *
+     * @memberof Task
+     * @member {boolean} isQueued
+     * @instance
+     * @readOnly
+     */
+
+    /**
+     * `true` if the task is not in the running or queued state.
+     *
+     * @memberof Task
+     * @member {boolean} isIdle
+     * @instance
+     * @readOnly
+     */
+
+    /**
+     * The current state of the task: `"running"`, `"queued"` or `"idle"`.
+     *
+     * @memberof Task
+     * @member {string} state
+     * @instance
+     * @readOnly
+     */
+
+    /**
+     * The most recently started task instance.
+     *
+     * @memberof Task
+     * @member {TaskInstance} last
+     * @instance
+     * @readOnly
+     */
+
+    /**
+     * The most recent task instance that is currently running.
+     *
+     * @memberof Task
+     * @member {TaskInstance} lastRunning
+     * @instance
+     * @readOnly
+     */
+
+    /**
+     * The most recently performed task instance.
+     *
+     * @memberof Task
+     * @member {TaskInstance} lastPerformed
+     * @instance
+     * @readOnly
+     */
+
+    /**
+     * The most recent task instance that succeeded.
+     *
+     * @memberof Task
+     * @member {TaskInstance} lastSuccessful
+     * @instance
+     * @readOnly
+     */
+
+    /**
+     * The most recently completed task instance.
+     *
+     * @memberof Task
+     * @member {TaskInstance} lastComplete
+     * @instance
+     * @readOnly
+     */
+
+    /**
+     * The most recent task instance that errored.
+     *
+     * @memberof Task
+     * @member {TaskInstance} lastErrored
+     * @instance
+     * @readOnly
+     */
+
+    /**
+     * The most recently canceled task instance.
+     *
+     * @memberof Task
+     * @member {TaskInstance} lastCanceled
+     * @instance
+     * @readOnly
+     */
+
+    /**
+     * The most recent task instance that is incomplete.
+     *
+     * @memberof Task
+     * @member {TaskInstance} lastIncomplete
+     * @instance
+     * @readOnly
+     */
+
+    /**
+     * The number of times this task has been performed.
+     *
+     * @memberof Task
+     * @member {number} performCount
+     * @instance
+     * @readOnly
+     */
+
+    fn: null,
+    context: null,
+    _observes: null,
+    _curryArgs: null,
+    _linkedObjects: null,
+
+    init: function init() {
+      this._super.apply(this, arguments);
+
+      if (_typeof(this.fn) === 'object') {
+        var owner = Ember.getOwner(this.context);
+        var ownerInjection = owner ? owner.ownerInjection() : {};
+        this._taskInstanceFactory = _encapsulatedTask.default.extend(ownerInjection, this.fn);
+      }
+
+      (0, _utils._cleanupOnDestroy)(this.context, this, 'cancelAll', 'the object it lives on was destroyed or unrendered');
+    },
+    _curry: function _curry() {
+      var task = this._clone();
+
+      for (var _len2 = arguments.length, args = Array(_len2), _key2 = 0; _key2 < _len2; _key2++) {
+        args[_key2] = arguments[_key2];
+      }
+
+      task._curryArgs = [].concat(_toConsumableArray(this._curryArgs || []), _toConsumableArray(args));
+      return task;
+    },
+    linked: function linked() {
+      var taskInstance = (0, _taskInstance.getRunningInstance)();
+      if (!taskInstance) {
+        throw new Error('You can only call .linked() from within a task.');
+      }
+
+      return PerformProxy.create({
+        _task: this,
+        _performType: _taskInstance.PERFORM_TYPE_LINKED,
+        _linkedObject: taskInstance
+      });
+    },
+    unlinked: function unlinked() {
+      return PerformProxy.create({
+        _task: this,
+        _performType: _taskInstance.PERFORM_TYPE_UNLINKED
+      });
+    },
+    _clone: function _clone() {
+      return Task.create({
+        fn: this.fn,
+        context: this.context,
+        _origin: this._origin,
+        _taskGroupPath: this._taskGroupPath,
+        _scheduler: this._scheduler,
+        _propertyName: this._propertyName
+      });
+    },
+
+
+    /**
+     * This property is true if this task is NOT running, i.e. the number
+     * of currently running TaskInstances is zero.
+     *
+     * This property is useful for driving the state/style of buttons
+     * and loading UI, among other things.
+     *
+     * @memberof Task
+     * @instance
+     * @readOnly
+     */
+
+    /**
+     * This property is true if this task is running, i.e. the number
+     * of currently running TaskInstances is greater than zero.
+     *
+     * This property is useful for driving the state/style of buttons
+     * and loading UI, among other things.
+     *
+     * @memberof Task
+     * @instance
+     * @readOnly
+     */
+
+    /**
+     * EXPERIMENTAL
+     *
+     * This value describes what would happen to the TaskInstance returned
+     * from .perform() if .perform() were called right now.  Returns one of
+     * the following values:
+     *
+     * - `succeed`: new TaskInstance will start running immediately
+     * - `drop`: new TaskInstance will be dropped
+     * - `enqueue`: new TaskInstance will be enqueued for later execution
+     *
+     * @memberof Task
+     * @instance
+     * @private
+     * @readOnly
+     */
+
+    /**
+     * EXPERIMENTAL
+     *
+     * Returns true if calling .perform() right now would immediately start running
+     * the returned TaskInstance.
+     *
+     * @memberof Task
+     * @instance
+     * @private
+     * @readOnly
+     */
+
+    /**
+     * EXPERIMENTAL
+     *
+     * Returns true if calling .perform() right now would immediately cancel (drop)
+     * the returned TaskInstance.
+     *
+     * @memberof Task
+     * @instance
+     * @private
+     * @readOnly
+     */
+
+    /**
+     * EXPERIMENTAL
+     *
+     * Returns true if calling .perform() right now would enqueue the TaskInstance
+     * rather than execute immediately.
+     *
+     * @memberof Task
+     * @instance
+     * @private
+     * @readOnly
+     */
+
+    /**
+     * EXPERIMENTAL
+     *
+     * Returns true if calling .perform() right now would cause a previous task to be canceled
+     *
+     * @memberof Task
+     * @instance
+     * @private
+     * @readOnly
+     */
+
+    /**
+     * The current number of active running task instances. This
+     * number will never exceed maxConcurrency.
+     *
+     * @memberof Task
+     * @instance
+     * @readOnly
+     */
+
+    /**
+     * Cancels all running or queued `TaskInstance`s for this Task.
+     * If you're trying to cancel a specific TaskInstance (rather
+     * than all of the instances running under this task) call
+     * `.cancel()` on the specific TaskInstance.
+     *
+     * @method cancelAll
+     * @memberof Task
+     * @instance
+     */
+
+    toString: function toString() {
+      return '<Task:' + this._propertyName + '>';
+    },
+
+
+    _taskInstanceFactory: _taskInstance.default,
+
+    /**
+     * Creates a new {@linkcode TaskInstance} and attempts to run it right away.
+     * If running this task instance would increase the task's concurrency
+     * to a number greater than the task's maxConcurrency, this task
+     * instance might be immediately canceled (dropped), or enqueued
+     * to run at later time, after the currently running task(s) have finished.
+     *
+     * @method perform
+     * @memberof Task
+     * @param {*} arg* - args to pass to the task function
+     * @instance
+     *
+     * @fires TaskInstance#TASK_NAME:started
+     * @fires TaskInstance#TASK_NAME:succeeded
+     * @fires TaskInstance#TASK_NAME:errored
+     * @fires TaskInstance#TASK_NAME:canceled
+     *
+     */
+    perform: function perform() {
+      for (var _len3 = arguments.length, args = Array(_len3), _key3 = 0; _key3 < _len3; _key3++) {
+        args[_key3] = arguments[_key3];
+      }
+
+      return this._performShared(args, _taskInstance.PERFORM_TYPE_DEFAULT, null);
+    },
+    _performShared: function _performShared(args, performType, linkedObject) {
+      var fullArgs = this._curryArgs ? [].concat(_toConsumableArray(this._curryArgs), _toConsumableArray(args)) : args;
+      var taskInstance = this._taskInstanceFactory.create({
+        fn: this.fn,
+        args: fullArgs,
+        context: this.context,
+        owner: this.context,
+        task: this,
+        _debug: this._debug,
+        _hasEnabledEvents: this._hasEnabledEvents,
+        _origin: this,
+        _performType: performType
+      });
+
+      if (performType === _taskInstance.PERFORM_TYPE_LINKED) {
+        linkedObject._expectsLinkedYield = true;
+      }
+
+      if (this.context.isDestroying) {
+        // TODO: express this in terms of lifetimes; a task linked to
+        // a dead lifetime should immediately cancel.
+        taskInstance.cancel();
+      }
+
+      this._scheduler.schedule(taskInstance);
+      return taskInstance;
+    }
+  }, _utils.INVOKE, function () {
+    return this.perform.apply(this, arguments);
+  }));
+
+  /**
+    A {@link TaskProperty} is the Computed Property-like object returned
+    from the {@linkcode task} function. You can call Task Modifier methods
+    on this object to configure the behavior of the {@link Task}.
+  
+    See [Managing Task Concurrency](/#/docs/task-concurrency) for an
+    overview of all the different task modifiers you can use and how
+    they impact automatic cancelation / enqueueing of task instances.
+  
+    <style>
+      .ignore-this--this-is-here-to-hide-constructor,
+      #TaskProperty { display: none }
+    </style>
+  
+    @class TaskProperty
+  */
+  function TaskProperty(taskFn) {
+    var tp = this;
+    _utils._ComputedProperty.call(this, function (_propertyName) {
+      taskFn.displayName = _propertyName + ' (task)';
+      return Task.create({
+        fn: tp.taskFn,
+        context: this,
+        _origin: this,
+        _taskGroupPath: tp._taskGroupPath,
+        _scheduler: (0, _propertyModifiersMixin.resolveScheduler)(tp, this, _taskGroup.TaskGroup),
+        _propertyName: _propertyName,
+        _debug: tp._debug,
+        _hasEnabledEvents: tp._hasEnabledEvents
+      });
+    });
+
+    this.taskFn = taskFn;
+    this.eventNames = null;
+    this.cancelEventNames = null;
+    this._observes = null;
+  }
+
+  TaskProperty.prototype = Object.create(_utils._ComputedProperty.prototype);
+  (0, _utils.objectAssign)(TaskProperty.prototype, _propertyModifiersMixin.propertyModifiers, {
+    constructor: TaskProperty,
+
+    setup: function setup(proto, taskName) {
+      if (this._maxConcurrency !== Infinity && !this._hasSetBufferPolicy) {
+        Ember.Logger.warn('The use of maxConcurrency() without a specified task modifier is deprecated and won\'t be supported in future versions of ember-concurrency. Please specify a task modifier instead, e.g. `' + taskName + ': task(...).enqueue().maxConcurrency(' + this._maxConcurrency + ')`');
+      }
+
+      registerOnPrototype(Ember.addListener, proto, this.eventNames, taskName, 'perform', false);
+      registerOnPrototype(Ember.addListener, proto, this.cancelEventNames, taskName, 'cancelAll', false);
+      registerOnPrototype(Ember.addObserver, proto, this._observes, taskName, 'perform', true);
+    },
+    on: function on() {
+      this.eventNames = this.eventNames || [];
+      this.eventNames.push.apply(this.eventNames, arguments);
+      return this;
+    },
+    cancelOn: function cancelOn() {
+      this.cancelEventNames = this.cancelEventNames || [];
+      this.cancelEventNames.push.apply(this.cancelEventNames, arguments);
+      return this;
+    },
+    observes: function observes() {
+      for (var _len4 = arguments.length, properties = Array(_len4), _key4 = 0; _key4 < _len4; _key4++) {
+        properties[_key4] = arguments[_key4];
+      }
+
+      this._observes = properties;
+      return this;
+    },
+    perform: function perform() {
+      throw new Error("It looks like you tried to perform a task via `this.nameOfTask.perform()`, which isn't supported. Use `this.get('nameOfTask').perform()` instead.");
+    }
+  });
+
+  function registerOnPrototype(addListenerOrObserver, proto, names, taskName, taskMethod, once) {
+    if (names) {
+      for (var i = 0; i < names.length; ++i) {
+        var name = names[i];
+        addListenerOrObserver(proto, name, null, makeTaskCallback(taskName, taskMethod, once));
+      }
+    }
+  }
+
+  function makeTaskCallback(taskName, method, once) {
+    return function () {
+      var task = this.get(taskName);
+
+      if (once) {
+        Ember.run.scheduleOnce.apply(undefined, ['actions', task, method].concat(Array.prototype.slice.call(arguments)));
+      } else {
+        task[method].apply(task, arguments);
+      }
+    };
+  }
+});
+;define('ember-concurrency/-task-state-mixin', ['exports'], function (exports) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  var alias = Ember.computed.alias;
+  exports.default = Ember.Mixin.create({
+    isRunning: Ember.computed.gt('numRunning', 0),
+    isQueued: Ember.computed.gt('numQueued', 0),
+    isIdle: Ember.computed('isRunning', 'isQueued', function () {
+      return !this.get('isRunning') && !this.get('isQueued');
+    }),
+
+    state: Ember.computed('isRunning', 'isQueued', function () {
+      if (this.get('isRunning')) {
+        return 'running';
+      } else if (this.get('isQueued')) {
+        return 'queued';
+      } else {
+        return 'idle';
+      }
+    }),
+
+    _propertyName: null,
+    _origin: null,
+    name: alias('_propertyName'),
+
+    concurrency: alias('numRunning'),
+    last: alias('_scheduler.lastStarted'),
+    lastRunning: alias('_scheduler.lastRunning'),
+    lastPerformed: alias('_scheduler.lastPerformed'),
+    lastSuccessful: alias('_scheduler.lastSuccessful'),
+    lastComplete: alias('_scheduler.lastComplete'),
+    lastErrored: alias('_scheduler.lastErrored'),
+    lastCanceled: alias('_scheduler.lastCanceled'),
+    lastIncomplete: alias('_scheduler.lastIncomplete'),
+    performCount: alias('_scheduler.performCount'),
+
+    numRunning: 0,
+    numQueued: 0,
+    _seenIndex: 0,
+
+    cancelAll: function cancelAll() {
+      var reason = arguments.length > 0 && arguments[0] !== undefined ? arguments[0] : ".cancelAll() was explicitly called on the Task";
+
+      this._scheduler.cancelAll(reason);
+    },
+
+
+    group: Ember.computed(function () {
+      return this._taskGroupPath && this.context.get(this._taskGroupPath);
+    }),
+
+    _scheduler: null
+
+  });
+});
+;define('ember-concurrency/-wait-for', ['exports', 'ember-concurrency/utils'], function (exports, _utils) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.waitForQueue = waitForQueue;
+  exports.waitForEvent = waitForEvent;
+  exports.waitForProperty = waitForProperty;
+
+  function _possibleConstructorReturn(self, call) {
+    if (!self) {
+      throw new ReferenceError("this hasn't been initialised - super() hasn't been called");
+    }
+
+    return call && (typeof call === "object" || typeof call === "function") ? call : self;
+  }
+
+  function _inherits(subClass, superClass) {
+    if (typeof superClass !== "function" && superClass !== null) {
+      throw new TypeError("Super expression must either be null or a function, not " + typeof superClass);
+    }
+
+    subClass.prototype = Object.create(superClass && superClass.prototype, {
+      constructor: {
+        value: subClass,
+        enumerable: false,
+        writable: true,
+        configurable: true
+      }
+    });
+    if (superClass) Object.setPrototypeOf ? Object.setPrototypeOf(subClass, superClass) : subClass.__proto__ = superClass;
+  }
+
+  function _classCallCheck(instance, Constructor) {
+    if (!(instance instanceof Constructor)) {
+      throw new TypeError("Cannot call a class as a function");
+    }
+  }
+
+  var _createClass = function () {
+    function defineProperties(target, props) {
+      for (var i = 0; i < props.length; i++) {
+        var descriptor = props[i];
+        descriptor.enumerable = descriptor.enumerable || false;
+        descriptor.configurable = true;
+        if ("value" in descriptor) descriptor.writable = true;
+        Object.defineProperty(target, descriptor.key, descriptor);
+      }
+    }
+
+    return function (Constructor, protoProps, staticProps) {
+      if (protoProps) defineProperties(Constructor.prototype, protoProps);
+      if (staticProps) defineProperties(Constructor, staticProps);
+      return Constructor;
+    };
+  }();
+
+  var WaitFor = function () {
+    function WaitFor() {
+      _classCallCheck(this, WaitFor);
+    }
+
+    _createClass(WaitFor, [{
+      key: 'then',
+      value: function then() {
+        var _yieldableToPromise;
+
+        return (_yieldableToPromise = (0, _utils.yieldableToPromise)(this)).then.apply(_yieldableToPromise, arguments);
+      }
+    }]);
+
+    return WaitFor;
+  }();
+
+  var WaitForQueueYieldable = function (_WaitFor) {
+    _inherits(WaitForQueueYieldable, _WaitFor);
+
+    function WaitForQueueYieldable(queueName) {
+      _classCallCheck(this, WaitForQueueYieldable);
+
+      var _this = _possibleConstructorReturn(this, (WaitForQueueYieldable.__proto__ || Object.getPrototypeOf(WaitForQueueYieldable)).call(this));
+
+      _this.queueName = queueName;
+      return _this;
+    }
+
+    _createClass(WaitForQueueYieldable, [{
+      key: _utils.yieldableSymbol,
+      value: function value(taskInstance, resumeIndex) {
+        Ember.run.schedule(this.queueName, function () {
+          taskInstance.proceed(resumeIndex, _utils.YIELDABLE_CONTINUE, null);
+        });
+      }
+    }]);
+
+    return WaitForQueueYieldable;
+  }(WaitFor);
+
+  var WaitForEventYieldable = function (_WaitFor2) {
+    _inherits(WaitForEventYieldable, _WaitFor2);
+
+    function WaitForEventYieldable(object, eventName) {
+      _classCallCheck(this, WaitForEventYieldable);
+
+      var _this2 = _possibleConstructorReturn(this, (WaitForEventYieldable.__proto__ || Object.getPrototypeOf(WaitForEventYieldable)).call(this));
+
+      _this2.object = object;
+      _this2.eventName = eventName;
+      return _this2;
+    }
+
+    _createClass(WaitForEventYieldable, [{
+      key: _utils.yieldableSymbol,
+      value: function value(taskInstance, resumeIndex) {
+        var _this3 = this;
+
+        var unbind = function unbind() {};
+        var fn = function fn(event) {
+          unbind();
+          taskInstance.proceed(resumeIndex, _utils.YIELDABLE_CONTINUE, event);
+        };
+
+        if (typeof this.object.addEventListener === 'function') {
+          // assume that we're dealing with a DOM `EventTarget`.
+          this.object.addEventListener(this.eventName, fn);
+
+          // unfortunately this is required, because IE 11 does not support the
+          // `once` option: https://caniuse.com/#feat=once-event-listener
+          unbind = function unbind() {
+            _this3.object.removeEventListener(_this3.eventName, fn);
+          };
+
+          return unbind;
+        } else {
+          // assume that we're dealing with either `Ember.Evented` or a compatible
+          // interface, like jQuery.
+          this.object.one(this.eventName, fn);
+
+          return function () {
+            _this3.object.off(_this3.eventName, fn);
+          };
+        }
+      }
+    }]);
+
+    return WaitForEventYieldable;
+  }(WaitFor);
+
+  var WaitForPropertyYieldable = function (_WaitFor3) {
+    _inherits(WaitForPropertyYieldable, _WaitFor3);
+
+    function WaitForPropertyYieldable(object, key) {
+      var predicateCallback = arguments.length > 2 && arguments[2] !== undefined ? arguments[2] : Boolean;
+
+      _classCallCheck(this, WaitForPropertyYieldable);
+
+      var _this4 = _possibleConstructorReturn(this, (WaitForPropertyYieldable.__proto__ || Object.getPrototypeOf(WaitForPropertyYieldable)).call(this));
+
+      _this4.object = object;
+      _this4.key = key;
+
+      if (typeof predicateCallback === 'function') {
+        _this4.predicateCallback = predicateCallback;
+      } else {
+        _this4.predicateCallback = function (v) {
+          return v === predicateCallback;
+        };
+      }
+      return _this4;
+    }
+
+    _createClass(WaitForPropertyYieldable, [{
+      key: _utils.yieldableSymbol,
+      value: function value(taskInstance, resumeIndex) {
+        var _this5 = this;
+
+        var observerFn = function observerFn() {
+          var value = Ember.get(_this5.object, _this5.key);
+          var predicateValue = _this5.predicateCallback(value);
+          if (predicateValue) {
+            taskInstance.proceed(resumeIndex, _utils.YIELDABLE_CONTINUE, value);
+            return true;
+          }
+        };
+
+        if (!observerFn()) {
+          this.object.addObserver(this.key, null, observerFn);
+          return function () {
+            _this5.object.removeObserver(_this5.key, null, observerFn);
+          };
+        }
+      }
+    }]);
+
+    return WaitForPropertyYieldable;
+  }(WaitFor);
+
+  /**
+   * Use `waitForQueue` to pause the task until a certain run loop queue is reached.
+   *
+   * ```js
+   * import { task, waitForQueue } from 'ember-concurrency';
+   * export default Component.extend({
+   *   myTask: task(function * () {
+   *     yield waitForQueue('afterRender');
+   *     console.log("now we're in the afterRender queue");
+   *   })
+   * });
+   * ```
+   *
+   * @param {string} queueName the name of the Ember run loop queue
+   */
+  function waitForQueue(queueName) {
+    return new WaitForQueueYieldable(queueName);
+  }
+
+  /**
+   * Use `waitForEvent` to pause the task until an event is fired. The event
+   * can either be a jQuery event or an Ember.Evented event (or any event system
+   * where the object supports `.on()` `.one()` and `.off()`).
+   *
+   * ```js
+   * import { task, waitForEvent } from 'ember-concurrency';
+   * export default Component.extend({
+   *   myTask: task(function * () {
+   *     console.log("Please click anywhere..");
+   *     let clickEvent = yield waitForEvent($('body'), 'click');
+   *     console.log("Got event", clickEvent);
+   *
+   *     let emberEvent = yield waitForEvent(this, 'foo');
+   *     console.log("Got foo event", emberEvent);
+   *
+   *     // somewhere else: component.trigger('foo', { value: 123 });
+   *   })
+   * });
+   * ```
+   *
+   * @param {object} object the Ember Object or jQuery selector (with ,on(), .one(), and .off())
+   *                 that the event fires from
+   * @param {function} eventName the name of the event to wait for
+   */
+  function waitForEvent(object, eventName) {
+    (true && !((0, _utils.isEventedObject)(object)) && Ember.assert(object + ' must include Ember.Evented (or support `.one()` and `.off()`) or DOM EventTarget (or support `addEventListener` and  `removeEventListener`) to be able to use `waitForEvent`', (0, _utils.isEventedObject)(object)));
+
+    return new WaitForEventYieldable(object, eventName);
+  }
+
+  /**
+   * Use `waitForProperty` to pause the task until a property on an object
+   * changes to some expected value. This can be used for a variety of use
+   * cases, including synchronizing with another task by waiting for it
+   * to become idle, or change state in some other way. If you omit the
+   * callback, `waitForProperty` will resume execution when the observed
+   * property becomes truthy. If you provide a callback, it'll be called
+   * immediately with the observed property's current value, and multiple
+   * times thereafter whenever the property changes, until you return
+   * a truthy value from the callback, or the current task is canceled.
+   * You can also pass in a non-Function value in place of the callback,
+   * in which case the task will continue executing when the property's
+   * value becomes the value that you passed in.
+   *
+   * ```js
+   * import { task, waitForProperty } from 'ember-concurrency';
+   * export default Component.extend({
+   *   foo: 0,
+   *
+   *   myTask: task(function * () {
+   *     console.log("Waiting for `foo` to become 5");
+   *
+   *     yield waitForProperty(this, 'foo', v => v === 5);
+   *     // alternatively: yield waitForProperty(this, 'foo', 5);
+   *
+   *     // somewhere else: this.set('foo', 5)
+   *
+   *     console.log("`foo` is 5!");
+   *
+   *     // wait for another task to be idle before running:
+   *     yield waitForProperty(this, 'otherTask.isIdle');
+   *     console.log("otherTask is idle!");
+   *   })
+   * });
+   * ```
+   *
+   * @param {object} object an object (most likely an Ember Object)
+   * @param {string} key the property name that is observed for changes
+   * @param {function} callbackOrValue a Function that should return a truthy value
+   *                                   when the task should continue executing, or
+   *                                   a non-Function value that the watched property
+   *                                   needs to equal before the task will continue running
+   */
+  function waitForProperty(object, key, predicateCallback) {
+    return new WaitForPropertyYieldable(object, key, predicateCallback);
+  }
+});
+;define('ember-concurrency/helpers/cancel-all', ['exports', 'ember-concurrency/-helpers'], function (exports, _helpers) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.cancelHelper = cancelHelper;
+
+
+  var CANCEL_REASON = "the 'cancel-all' template helper was invoked";
+
+  function cancelHelper(args) {
+    var cancelable = args[0];
+    if (!cancelable || typeof cancelable.cancelAll !== 'function') {
+      (true && !(false) && Ember.assert('The first argument passed to the `cancel-all` helper should be a Task or TaskGroup (without quotes); you passed ' + cancelable, false));
+    }
+
+    return (0, _helpers.taskHelperClosure)('cancel-all', 'cancelAll', [cancelable, CANCEL_REASON]);
+  }
+
+  exports.default = Ember.Helper.helper(cancelHelper);
+});
+;define('ember-concurrency/helpers/perform', ['exports', 'ember-concurrency/-helpers'], function (exports, _helpers) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.performHelper = performHelper;
+  function performHelper(args, hash) {
+    return (0, _helpers.taskHelperClosure)('perform', 'perform', args, hash);
+  }
+
+  exports.default = Ember.Helper.helper(performHelper);
+});
+;define('ember-concurrency/helpers/task', ['exports'], function (exports) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+
+  function _toConsumableArray(arr) {
+    if (Array.isArray(arr)) {
+      for (var i = 0, arr2 = Array(arr.length); i < arr.length; i++) {
+        arr2[i] = arr[i];
+      }
+
+      return arr2;
+    } else {
+      return Array.from(arr);
+    }
+  }
+
+  function _toArray(arr) {
+    return Array.isArray(arr) ? arr : Array.from(arr);
+  }
+
+  function taskHelper(_ref) {
+    var _ref2 = _toArray(_ref),
+        task = _ref2[0],
+        args = _ref2.slice(1);
+
+    return task._curry.apply(task, _toConsumableArray(args));
+  }
+
+  exports.default = Ember.Helper.helper(taskHelper);
+});
+;define('ember-concurrency/index', ['exports', 'ember-concurrency/utils', 'ember-concurrency/-task-property', 'ember-concurrency/-task-instance', 'ember-concurrency/-task-group', 'ember-concurrency/-cancelable-promise-helpers', 'ember-concurrency/-wait-for'], function (exports, _utils, _taskProperty, _taskInstance, _taskGroup, _cancelablePromiseHelpers, _waitFor) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.waitForProperty = exports.waitForEvent = exports.waitForQueue = exports.timeout = exports.race = exports.hash = exports.didCancel = exports.allSettled = exports.all = undefined;
+  exports.task = task;
+  exports.taskGroup = taskGroup;
+
+
+  /**
+   * A Task is a cancelable, restartable, asynchronous operation that
+   * is driven by a generator function. Tasks are automatically canceled
+   * when the object they live on is destroyed (e.g. a Component
+   * is unrendered).
+   *
+   * To define a task, use the `task(...)` function, and pass in
+   * a generator function, which will be invoked when the task
+   * is performed. The reason generator functions are used is
+   * that they (like the proposed ES7 async-await syntax) can
+   * be used to elegantly express asynchronous, cancelable
+   * operations.
+   *
+   * You can also define an
+   * <a href="/#/docs/encapsulated-task">Encapsulated Task</a>
+   * by passing in an object that defined a `perform` generator
+   * function property.
+   *
+   * The following Component defines a task called `myTask` that,
+   * when performed, prints a message to the console, sleeps for 1 second,
+   * prints a final message to the console, and then completes.
+   *
+   * ```js
+   * import { task, timeout } from 'ember-concurrency';
+   * export default Component.extend({
+   *   myTask: task(function * () {
+   *     console.log("Pausing for a second...");
+   *     yield timeout(1000);
+   *     console.log("Done!");
+   *   })
+   * });
+   * ```
+   *
+   * ```hbs
+   * <button {{action myTask.perform}}>Perform Task</button>
+   * ```
+   *
+   * By default, tasks have no concurrency constraints
+   * (multiple instances of a task can be running at the same time)
+   * but much of a power of tasks lies in proper usage of Task Modifiers
+   * that you can apply to a task.
+   *
+   * @param {function} generatorFunction the generator function backing the task.
+   * @returns {TaskProperty}
+   */
+  function task() {
+    for (var _len = arguments.length, args = Array(_len), _key = 0; _key < _len; _key++) {
+      args[_key] = arguments[_key];
+    }
+
+    return new (Function.prototype.bind.apply(_taskProperty.TaskProperty, [null].concat(args)))();
+  }
+
+  /**
+   * "Task Groups" provide a means for applying
+   * task modifiers to groups of tasks. Once a {@linkcode Task} is declared
+   * as part of a group task, modifiers like `drop()` or `restartable()`
+   * will no longer affect the individual `Task`. Instead those
+   * modifiers can be applied to the entire group.
+   *
+   * ```js
+   * import { task, taskGroup } from 'ember-concurrency';
+   *
+   * export default Controller.extend({
+   *   chores: taskGroup().drop(),
+   *
+   *   mowLawn:       task(taskFn).group('chores'),
+   *   doDishes:      task(taskFn).group('chores'),
+   *   changeDiapers: task(taskFn).group('chores')
+   * });
+   * ```
+   *
+   * @returns {TaskGroup}
+  */
+  function taskGroup() {
+    for (var _len2 = arguments.length, args = Array(_len2), _key2 = 0; _key2 < _len2; _key2++) {
+      args[_key2] = arguments[_key2];
+    }
+
+    return new (Function.prototype.bind.apply(_taskGroup.TaskGroupProperty, [null].concat(args)))();
+  }
+
+  exports.all = _cancelablePromiseHelpers.all;
+  exports.allSettled = _cancelablePromiseHelpers.allSettled;
+  exports.didCancel = _taskInstance.didCancel;
+  exports.hash = _cancelablePromiseHelpers.hash;
+  exports.race = _cancelablePromiseHelpers.race;
+  exports.timeout = _utils.timeout;
+  exports.waitForQueue = _waitFor.waitForQueue;
+  exports.waitForEvent = _waitFor.waitForEvent;
+  exports.waitForProperty = _waitFor.waitForProperty;
+});
+;define('ember-concurrency/initializers/ember-concurrency', ['exports', 'ember-concurrency'], function (exports) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = {
+    name: 'ember-concurrency',
+    initialize: function initialize() {}
+  };
+});
+;define('ember-concurrency/utils', ['exports'], function (exports) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.isEventedObject = isEventedObject;
+  exports.Arguments = Arguments;
+  exports._cleanupOnDestroy = _cleanupOnDestroy;
+  exports.timeout = timeout;
+  exports.RawValue = RawValue;
+  exports.raw = raw;
+  exports.rawTimeout = rawTimeout;
+  exports.yieldableToPromise = yieldableToPromise;
+
+  function _defineProperty(obj, key, value) {
+    if (key in obj) {
+      Object.defineProperty(obj, key, {
+        value: value,
+        enumerable: true,
+        configurable: true,
+        writable: true
+      });
+    } else {
+      obj[key] = value;
+    }
+
+    return obj;
+  }
+
+  function isEventedObject(c) {
+    return c && (typeof c.one === 'function' && typeof c.off === 'function' || typeof c.addEventListener === 'function' && typeof c.removeEventListener === 'function');
+  }
+
+  function Arguments(args, defer) {
+    this.args = args;
+    this.defer = defer;
+  }
+
+  Arguments.prototype.resolve = function (value) {
+    if (this.defer) {
+      this.defer.resolve(value);
+    }
+  };
+
+  var objectAssign = exports.objectAssign = Object.assign || function objectAssign(target) {
+    'use strict';
+
+    if (target == null) {
+      throw new TypeError('Cannot convert undefined or null to object');
+    }
+
+    target = Object(target);
+    for (var index = 1; index < arguments.length; index++) {
+      var source = arguments[index];
+      if (source != null) {
+        for (var key in source) {
+          if (Object.prototype.hasOwnProperty.call(source, key)) {
+            target[key] = source[key];
+          }
+        }
+      }
+    }
+    return target;
+  };
+
+  function _cleanupOnDestroy(owner, object, cleanupMethodName) {
+    for (var _len = arguments.length, args = Array(_len > 3 ? _len - 3 : 0), _key = 3; _key < _len; _key++) {
+      args[_key - 3] = arguments[_key];
+    }
+
+    // TODO: find a non-mutate-y, non-hacky way of doing this.
+
+    if (!owner.willDestroy) {
+      // we're running in non Ember object (possibly in a test mock)
+      return;
+    }
+
+    if (!owner.willDestroy.__ember_processes_destroyers__) {
+      var oldWillDestroy = owner.willDestroy;
+      var disposers = [];
+
+      owner.willDestroy = function () {
+        for (var i = 0, l = disposers.length; i < l; i++) {
+          disposers[i]();
+        }
+        oldWillDestroy.apply(owner, arguments);
+      };
+      owner.willDestroy.__ember_processes_destroyers__ = disposers;
+    }
+
+    owner.willDestroy.__ember_processes_destroyers__.push(function () {
+      object[cleanupMethodName].apply(object, args);
+    });
+  }
+
+  var INVOKE = exports.INVOKE = "__invoke_symbol__";
+
+  var locations = ['ember-glimmer/helpers/action', 'ember-routing-htmlbars/keywords/closure-action', 'ember-routing/keywords/closure-action'];
+
+  for (var i = 0; i < locations.length; i++) {
+    if (locations[i] in Ember.__loader.registry) {
+      exports.INVOKE = INVOKE = Ember.__loader.require(locations[i])['INVOKE'];
+      break;
+    }
+  }
+
+  // TODO: Symbol polyfill?
+  var yieldableSymbol = exports.yieldableSymbol = "__ec_yieldable__";
+  var YIELDABLE_CONTINUE = exports.YIELDABLE_CONTINUE = "next";
+  var YIELDABLE_THROW = exports.YIELDABLE_THROW = "throw";
+  var YIELDABLE_RETURN = exports.YIELDABLE_RETURN = "return";
+  var YIELDABLE_CANCEL = exports.YIELDABLE_CANCEL = "cancel";
+
+  var _ComputedProperty = exports._ComputedProperty = Ember.ComputedProperty;
+
+  /**
+   *
+   * Yielding `timeout(ms)` will pause a task for the duration
+   * of time passed in, in milliseconds.
+   *
+   * The task below, when performed, will print a message to the
+   * console every second.
+   *
+   * ```js
+   * export default Component.extend({
+   *   myTask: task(function * () {
+   *     while (true) {
+   *       console.log("Hello!");
+   *       yield timeout(1000);
+   *     }
+   *   })
+   * });
+   * ```
+   *
+   * @param {number} ms - the amount of time to sleep before resuming
+   *   the task, in milliseconds
+   */
+  function timeout(ms) {
+    var timerId = void 0;
+    var promise = new Ember.RSVP.Promise(function (r) {
+      timerId = Ember.run.later(r, ms);
+    });
+    promise.__ec_cancel__ = function () {
+      Ember.run.cancel(timerId);
+    };
+    return promise;
+  }
+
+  function RawValue(value) {
+    this.value = value;
+  }
+
+  function raw(value) {
+    return new RawValue(value);
+  }
+
+  function rawTimeout(ms) {
+    return _defineProperty({}, yieldableSymbol, function (taskInstance, resumeIndex) {
+      var _this = this;
+
+      var timerId = setTimeout(function () {
+        taskInstance.proceed(resumeIndex, YIELDABLE_CONTINUE, _this._result);
+      }, ms);
+      return function () {
+        window.clearInterval(timerId);
+      };
+    });
+  }
+
+  function yieldableToPromise(yieldable) {
+    var def = Ember.RSVP.defer();
+
+    def.promise.__ec_cancel__ = yieldable[yieldableSymbol]({
+      proceed: function proceed(_index, resumeType, value) {
+        if (resumeType == YIELDABLE_CONTINUE || resumeType == YIELDABLE_RETURN) {
+          def.resolve(value);
+        } else {
+          def.reject(value);
+        }
+      }
+    }, 0);
+
+    return def.promise;
+  }
+});
+;define('ember-cookies/services/cookies', ['exports'], function (exports) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+
+  var _slicedToArray = function () {
+    function sliceIterator(arr, i) {
+      var _arr = [];
+      var _n = true;
+      var _d = false;
+      var _e = undefined;
+
+      try {
+        for (var _i = arr[Symbol.iterator](), _s; !(_n = (_s = _i.next()).done); _n = true) {
+          _arr.push(_s.value);
+
+          if (i && _arr.length === i) break;
+        }
+      } catch (err) {
+        _d = true;
+        _e = err;
+      } finally {
+        try {
+          if (!_n && _i["return"]) _i["return"]();
+        } finally {
+          if (_d) throw _e;
+        }
+      }
+
+      return _arr;
+    }
+
+    return function (arr, i) {
+      if (Array.isArray(arr)) {
+        return arr;
+      } else if (Symbol.iterator in Object(arr)) {
+        return sliceIterator(arr, i);
+      } else {
+        throw new TypeError("Invalid attempt to destructure non-iterable instance");
+      }
+    };
+  }();
+
+  var keys = Object.keys;
+
+  var assign = Object.assign || Ember.assign || Ember.merge;
+  var DEFAULTS = { raw: false };
+  var MAX_COOKIE_BYTE_LENGTH = 4096;
+
+  exports.default = Ember.Service.extend({
+    _isFastBoot: Ember.computed.reads('_fastBoot.isFastBoot'),
+
+    _fastBoot: Ember.computed(function () {
+      var owner = Ember.getOwner(this);
+
+      return owner.lookup('service:fastboot');
+    }),
+
+    _document: Ember.computed(function () {
+      return document;
+    }),
+
+    _documentCookies: Ember.computed(function () {
+      var all = this.get('_document.cookie').split(';');
+      var filtered = this._filterDocumentCookies(Ember.A(all));
+
+      return filtered.reduce(function (acc, cookie) {
+        if (!Ember.isEmpty(cookie)) {
+          var _cookie = _slicedToArray(cookie, 2),
+              key = _cookie[0],
+              value = _cookie[1];
+
+          acc[key.trim()] = (value || '').trim();
+        }
+        return acc;
+      }, {});
+    }).volatile(),
+
+    _fastBootCookies: Ember.computed(function () {
+      var fastBootCookiesCache = this.get('_fastBootCookiesCache');
+
+      if (!fastBootCookiesCache) {
+        var fastBootCookies = this.get('_fastBoot.request.cookies');
+        fastBootCookiesCache = Ember.A(keys(fastBootCookies)).reduce(function (acc, name) {
+          var value = fastBootCookies[name];
+          acc[name] = { value: value };
+          return acc;
+        }, {});
+        this.set('_fastBootCookiesCache', fastBootCookiesCache);
+      }
+
+      return this._filterCachedFastBootCookies(fastBootCookiesCache);
+    }).volatile(),
+
+    read: function read(name) {
+      var _this = this;
+
+      var options = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : {};
+
+      options = assign({}, DEFAULTS, options || {});
+      (true && !(Ember.isEmpty(options.domain) && Ember.isEmpty(options.expires) && Ember.isEmpty(options.maxAge) && Ember.isEmpty(options.path)) && Ember.assert('Domain, Expires, Max-Age, and Path options cannot be set when reading cookies', Ember.isEmpty(options.domain) && Ember.isEmpty(options.expires) && Ember.isEmpty(options.maxAge) && Ember.isEmpty(options.path)));
+
+
+      var all = void 0;
+      if (this.get('_isFastBoot')) {
+        all = this.get('_fastBootCookies');
+      } else {
+        all = this.get('_documentCookies');
+      }
+
+      if (name) {
+        return this._decodeValue(all[name], options.raw);
+      } else {
+        Ember.A(keys(all)).forEach(function (name) {
+          return all[name] = _this._decodeValue(all[name], options.raw);
+        });
+        return all;
+      }
+    },
+    write: function write(name, value) {
+      var options = arguments.length > 2 && arguments[2] !== undefined ? arguments[2] : {};
+
+      options = assign({}, DEFAULTS, options || {});
+      (true && !(!options.httpOnly) && Ember.assert('Cookies cannot be set to be HTTP-only as those cookies would not be accessible by the Ember.js application itself when running in the browser!', !options.httpOnly));
+      (true && !(!options.signed) && Ember.assert("Cookies cannot be set as signed as signed cookies would not be modifyable in the browser as it has no knowledge of the express server's signing key!", !options.signed));
+      (true && !(Ember.isEmpty(options.expires) || Ember.isEmpty(options.maxAge)) && Ember.assert('Cookies cannot be set with both maxAge and an explicit expiration time!', Ember.isEmpty(options.expires) || Ember.isEmpty(options.maxAge)));
+
+
+      value = this._encodeValue(value, options.raw);
+
+      (true && !(this._isCookieSizeAcceptable(value)) && Ember.assert('Cookies larger than ' + MAX_COOKIE_BYTE_LENGTH + ' bytes are not supported by most browsers!', this._isCookieSizeAcceptable(value)));
+
+
+      if (this.get('_isFastBoot')) {
+        this._writeFastBootCookie(name, value, options);
+      } else {
+        this._writeDocumentCookie(name, value, options);
+      }
+    },
+    clear: function clear(name) {
+      var options = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : {};
+      (true && !(Ember.isEmpty(options.expires) && Ember.isEmpty(options.maxAge) && Ember.isEmpty(options.raw)) && Ember.assert('Expires, Max-Age, and raw options cannot be set when clearing cookies', Ember.isEmpty(options.expires) && Ember.isEmpty(options.maxAge) && Ember.isEmpty(options.raw)));
+
+
+      options.expires = new Date('1970-01-01');
+      this.write(name, null, options);
+    },
+    exists: function exists(name) {
+      var all = void 0;
+      if (this.get('_isFastBoot')) {
+        all = this.get('_fastBootCookies');
+      } else {
+        all = this.get('_documentCookies');
+      }
+
+      return all.hasOwnProperty(name);
+    },
+    _writeDocumentCookie: function _writeDocumentCookie(name, value) {
+      var options = arguments.length > 2 && arguments[2] !== undefined ? arguments[2] : {};
+
+      var serializedCookie = this._serializeCookie(name, value, options);
+      this.set('_document.cookie', serializedCookie);
+    },
+    _writeFastBootCookie: function _writeFastBootCookie(name, value) {
+      var options = arguments.length > 2 && arguments[2] !== undefined ? arguments[2] : {};
+
+      var responseHeaders = this.get('_fastBoot.response.headers');
+      var serializedCookie = this._serializeCookie.apply(this, arguments);
+
+      if (!Ember.isEmpty(options.maxAge)) {
+        options.maxAge *= 1000;
+      }
+
+      this._cacheFastBootCookie.apply(this, arguments);
+
+      responseHeaders.append('set-cookie', serializedCookie);
+    },
+    _cacheFastBootCookie: function _cacheFastBootCookie(name, value) {
+      var options = arguments.length > 2 && arguments[2] !== undefined ? arguments[2] : {};
+
+      var fastBootCache = this.getWithDefault('_fastBootCookiesCache', {});
+      var cachedOptions = Ember.merge({}, options);
+
+      if (cachedOptions.maxAge) {
+        var expires = new Date();
+        expires.setSeconds(expires.getSeconds() + options.maxAge);
+        cachedOptions.expires = expires;
+        delete cachedOptions.maxAge;
+      }
+
+      fastBootCache[name] = { value: value, options: cachedOptions };
+      this.set('_fastBootCookiesCache', fastBootCache);
+    },
+    _filterCachedFastBootCookies: function _filterCachedFastBootCookies(fastBootCookiesCache) {
+      var _get = this.get('_fastBoot.request'),
+          requestPath = _get.path,
+          protocol = _get.protocol;
+
+      // cannot use deconstruct here
+
+
+      var host = this.get('_fastBoot.request.host');
+
+      return Ember.A(keys(fastBootCookiesCache)).reduce(function (acc, name) {
+        var _fastBootCookiesCache = fastBootCookiesCache[name],
+            value = _fastBootCookiesCache.value,
+            options = _fastBootCookiesCache.options;
+
+        options = options || {};
+
+        var _options = options,
+            optionsPath = _options.path,
+            domain = _options.domain,
+            expires = _options.expires,
+            secure = _options.secure;
+
+
+        if (optionsPath && requestPath.indexOf(optionsPath) !== 0) {
+          return acc;
+        }
+
+        if (domain && host.indexOf(domain) + domain.length !== host.length) {
+          return acc;
+        }
+
+        if (expires && expires < new Date()) {
+          return acc;
+        }
+
+        if (secure && !(protocol || '').match(/^https/)) {
+          return acc;
+        }
+
+        acc[name] = value;
+        return acc;
+      }, {});
+    },
+    _encodeValue: function _encodeValue(value, raw) {
+      if (Ember.isNone(value)) {
+        return '';
+      } else if (raw) {
+        return value;
+      } else {
+        return encodeURIComponent(value);
+      }
+    },
+    _decodeValue: function _decodeValue(value, raw) {
+      if (Ember.isNone(value) || raw) {
+        return value;
+      } else {
+        return decodeURIComponent(value);
+      }
+    },
+    _filterDocumentCookies: function _filterDocumentCookies(unfilteredCookies) {
+      return unfilteredCookies.map(function (c) {
+        return c.split('=');
+      }).filter(function (c) {
+        return c.length === 2 && Ember.isPresent(c[0]);
+      });
+    },
+    _serializeCookie: function _serializeCookie(name, value) {
+      var options = arguments.length > 2 && arguments[2] !== undefined ? arguments[2] : {};
+
+      var cookie = name + '=' + value;
+
+      if (!Ember.isEmpty(options.domain)) {
+        cookie = cookie + '; domain=' + options.domain;
+      }
+      if (Ember.typeOf(options.expires) === 'date') {
+        cookie = cookie + '; expires=' + options.expires.toUTCString();
+      }
+      if (!Ember.isEmpty(options.maxAge)) {
+        cookie = cookie + '; max-age=' + options.maxAge;
+      }
+      if (options.secure) {
+        cookie = cookie + '; secure';
+      }
+      if (!Ember.isEmpty(options.path)) {
+        cookie = cookie + '; path=' + options.path;
+      }
+
+      return cookie;
+    },
+    _isCookieSizeAcceptable: function _isCookieSizeAcceptable(value) {
+      // Counting bytes varies Pre-ES6 and in ES6
+      // This snippet counts the bytes in the value
+      // about to be stored as the cookie:
+      // See https://stackoverflow.com/a/25994411/6657064
+      var _byteCount = 0;
+      var i = 0;
+      var c = void 0;
+      while (c = value.charCodeAt(i++)) {
+        /* eslint-disable no-bitwise */
+        _byteCount += c >> 11 ? 3 : c >> 7 ? 2 : 1;
+        /* eslint-enable no-bitwise */
+      }
+
+      return _byteCount < MAX_COOKIE_BYTE_LENGTH;
+    }
+  });
+});
+;define('ember-fetch/ajax', ['exports', 'fetch'], function (exports, _fetch) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = ajax;
+  function ajax() {
+    return _fetch.default.apply(undefined, arguments).then(function (response) {
+      if (response.ok) {
+        return response.json();
+      }
+
+      throw response;
+    });
+  }
+});
+;define('ember-fetch/mixins/adapter-fetch', ['exports', 'fetch'], function (exports, _fetch) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.serializeQueryParams = serializeQueryParams;
+  exports.headersToObject = headersToObject;
+  exports.mungOptionsForFetch = mungOptionsForFetch;
+  exports.determineBodyPromise = determineBodyPromise;
+
+  var _typeof = typeof Symbol === "function" && typeof Symbol.iterator === "symbol" ? function (obj) {
+    return typeof obj;
+  } : function (obj) {
+    return obj && typeof Symbol === "function" && obj.constructor === Symbol && obj !== Symbol.prototype ? "symbol" : typeof obj;
+  };
+
+  var warn = Ember.Logger.warn;
+
+
+  var RBRACKET = /\[\]$/;
+
+  /**
+   * Helper function that turns the data/body of a request into a query param string.
+   * This is directly copied from jQuery.param.
+   * @param {Object} queryParamsObject
+   * @returns {String}
+   */
+  function serializeQueryParams(queryParamsObject) {
+    var s = [];
+
+    function buildParams(prefix, obj) {
+      var i, len, key;
+
+      if (prefix) {
+        if (Array.isArray(obj)) {
+          for (i = 0, len = obj.length; i < len; i++) {
+            if (RBRACKET.test(prefix)) {
+              add(s, prefix, obj[i]);
+            } else {
+              buildParams(prefix + '[' + (_typeof(obj[i]) === 'object' ? i : '') + ']', obj[i]);
+            }
+          }
+        } else if (obj && String(obj) === '[object Object]') {
+          for (key in obj) {
+            buildParams(prefix + '[' + key + ']', obj[key]);
+          }
+        } else {
+          add(s, prefix, obj);
+        }
+      } else if (Array.isArray(obj)) {
+        for (i = 0, len = obj.length; i < len; i++) {
+          add(s, obj[i].name, obj[i].value);
+        }
+      } else {
+        for (key in obj) {
+          buildParams(key, obj[key]);
+        }
+      }
+      return s;
+    }
+
+    return buildParams('', queryParamsObject).join('&').replace(/%20/g, '+');
+  }
+
+  /**
+   * Part of the `serializeQueryParams` helper function.
+   * @param {Array} s
+   * @param {String} k
+   * @param {String} v
+   */
+  function add(s, k, v) {
+    // Strip out keys with undefined value and replace null values with
+    // empty strings (mimics jQuery.ajax)
+    if (v === undefined) {
+      return;
+    } else if (v === null) {
+      v = '';
+    }
+
+    v = typeof v === 'function' ? v() : v;
+    s[s.length] = encodeURIComponent(k) + '=' + encodeURIComponent(v);
+  }
+
+  /**
+   * Helper function to create a plain object from the response's Headers.
+   * Consumed by the adapter's `handleResponse`.
+   * @param {Headers} headers
+   * @returns {Object}
+   */
+  function headersToObject(headers) {
+    var headersObject = {};
+
+    if (headers) {
+      headers.forEach(function (value, key) {
+        return headersObject[key] = value;
+      });
+    }
+
+    return headersObject;
+  }
+  /**
+   * Helper function that translates the options passed to `jQuery.ajax` into a format that `fetch` expects.
+   * @param {Object} _options
+   * @param {DS.Adapter} adapter
+   * @returns {Object}
+   */
+  function mungOptionsForFetch(_options, adapter) {
+    // This allows this mixin to be backward compatible with Ember < 2.5.
+    var combineObjs = Ember.assign || Ember.merge;
+    var options = combineObjs({
+      credentials: 'same-origin'
+    }, _options);
+
+    var adapterHeaders = adapter.get('headers');
+    if (adapterHeaders) {
+      // This double use of `combineObjs` is necessary because `merge` only accepts two arguments.
+      options.headers = combineObjs(combineObjs({}, options.headers || {}), adapterHeaders);
+    }
+
+    // Default to 'GET' in case `type` is not passed in (mimics jQuery.ajax).
+    options.method = options.type || 'GET';
+
+    if (options.data) {
+      // GET and HEAD requests can't have a `body`
+      if (options.method === 'GET' || options.method === 'HEAD') {
+        // If no options are passed, Ember Data sets `data` to an empty object, which we test for.
+        if (Object.keys(options.data).length) {
+          // Test if there are already query params in the url (mimics jQuey.ajax).
+          var queryParamDelimiter = options.url.indexOf('?') > -1 ? '&' : '?';
+          options.url += '' + queryParamDelimiter + serializeQueryParams(options.data);
+        }
+      } else {
+        // NOTE: a request's body cannot be an object, so we stringify it if it is.
+        // JSON.stringify removes keys with values of `undefined` (mimics jQuery.ajax).
+        options.body = JSON.stringify(options.data);
+      }
+    }
+
+    // Mimics the default behavior in Ember Data's `ajaxOptions`, namely to set the
+    // 'Content-Type' header to application/json if it is not a GET request and it has a body.
+    if (options.method !== 'GET' && options.body && (options.headers === undefined || !(options.headers['Content-Type'] || options.headers['content-type']))) {
+      options.headers = options.headers || {};
+      options.headers['Content-Type'] = 'application/json; charset=utf-8';
+    }
+
+    return options;
+  }
+  /**
+   * Function that always attempts to parse the response as json, and if an error is thrown,
+   * returns an object with 'data' set to null if the response is
+   * a sucess and has a status code of 204 (No Content) or 205 (Reset Content) or if the request method was 'HEAD',
+   * and the plain payload otherwise.
+   * @param {Response} response
+   * @param {Object} requestData
+   * @returns {Promise}
+   */
+  function determineBodyPromise(response, requestData) {
+    return response.text().then(function (payload) {
+      try {
+        payload = JSON.parse(payload);
+      } catch (error) {
+        if (!(error instanceof SyntaxError)) {
+          throw error;
+        }
+        var status = response.status;
+        if (response.ok && (status === 204 || status === 205 || requestData.method === 'HEAD')) {
+          payload = { data: null };
+        } else {
+          warn('This response was unable to be parsed as json.', payload);
+        }
+      }
+      return payload;
+    });
+  }
+
+  exports.default = Ember.Mixin.create({
+    /**
+     * @param {String} url
+     * @param {String} type
+     * @param {Object} _options
+     * @returns {Object}
+     * @override
+     */
+
+    ajaxOptions: function ajaxOptions(url, type) {
+      var options = arguments.length > 2 && arguments[2] !== undefined ? arguments[2] : {};
+
+      options.url = url;
+      options.type = type;
+      return mungOptionsForFetch(options, this);
+    },
+
+
+    /**
+     * @param {String} url
+     * @param {String} type
+     * @param {Object} options
+     * @override
+     */
+    ajax: function ajax(url, type, options) {
+      var _this = this;
+
+      var requestData = {
+        url: url,
+        method: type
+      };
+
+      var hash = this.ajaxOptions(url, type, options);
+
+      return this._ajaxRequest(hash).catch(function (error, response, requestData) {
+        throw _this.ajaxError(_this, response, null, requestData, error);
+      }).then(function (response) {
+        return Ember.RSVP.hash({
+          response: response,
+          payload: determineBodyPromise(response, requestData)
+        });
+      }).then(function (_ref) {
+        var response = _ref.response,
+            payload = _ref.payload;
+
+        if (response.ok) {
+          return _this.ajaxSuccess(_this, response, payload, requestData);
+        } else {
+          throw _this.ajaxError(_this, response, payload, requestData);
+        }
+      });
+    },
+
+
+    /**
+     * Overrides the `_ajaxRequest` method to use `fetch` instead of jQuery.ajax
+     * @param {Object} options
+     * @override
+     */
+    _ajaxRequest: function _ajaxRequest(options) {
+      return this._fetchRequest(options.url, options);
+    },
+
+
+    /**
+     * A hook into where `fetch` is called.
+     * Useful if you want to override this behavior, for example to multiplex requests.
+     * @param {String} url
+     * @param {Object} options
+     */
+    _fetchRequest: function _fetchRequest(url, options) {
+      return (0, _fetch.default)(url, options);
+    },
+
+
+    /**
+     * @param {Object} adapter
+     * @param {Object} response
+     * @param {Object} payload
+     * @param {Object} requestData
+     * @override
+     */
+    ajaxSuccess: function ajaxSuccess(adapter, response, payload, requestData) {
+      var returnResponse = adapter.handleResponse(response.status, headersToObject(response.headers), payload, requestData);
+
+      if (returnResponse && returnResponse.isAdapterError) {
+        return Ember.RSVP.Promise.reject(returnResponse);
+      } else {
+        return returnResponse;
+      }
+    },
+
+
+    /**
+     * Allows for the error to be selected from either the
+     * response object, or the response data.
+     * @param {Object} response
+     * @param {Object} payload
+     */
+    parseFetchResponseForError: function parseFetchResponseForError(response, payload) {
+      return payload || response.statusTest;
+    },
+
+
+    /**
+     * @param {Object} adapter
+     * @param {Object} response
+     * @param {String|Object} payload
+     * @param {Object} requestData
+     * @param {Error} error
+     * @override
+     */
+    ajaxError: function ajaxError(adapter, response, payload, requestData, error) {
+      if (error) {
+        return error;
+      } else {
+        var parsedResponse = adapter.parseFetchResponseForError(response, payload);
+        return adapter.handleResponse(response.status, headersToObject(response.headers), adapter.parseErrorResponse(parsedResponse) || payload, requestData);
+      }
+    }
+  });
+});
+;define('ember-get-config/index', ['exports', 'up-signal/config/environment'], function (exports, _environment) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  Object.defineProperty(exports, 'default', {
+    enumerable: true,
+    get: function () {
+      return _environment.default;
+    }
+  });
+});
 ;define("ember-getowner-polyfill/index", ["exports", "ember"], function (exports, _ember) {
 
   _ember["default"].deprecate("ember-getowner-polyfill is now a true polyfill. Use Ember.getOwner directly instead of importing from ember-getowner-polyfill", false, {
@@ -73250,7 +91622,7 @@ createDeprecatedModule('resolver');
   if (Ember.EXTEND_PROTOTYPES === true || Ember.EXTEND_PROTOTYPES.String) {
     /**
       See {{#crossLink "Ember.String/pluralize"}}{{/crossLink}}
-       @method pluralize
+        @method pluralize
       @for String
     */
     Object.defineProperty(String.prototype, 'pluralize', {
@@ -73268,7 +91640,7 @@ createDeprecatedModule('resolver');
 
     /**
       See {{#crossLink "Ember.String/singularize"}}{{/crossLink}}
-       @method singularize
+        @method singularize
       @for String
     */
     Object.defineProperty(String.prototype, 'singularize', {
@@ -73489,9 +91861,9 @@ createDeprecatedModule('resolver');
   Inflector.prototype = {
     /**
       @public
-       As inflections can be costly, and commonly the same subset of words are repeatedly
+        As inflections can be costly, and commonly the same subset of words are repeatedly
       inflected an optional cache is provided.
-       @method enableCache
+        @method enableCache
     */
     enableCache: function enableCache() {
       this.purgeCache();
@@ -73509,7 +91881,7 @@ createDeprecatedModule('resolver');
 
     /**
       @public
-       @method purgedCache
+        @method purgedCache
     */
     purgeCache: function purgeCache() {
       this._cacheUsed = false;
@@ -73520,7 +91892,7 @@ createDeprecatedModule('resolver');
     /**
       @public
       disable caching
-       @method disableCache;
+        @method disableCache;
     */
     disableCache: function disableCache() {
       this._sCache = null;
@@ -73606,7 +91978,7 @@ createDeprecatedModule('resolver');
 
     /**
       @protected
-       @method inflect
+        @method inflect
       @param {String} word
       @param {Object} typeRules
       @param {Object} irregular
@@ -73817,6 +92189,835 @@ createDeprecatedModule('resolver');
   }
 
   exports['default'] = supportsSetterGetter;
+});
+;define('ember-popper/components/ember-popper-base', ['exports', '@ember-decorators/argument/-debug/validated-component', 'ember-popper/templates/components/ember-popper', '@ember-decorators/argument/types', '@ember-decorators/object', '@ember-decorators/argument', 'ember-raf-scheduler', '@ember-decorators/component', '@ember-decorators/argument/type'], function (exports, _validatedComponent, _emberPopper, _types, _object, _argument, _emberRafScheduler, _component, _type) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = undefined;
+
+  function _initDefineProp(target, property, descriptor, context) {
+    if (!descriptor) return;
+    Object.defineProperty(target, property, {
+      enumerable: descriptor.enumerable,
+      configurable: descriptor.configurable,
+      writable: descriptor.writable,
+      value: descriptor.initializer ? descriptor.initializer.call(context) : void 0
+    });
+  }
+
+  function _classCallCheck(instance, Constructor) {
+    if (!(instance instanceof Constructor)) {
+      throw new TypeError("Cannot call a class as a function");
+    }
+  }
+
+  var _createClass = function () {
+    function defineProperties(target, props) {
+      for (var i = 0; i < props.length; i++) {
+        var descriptor = props[i];
+        descriptor.enumerable = descriptor.enumerable || false;
+        descriptor.configurable = true;
+        if ("value" in descriptor) descriptor.writable = true;
+        Object.defineProperty(target, descriptor.key, descriptor);
+      }
+    }
+
+    return function (Constructor, protoProps, staticProps) {
+      if (protoProps) defineProperties(Constructor.prototype, protoProps);
+      if (staticProps) defineProperties(Constructor, staticProps);
+      return Constructor;
+    };
+  }();
+
+  function _possibleConstructorReturn(self, call) {
+    if (!self) {
+      throw new ReferenceError("this hasn't been initialised - super() hasn't been called");
+    }
+
+    return call && (typeof call === "object" || typeof call === "function") ? call : self;
+  }
+
+  var _get = function get(object, property, receiver) {
+    if (object === null) object = Function.prototype;
+    var desc = Object.getOwnPropertyDescriptor(object, property);
+
+    if (desc === undefined) {
+      var parent = Object.getPrototypeOf(object);
+
+      if (parent === null) {
+        return undefined;
+      } else {
+        return get(parent, property, receiver);
+      }
+    } else if ("value" in desc) {
+      return desc.value;
+    } else {
+      var getter = desc.get;
+
+      if (getter === undefined) {
+        return undefined;
+      }
+
+      return getter.call(receiver);
+    }
+  };
+
+  function _inherits(subClass, superClass) {
+    if (typeof superClass !== "function" && superClass !== null) {
+      throw new TypeError("Super expression must either be null or a function, not " + typeof superClass);
+    }
+
+    subClass.prototype = Object.create(superClass && superClass.prototype, {
+      constructor: {
+        value: subClass,
+        enumerable: false,
+        writable: true,
+        configurable: true
+      }
+    });
+    if (superClass) Object.setPrototypeOf ? Object.setPrototypeOf(subClass, superClass) : subClass.__proto__ = superClass;
+  }
+
+  function _applyDecoratedDescriptor(target, property, decorators, descriptor, context) {
+    var desc = {};
+    Object['ke' + 'ys'](descriptor).forEach(function (key) {
+      desc[key] = descriptor[key];
+    });
+    desc.enumerable = !!desc.enumerable;
+    desc.configurable = !!desc.configurable;
+
+    if ('value' in desc || desc.initializer) {
+      desc.writable = true;
+    }
+
+    desc = decorators.slice().reverse().reduce(function (desc, decorator) {
+      return decorator(target, property, desc) || desc;
+    }, desc);
+
+    if (context && desc.initializer !== void 0) {
+      desc.value = desc.initializer ? desc.initializer.call(context) : void 0;
+      desc.initializer = undefined;
+    }
+
+    if (desc.initializer === void 0) {
+      Object['define' + 'Property'](target, property, desc);
+      desc = null;
+    }
+
+    return desc;
+  }
+
+  function _initializerWarningHelper(descriptor, context) {
+    throw new Error('Decorating class property failed. Please ensure that transform-class-properties is enabled.');
+  }
+
+  var _dec, _dec2, _dec3, _dec4, _dec5, _dec6, _dec7, _dec8, _dec9, _dec10, _dec11, _dec12, _dec13, _dec14, _dec15, _class, _desc, _value, _class2, _descriptor, _descriptor2, _descriptor3, _descriptor4, _descriptor5, _descriptor6, _descriptor7, _descriptor8;
+
+  var Selector = (0, _type.unionOf)('string', _types.Element);
+
+  var EmberPopperBase = (_dec = (0, _component.tagName)(''), _dec2 = (0, _argument.argument)({ defaultIfUndefined: true }), _dec3 = (0, _type.type)('boolean'), _dec4 = (0, _type.type)((0, _type.optional)('object')), _dec5 = (0, _type.type)((0, _type.optional)(Function)), _dec6 = (0, _type.type)((0, _type.optional)(Function)), _dec7 = (0, _argument.argument)({ defaultIfUndefined: true }), _dec8 = (0, _type.type)('string'), _dec9 = (0, _argument.argument)({ defaultIfUndefined: true }), _dec10 = (0, _type.type)(Selector), _dec11 = (0, _type.type)((0, _type.optional)(_types.Action)), _dec12 = (0, _argument.argument)({ defaultIfUndefined: true }), _dec13 = (0, _type.type)('boolean'), _dec14 = (0, _object.computed)('_renderInPlace', 'popperContainer'), _dec15 = (0, _object.computed)('renderInPlace'), _dec(_class = (_class2 = function (_Component) {
+    _inherits(EmberPopperBase, _Component);
+
+    function EmberPopperBase() {
+      var _ref;
+
+      var _temp, _this, _ret;
+
+      _classCallCheck(this, EmberPopperBase);
+
+      for (var _len = arguments.length, args = Array(_len), _key = 0; _key < _len; _key++) {
+        args[_key] = arguments[_key];
+      }
+
+      return _ret = (_temp = (_this = _possibleConstructorReturn(this, (_ref = EmberPopperBase.__proto__ || Object.getPrototypeOf(EmberPopperBase)).call.apply(_ref, [this].concat(args))), _this), _this.layout = _emberPopper.default, _initDefineProp(_this, 'eventsEnabled', _descriptor, _this), _initDefineProp(_this, 'modifiers', _descriptor2, _this), _initDefineProp(_this, 'onCreate', _descriptor3, _this), _initDefineProp(_this, 'onUpdate', _descriptor4, _this), _initDefineProp(_this, 'placement', _descriptor5, _this), _initDefineProp(_this, 'popperContainer', _descriptor6, _this), _initDefineProp(_this, 'registerAPI', _descriptor7, _this), _initDefineProp(_this, 'renderInPlace', _descriptor8, _this), _this._didRenderInPlace = false, _this._eventsEnabled = null, _this._initialParentNode = null, _this._modifiers = null, _this._onCreate = null, _this._onUpdate = null, _this._placement = null, _this._popper = null, _this._popperTarget = null, _this._publicAPI = null, _this._updateRAF = null, _temp), _possibleConstructorReturn(_this, _ret);
+    }
+
+    _createClass(EmberPopperBase, [{
+      key: 'didRender',
+      value: function didRender() {
+        this._updatePopper();
+      }
+    }, {
+      key: 'willDestroyElement',
+      value: function willDestroyElement() {
+        _get(EmberPopperBase.prototype.__proto__ || Object.getPrototypeOf(EmberPopperBase.prototype), 'willDestroyElement', this).apply(this, arguments);
+
+        this._popper.destroy();
+        _emberRafScheduler.scheduler.forget(this._updateRAF);
+      }
+    }, {
+      key: 'update',
+      value: function update() {
+        this._popper.update();
+      }
+    }, {
+      key: 'scheduleUpdate',
+      value: function scheduleUpdate() {
+        var _this2 = this;
+
+        if (this._updateRAF !== null) {
+          return;
+        }
+
+        this._updateRAF = _emberRafScheduler.scheduler.schedule('affect', function () {
+          _this2._updateRAF = null;
+          _this2._popper.update();
+        });
+      }
+    }, {
+      key: 'enableEventListeners',
+      value: function enableEventListeners() {
+        this._popper.enableEventListeners();
+      }
+    }, {
+      key: 'disableEventListeners',
+      value: function disableEventListeners() {
+        this._popper.disableEventListeners();
+      }
+    }, {
+      key: '_updatePopper',
+      value: function _updatePopper() {
+        if (this.isDestroying || this.isDestroyed) {
+          return;
+        }
+
+        var eventsEnabled = this.get('eventsEnabled');
+        var modifiers = this.get('modifiers');
+        var onCreate = this.get('onCreate');
+        var onUpdate = this.get('onUpdate');
+        var placement = this.get('placement');
+        var popperTarget = this._getPopperTarget();
+        var renderInPlace = this.get('_renderInPlace');
+
+        // Compare against previous values to see if anything has changed
+        var didChange = renderInPlace !== this._didRenderInPlace || popperTarget !== this._popperTarget || eventsEnabled !== this._eventsEnabled || modifiers !== this._modifiers || placement !== this._placement || onCreate !== this._onCreate || onUpdate !== this._onUpdate;
+
+        if (didChange === true) {
+          if (this._popper !== null) {
+            this._popper.destroy();
+          }
+
+          var popperElement = this._getPopperElement();
+
+          // Store current values to check against on updates
+          this._didRenderInPlace = renderInPlace;
+          this._eventsEnabled = eventsEnabled;
+          this._modifiers = modifiers;
+          this._onCreate = onCreate;
+          this._onUpdate = onUpdate;
+          this._placement = placement;
+          this._popperTarget = popperTarget;
+
+          var options = {
+            eventsEnabled: eventsEnabled,
+            modifiers: modifiers,
+            placement: placement
+          };
+
+          if (onCreate) {
+            (true && !(typeof onCreate === 'function') && Ember.assert('onCreate of ember-popper must be a function', typeof onCreate === 'function'));
+
+            options.onCreate = onCreate;
+          }
+
+          if (onUpdate) {
+            (true && !(typeof onUpdate === 'function') && Ember.assert('onUpdate of ember-popper must be a function', typeof onUpdate === 'function'));
+
+            options.onUpdate = onUpdate;
+          }
+
+          this._popper = new Popper(popperTarget, popperElement, options);
+
+          // Execute the registerAPI hook last to ensure the Popper is initialized on the target
+          if (this.get('registerAPI') !== null) {
+            /* eslint-disable ember/closure-actions */
+            this.sendAction('registerAPI', this._getPublicAPI());
+          }
+        }
+      }
+    }, {
+      key: '_getPopperElement',
+      value: function _getPopperElement() {
+        return self.document.getElementById(this.id);
+      }
+    }, {
+      key: '_getPopperTarget',
+      value: function _getPopperTarget() {
+        return this.get('popperTarget');
+      }
+    }, {
+      key: '_getPublicAPI',
+      value: function _getPublicAPI() {
+        if (this._publicAPI === null) {
+          // bootstrap the public API with fields that are guaranteed to be static,
+          // such as imperative actions
+          this._publicAPI = {
+            disableEventListeners: this.disableEventListeners.bind(this),
+            enableEventListeners: this.enableEventListeners.bind(this),
+            scheduleUpdate: this.scheduleUpdate.bind(this),
+            update: this.update.bind(this)
+          };
+        }
+
+        this._publicAPI.popperElement = this._getPopperElement();
+        this._publicAPI.popperTarget = this._popperTarget;
+
+        return this._publicAPI;
+      }
+    }, {
+      key: '_popperContainer',
+      get: function get() {
+        var renderInPlace = this.get('_renderInPlace');
+        var maybeContainer = this.get('popperContainer');
+
+        var popperContainer = void 0;
+
+        if (renderInPlace) {
+          popperContainer = this._initialParentNode;
+        } else if (maybeContainer instanceof _types.Element) {
+          popperContainer = maybeContainer;
+        } else if (typeof maybeContainer === 'string') {
+          var selector = maybeContainer;
+          var possibleContainers = self.document.querySelectorAll(selector);
+
+          (true && !(possibleContainers.length === 1) && Ember.assert('ember-popper with popperContainer selector "' + selector + '" found ' + (possibleContainers.length + ' possible containers when there should be exactly 1'), possibleContainers.length === 1));
+
+
+          popperContainer = possibleContainers[0];
+        }
+
+        return popperContainer;
+      }
+    }, {
+      key: '_renderInPlace',
+      get: function get() {
+        // self.document is undefined in Fastboot, so we have to render in
+        // place for the popper to show up at all.
+        return self.document ? !!this.get('renderInPlace') : true;
+      }
+    }]);
+
+    return EmberPopperBase;
+  }(_validatedComponent.default), (_descriptor = _applyDecoratedDescriptor(_class2.prototype, 'eventsEnabled', [_dec2, _dec3], {
+    enumerable: true,
+    initializer: function initializer() {
+      return true;
+    }
+  }), _descriptor2 = _applyDecoratedDescriptor(_class2.prototype, 'modifiers', [_argument.argument, _dec4], {
+    enumerable: true,
+    initializer: function initializer() {
+      return null;
+    }
+  }), _descriptor3 = _applyDecoratedDescriptor(_class2.prototype, 'onCreate', [_argument.argument, _dec5], {
+    enumerable: true,
+    initializer: function initializer() {
+      return null;
+    }
+  }), _descriptor4 = _applyDecoratedDescriptor(_class2.prototype, 'onUpdate', [_argument.argument, _dec6], {
+    enumerable: true,
+    initializer: function initializer() {
+      return null;
+    }
+  }), _descriptor5 = _applyDecoratedDescriptor(_class2.prototype, 'placement', [_dec7, _dec8], {
+    enumerable: true,
+    initializer: function initializer() {
+      return 'bottom';
+    }
+  }), _descriptor6 = _applyDecoratedDescriptor(_class2.prototype, 'popperContainer', [_dec9, _dec10], {
+    enumerable: true,
+    initializer: function initializer() {
+      return '.ember-application';
+    }
+  }), _descriptor7 = _applyDecoratedDescriptor(_class2.prototype, 'registerAPI', [_argument.argument, _dec11], {
+    enumerable: true,
+    initializer: function initializer() {
+      return null;
+    }
+  }), _descriptor8 = _applyDecoratedDescriptor(_class2.prototype, 'renderInPlace', [_dec12, _dec13], {
+    enumerable: true,
+    initializer: function initializer() {
+      return false;
+    }
+  }), _applyDecoratedDescriptor(_class2.prototype, 'update', [_object.action], Object.getOwnPropertyDescriptor(_class2.prototype, 'update'), _class2.prototype), _applyDecoratedDescriptor(_class2.prototype, 'scheduleUpdate', [_object.action], Object.getOwnPropertyDescriptor(_class2.prototype, 'scheduleUpdate'), _class2.prototype), _applyDecoratedDescriptor(_class2.prototype, 'enableEventListeners', [_object.action], Object.getOwnPropertyDescriptor(_class2.prototype, 'enableEventListeners'), _class2.prototype), _applyDecoratedDescriptor(_class2.prototype, 'disableEventListeners', [_object.action], Object.getOwnPropertyDescriptor(_class2.prototype, 'disableEventListeners'), _class2.prototype), _applyDecoratedDescriptor(_class2.prototype, '_popperContainer', [_dec14], Object.getOwnPropertyDescriptor(_class2.prototype, '_popperContainer'), _class2.prototype), _applyDecoratedDescriptor(_class2.prototype, '_renderInPlace', [_dec15], Object.getOwnPropertyDescriptor(_class2.prototype, '_renderInPlace'), _class2.prototype)), _class2)) || _class);
+  exports.default = EmberPopperBase;
+});
+;define('ember-popper/components/ember-popper-targeting-parent', ['exports', 'ember-popper/components/ember-popper-base', 'ember-popper/templates/components/ember-popper-targeting-parent'], function (exports, _emberPopperBase, _emberPopperTargetingParent) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = undefined;
+
+  function _classCallCheck(instance, Constructor) {
+    if (!(instance instanceof Constructor)) {
+      throw new TypeError("Cannot call a class as a function");
+    }
+  }
+
+  var _createClass = function () {
+    function defineProperties(target, props) {
+      for (var i = 0; i < props.length; i++) {
+        var descriptor = props[i];
+        descriptor.enumerable = descriptor.enumerable || false;
+        descriptor.configurable = true;
+        if ("value" in descriptor) descriptor.writable = true;
+        Object.defineProperty(target, descriptor.key, descriptor);
+      }
+    }
+
+    return function (Constructor, protoProps, staticProps) {
+      if (protoProps) defineProperties(Constructor.prototype, protoProps);
+      if (staticProps) defineProperties(Constructor, staticProps);
+      return Constructor;
+    };
+  }();
+
+  function _possibleConstructorReturn(self, call) {
+    if (!self) {
+      throw new ReferenceError("this hasn't been initialised - super() hasn't been called");
+    }
+
+    return call && (typeof call === "object" || typeof call === "function") ? call : self;
+  }
+
+  var _get = function get(object, property, receiver) {
+    if (object === null) object = Function.prototype;
+    var desc = Object.getOwnPropertyDescriptor(object, property);
+
+    if (desc === undefined) {
+      var parent = Object.getPrototypeOf(object);
+
+      if (parent === null) {
+        return undefined;
+      } else {
+        return get(parent, property, receiver);
+      }
+    } else if ("value" in desc) {
+      return desc.value;
+    } else {
+      var getter = desc.get;
+
+      if (getter === undefined) {
+        return undefined;
+      }
+
+      return getter.call(receiver);
+    }
+  };
+
+  function _inherits(subClass, superClass) {
+    if (typeof superClass !== "function" && superClass !== null) {
+      throw new TypeError("Super expression must either be null or a function, not " + typeof superClass);
+    }
+
+    subClass.prototype = Object.create(superClass && superClass.prototype, {
+      constructor: {
+        value: subClass,
+        enumerable: false,
+        writable: true,
+        configurable: true
+      }
+    });
+    if (superClass) Object.setPrototypeOf ? Object.setPrototypeOf(subClass, superClass) : subClass.__proto__ = superClass;
+  }
+
+  var EmberPopperTargetingParent = function (_EmberPopperBase) {
+    _inherits(EmberPopperTargetingParent, _EmberPopperBase);
+
+    function EmberPopperTargetingParent() {
+      var _ref;
+
+      var _temp, _this, _ret;
+
+      _classCallCheck(this, EmberPopperTargetingParent);
+
+      for (var _len = arguments.length, args = Array(_len), _key = 0; _key < _len; _key++) {
+        args[_key] = arguments[_key];
+      }
+
+      return _ret = (_temp = (_this = _possibleConstructorReturn(this, (_ref = EmberPopperTargetingParent.__proto__ || Object.getPrototypeOf(EmberPopperTargetingParent)).call.apply(_ref, [this].concat(args))), _this), _this.layout = _emberPopperTargetingParent.default, _temp), _possibleConstructorReturn(_this, _ret);
+    }
+
+    _createClass(EmberPopperTargetingParent, [{
+      key: 'init',
+      value: function init() {
+        this.id = this.id || Ember.guidFor(this) + '-popper';
+        this._parentFinder = self.document ? self.document.createTextNode('') : '';
+
+        _get(EmberPopperTargetingParent.prototype.__proto__ || Object.getPrototypeOf(EmberPopperTargetingParent.prototype), 'init', this).apply(this, arguments);
+      }
+    }, {
+      key: 'didInsertElement',
+      value: function didInsertElement() {
+        this._initialParentNode = this._parentFinder.parentNode;
+
+        _get(EmberPopperTargetingParent.prototype.__proto__ || Object.getPrototypeOf(EmberPopperTargetingParent.prototype), 'didInsertElement', this).apply(this, arguments);
+      }
+    }, {
+      key: '_getPopperTarget',
+      value: function _getPopperTarget() {
+        return this._initialParentNode;
+      }
+    }]);
+
+    return EmberPopperTargetingParent;
+  }(_emberPopperBase.default);
+
+  exports.default = EmberPopperTargetingParent;
+});
+;define('ember-popper/components/ember-popper', ['exports', 'ember-popper/components/ember-popper-base', '@ember-decorators/argument/types', '@ember-decorators/argument', '@ember-decorators/argument/type'], function (exports, _emberPopperBase, _types, _argument, _type) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = undefined;
+
+  function _initDefineProp(target, property, descriptor, context) {
+    if (!descriptor) return;
+    Object.defineProperty(target, property, {
+      enumerable: descriptor.enumerable,
+      configurable: descriptor.configurable,
+      writable: descriptor.writable,
+      value: descriptor.initializer ? descriptor.initializer.call(context) : void 0
+    });
+  }
+
+  function _classCallCheck(instance, Constructor) {
+    if (!(instance instanceof Constructor)) {
+      throw new TypeError("Cannot call a class as a function");
+    }
+  }
+
+  var _createClass = function () {
+    function defineProperties(target, props) {
+      for (var i = 0; i < props.length; i++) {
+        var descriptor = props[i];
+        descriptor.enumerable = descriptor.enumerable || false;
+        descriptor.configurable = true;
+        if ("value" in descriptor) descriptor.writable = true;
+        Object.defineProperty(target, descriptor.key, descriptor);
+      }
+    }
+
+    return function (Constructor, protoProps, staticProps) {
+      if (protoProps) defineProperties(Constructor.prototype, protoProps);
+      if (staticProps) defineProperties(Constructor, staticProps);
+      return Constructor;
+    };
+  }();
+
+  function _possibleConstructorReturn(self, call) {
+    if (!self) {
+      throw new ReferenceError("this hasn't been initialised - super() hasn't been called");
+    }
+
+    return call && (typeof call === "object" || typeof call === "function") ? call : self;
+  }
+
+  var _get = function get(object, property, receiver) {
+    if (object === null) object = Function.prototype;
+    var desc = Object.getOwnPropertyDescriptor(object, property);
+
+    if (desc === undefined) {
+      var parent = Object.getPrototypeOf(object);
+
+      if (parent === null) {
+        return undefined;
+      } else {
+        return get(parent, property, receiver);
+      }
+    } else if ("value" in desc) {
+      return desc.value;
+    } else {
+      var getter = desc.get;
+
+      if (getter === undefined) {
+        return undefined;
+      }
+
+      return getter.call(receiver);
+    }
+  };
+
+  function _inherits(subClass, superClass) {
+    if (typeof superClass !== "function" && superClass !== null) {
+      throw new TypeError("Super expression must either be null or a function, not " + typeof superClass);
+    }
+
+    subClass.prototype = Object.create(superClass && superClass.prototype, {
+      constructor: {
+        value: subClass,
+        enumerable: false,
+        writable: true,
+        configurable: true
+      }
+    });
+    if (superClass) Object.setPrototypeOf ? Object.setPrototypeOf(subClass, superClass) : subClass.__proto__ = superClass;
+  }
+
+  function _applyDecoratedDescriptor(target, property, decorators, descriptor, context) {
+    var desc = {};
+    Object['ke' + 'ys'](descriptor).forEach(function (key) {
+      desc[key] = descriptor[key];
+    });
+    desc.enumerable = !!desc.enumerable;
+    desc.configurable = !!desc.configurable;
+
+    if ('value' in desc || desc.initializer) {
+      desc.writable = true;
+    }
+
+    desc = decorators.slice().reverse().reduce(function (desc, decorator) {
+      return decorator(target, property, desc) || desc;
+    }, desc);
+
+    if (context && desc.initializer !== void 0) {
+      desc.value = desc.initializer ? desc.initializer.call(context) : void 0;
+      desc.initializer = undefined;
+    }
+
+    if (desc.initializer === void 0) {
+      Object['define' + 'Property'](target, property, desc);
+      desc = null;
+    }
+
+    return desc;
+  }
+
+  function _initializerWarningHelper(descriptor, context) {
+    throw new Error('Decorating class property failed. Please ensure that transform-class-properties is enabled.');
+  }
+
+  var _dec, _desc, _value, _class, _descriptor;
+
+  var EmberPopper = (_dec = (0, _type.type)(_types.Element), (_class = function (_EmberPopperBase) {
+    _inherits(EmberPopper, _EmberPopperBase);
+
+    function EmberPopper() {
+      var _ref;
+
+      var _temp, _this, _ret;
+
+      _classCallCheck(this, EmberPopper);
+
+      for (var _len = arguments.length, args = Array(_len), _key = 0; _key < _len; _key++) {
+        args[_key] = arguments[_key];
+      }
+
+      return _ret = (_temp = (_this = _possibleConstructorReturn(this, (_ref = EmberPopper.__proto__ || Object.getPrototypeOf(EmberPopper)).call.apply(_ref, [this].concat(args))), _this), _initDefineProp(_this, 'popperTarget', _descriptor, _this), _temp), _possibleConstructorReturn(_this, _ret);
+    }
+
+    _createClass(EmberPopper, [{
+      key: 'init',
+      value: function init() {
+        this.id = this.id || Ember.guidFor(this) + '-popper';
+
+        _get(EmberPopper.prototype.__proto__ || Object.getPrototypeOf(EmberPopper.prototype), 'init', this).apply(this, arguments);
+      }
+    }]);
+
+    return EmberPopper;
+  }(_emberPopperBase.default), (_descriptor = _applyDecoratedDescriptor(_class.prototype, 'popperTarget', [_argument.argument, _dec], {
+    enumerable: true,
+    initializer: function initializer() {
+      return null;
+    }
+  })), _class));
+  exports.default = EmberPopper;
+});
+;define("ember-popper/templates/components/ember-popper-targeting-parent", ["exports"], function (exports) {
+  "use strict";
+
+  exports.__esModule = true;
+  exports.default = Ember.HTMLBars.template({ "id": "PB2pz7m1", "block": "{\"statements\":[[1,[33,[\"unbound\"],[[28,[\"_parentFinder\"]]],null],false],[0,\"\\n\\n\"],[6,[\"if\"],[[28,[\"renderInPlace\"]]],null,{\"statements\":[[0,\"  \"],[11,\"div\",[]],[16,\"id\",[26,[\"id\"]],null],[16,\"class\",[26,[\"class\"]],null],[16,\"role\",[26,[\"ariaRole\"]],null],[13],[0,\"\\n    \"],[18,\"default\",[[33,[\"hash\"],null,[[\"disableEventListeners\",\"enableEventListeners\",\"scheduleUpdate\",\"update\"],[[33,[\"action\"],[[28,[null]],\"disableEventListeners\"],null],[33,[\"action\"],[[28,[null]],\"enableEventListeners\"],null],[33,[\"action\"],[[28,[null]],\"scheduleUpdate\"],null],[33,[\"action\"],[[28,[null]],\"update\"],null]]]]]],[0,\"\\n  \"],[14],[0,\"\\n\"]],\"locals\":[]},{\"statements\":[[6,[\"-in-element\"],[[28,[\"_popperContainer\"]]],null,{\"statements\":[[0,\"    \"],[11,\"div\",[]],[16,\"id\",[26,[\"id\"]],null],[16,\"class\",[26,[\"class\"]],null],[16,\"role\",[26,[\"ariaRole\"]],null],[13],[0,\"\\n      \"],[18,\"default\",[[33,[\"hash\"],null,[[\"disableEventListeners\",\"enableEventListeners\",\"scheduleUpdate\",\"update\"],[[33,[\"action\"],[[28,[null]],\"disableEventListeners\"],null],[33,[\"action\"],[[28,[null]],\"enableEventListeners\"],null],[33,[\"action\"],[[28,[null]],\"scheduleUpdate\"],null],[33,[\"action\"],[[28,[null]],\"update\"],null]]]]]],[0,\"\\n    \"],[14],[0,\"\\n\"]],\"locals\":[]},null]],\"locals\":[]}]],\"locals\":[],\"named\":[],\"yields\":[\"default\"],\"hasPartials\":false}", "meta": { "moduleName": "ember-popper/templates/components/ember-popper-targeting-parent.hbs" } });
+});
+;define("ember-popper/templates/components/ember-popper", ["exports"], function (exports) {
+  "use strict";
+
+  exports.__esModule = true;
+  exports.default = Ember.HTMLBars.template({ "id": "XkRAQgKG", "block": "{\"statements\":[[6,[\"if\"],[[28,[\"renderInPlace\"]]],null,{\"statements\":[[0,\"  \"],[11,\"div\",[]],[16,\"id\",[26,[\"id\"]],null],[16,\"class\",[26,[\"class\"]],null],[16,\"role\",[26,[\"ariaRole\"]],null],[13],[0,\"\\n    \"],[18,\"default\",[[33,[\"hash\"],null,[[\"disableEventListeners\",\"enableEventListeners\",\"scheduleUpdate\",\"update\"],[[33,[\"action\"],[[28,[null]],\"disableEventListeners\"],null],[33,[\"action\"],[[28,[null]],\"enableEventListeners\"],null],[33,[\"action\"],[[28,[null]],\"scheduleUpdate\"],null],[33,[\"action\"],[[28,[null]],\"update\"],null]]]]]],[0,\"\\n  \"],[14],[0,\"\\n\"]],\"locals\":[]},{\"statements\":[[6,[\"-in-element\"],[[28,[\"_popperContainer\"]]],null,{\"statements\":[[0,\"    \"],[11,\"div\",[]],[16,\"id\",[26,[\"id\"]],null],[16,\"class\",[26,[\"class\"]],null],[16,\"role\",[26,[\"ariaRole\"]],null],[13],[0,\"\\n      \"],[18,\"default\",[[33,[\"hash\"],null,[[\"disableEventListeners\",\"enableEventListeners\",\"scheduleUpdate\",\"update\"],[[33,[\"action\"],[[28,[null]],\"disableEventListeners\"],null],[33,[\"action\"],[[28,[null]],\"enableEventListeners\"],null],[33,[\"action\"],[[28,[null]],\"scheduleUpdate\"],null],[33,[\"action\"],[[28,[null]],\"update\"],null]]]]]],[0,\"\\n    \"],[14],[0,\"\\n\"]],\"locals\":[]},null]],\"locals\":[]}]],\"locals\":[],\"named\":[],\"yields\":[\"default\"],\"hasPartials\":false}", "meta": { "moduleName": "ember-popper/templates/components/ember-popper.hbs" } });
+});
+;define('ember-raf-scheduler/index', ['exports'], function (exports) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+
+  function _classCallCheck(instance, Constructor) {
+    if (!(instance instanceof Constructor)) {
+      throw new TypeError("Cannot call a class as a function");
+    }
+  }
+
+  var _createClass = function () {
+    function defineProperties(target, props) {
+      for (var i = 0; i < props.length; i++) {
+        var descriptor = props[i];
+        descriptor.enumerable = descriptor.enumerable || false;
+        descriptor.configurable = true;
+        if ("value" in descriptor) descriptor.writable = true;
+        Object.defineProperty(target, descriptor.key, descriptor);
+      }
+    }
+
+    return function (Constructor, protoProps, staticProps) {
+      if (protoProps) defineProperties(Constructor.prototype, protoProps);
+      if (staticProps) defineProperties(Constructor, staticProps);
+      return Constructor;
+    };
+  }();
+
+  var Token = exports.Token = function () {
+    function Token(parent) {
+      _classCallCheck(this, Token);
+
+      this._parent = parent;
+      this._cancelled = false;
+
+      if (true) {
+        Object.seal(this);
+      }
+    }
+
+    _createClass(Token, [{
+      key: 'cancel',
+      value: function cancel() {
+        this._cancelled = true;
+      }
+    }, {
+      key: 'cancelled',
+      get: function get() {
+        return this._cancelled || (this._cancelled = this._parent ? this._parent.cancelled : false);
+      }
+    }]);
+
+    return Token;
+  }();
+
+  function job(cb, token) {
+    return function execJob() {
+      if (token.cancelled === false) {
+        cb();
+      }
+    };
+  }
+
+  var Scheduler = exports.Scheduler = function () {
+    function Scheduler() {
+      _classCallCheck(this, Scheduler);
+
+      this.sync = [];
+      this.layout = [];
+      this.measure = [];
+      this.affect = [];
+      this.jobs = 0;
+      this._nextFlush = null;
+      this.ticks = 0;
+
+      if (true) {
+        Object.seal(this);
+      }
+    }
+
+    _createClass(Scheduler, [{
+      key: 'schedule',
+      value: function schedule(queueName, cb, parent) {
+        (true && !(queueName in this) && Ember.assert('Attempted to schedule to unknown queue: ' + queueName, queueName in this));
+
+
+        this.jobs++;
+        var token = new Token(parent);
+
+        this[queueName].push(job(cb, token));
+        this._flush();
+
+        return token;
+      }
+    }, {
+      key: 'forget',
+      value: function forget(token) {
+        // TODO add explicit test
+        if (token) {
+          token.cancel();
+        }
+      }
+    }, {
+      key: '_flush',
+      value: function _flush() {
+        var _this = this;
+
+        if (this._nextFlush !== null) {
+          return;
+        }
+
+        this._nextFlush = requestAnimationFrame(function () {
+          _this.flush();
+        });
+      }
+    }, {
+      key: 'flush',
+      value: function flush() {
+        var i = void 0,
+            q = void 0;
+        this.jobs = 0;
+
+        if (this.sync.length > 0) {
+          Ember.run.begin();
+          q = this.sync;
+          this.sync = [];
+
+          for (i = 0; i < q.length; i++) {
+            q[i]();
+          }
+          Ember.run.end();
+        }
+
+        if (this.layout.length > 0) {
+          q = this.layout;
+          this.layout = [];
+
+          for (i = 0; i < q.length; i++) {
+            q[i]();
+          }
+        }
+
+        if (this.measure.length > 0) {
+          q = this.measure;
+          this.measure = [];
+
+          for (i = 0; i < q.length; i++) {
+            q[i]();
+          }
+        }
+
+        if (this.affect.length > 0) {
+          q = this.affect;
+          this.affect = [];
+
+          for (i = 0; i < q.length; i++) {
+            q[i]();
+          }
+        }
+
+        this._nextFlush = null;
+        if (this.jobs > 0) {
+          this._flush();
+        }
+      }
+    }]);
+
+    return Scheduler;
+  }();
+
+  var scheduler = exports.scheduler = new Scheduler();
+
+  exports.default = scheduler;
 });
 ;/*
  * This is a stub file, it must be on disk b/c babel-plugin-debug-macros
@@ -74392,6 +93593,3019 @@ define("ember-resolver/features", [], function () {
     cache['_dict'] = null;
     delete cache['_dict'];
     return cache;
+  }
+});
+;define('ember-simple-auth/authenticators/base', ['exports'], function (exports) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = Ember.Object.extend(Ember.Evented, {
+    /**
+      __Triggered when the authentication data is updated by the authenticator
+      due to an external or scheduled event__. This might happen, e.g., if the
+      authenticator refreshes an expired token or an event is triggered from an
+      external authentication provider that the authenticator uses. The session
+      handles that event, passes the updated data back to the authenticator's
+      {{#crossLink "BaseAuthenticator/restore:method"}}{{/crossLink}}
+      method and handles the result of that invocation accordingly.
+       @event sessionDataUpdated
+      @param {Object} data The updated session data
+      @public
+    */
+
+    /**
+      __Triggered when the authentication data is invalidated by the authenticator
+      due to an external or scheduled event__. This might happen, e.g., if a token
+      expires or an event is triggered from an external authentication provider
+      that the authenticator uses. The session handles the event and will
+      invalidate itself when it is triggered.
+       @event sessionDataInvalidated
+      @public
+    */
+
+    /**
+      Restores the session from a session data object. __This method is invoked
+      by the session either on application startup if session data is restored
+      from the session store__ or when properties in the store change due to
+      external events (e.g. in another tab) and the new session data needs to be
+      validated for whether it constitutes an authenticated session.
+       __This method returns a promise. A resolving promise results in the session
+      becoming or remaining authenticated.__ Any data the promise resolves with
+      will be saved in and accessible via the session service's
+      `data.authenticated` property (see
+      {{#crossLink "SessionService/data:property"}}{{/crossLink}}). A rejecting
+      promise indicates that `data` does not constitute a valid session and will
+      result in the session being invalidated or remaining unauthenticated.
+       The `BaseAuthenticator`'s implementation always returns a rejecting
+      promise. __This method must be overridden in subclasses.__
+       @method restore
+      @param {Object} data The data to restore the session from
+      @return {Ember.RSVP.Promise} A promise that when it resolves results in the session becoming or remaining authenticated
+      @public
+    */
+    restore: function restore() {
+      return Ember.RSVP.reject();
+    },
+
+
+    /**
+      Authenticates the session with the specified `args`. These options vary
+      depending on the actual authentication mechanism the authenticator
+      implements (e.g. a set of credentials or a Facebook account id etc.). __The
+      session will invoke this method in order to authenticate itself__ (see
+      {{#crossLink "SessionService/authenticate:method"}}{{/crossLink}}).
+       __This method returns a promise. A resolving promise will result in the
+      session becoming authenticated.__ Any data the promise resolves with will
+      be saved in and accessible via the session service's `data.authenticated`
+      property (see {{#crossLink "SessionService/data:property"}}{{/crossLink}}).
+      A rejecting promise indicates that authentication failed and will result in
+      the session remaining unauthenticated.
+       The `BaseAuthenticator`'s implementation always returns a rejecting promise
+      and thus never authenticates the session. __This method must be overridden
+      in subclasses__.
+       @method authenticate
+      @param {Any} [...args] The arguments that the authenticator requires to authenticate the session
+      @return {Ember.RSVP.Promise} A promise that when it resolves results in the session becoming authenticated
+      @public
+    */
+    authenticate: function authenticate() {
+      return Ember.RSVP.reject();
+    },
+
+
+    /**
+      This method is invoked as a callback when the session is invalidated. While
+      the session will invalidate itself and clear all authenticated session data,
+      it might be necessary for some authenticators to perform additional tasks
+      (e.g. invalidating an access token on the server side).
+       __This method returns a promise. A resolving promise will result in the
+      session becoming unauthenticated.__ A rejecting promise will result in
+      invalidation being intercepted and the session remaining authenticated.
+       The `BaseAuthenticator`'s implementation always returns a resolving promise
+      and thus never intercepts session invalidation. __This method doesn't have
+      to be overridden in custom authenticators__ if no actions need to be
+      performed on session invalidation.
+       @method invalidate
+      @param {Object} data The current authenticated session data
+      @param {Array} ...args additional arguments as required by the authenticator
+      @return {Ember.RSVP.Promise} A promise that when it resolves results in the session being invalidated
+      @public
+    */
+    invalidate: function invalidate() {
+      return Ember.RSVP.resolve();
+    }
+  });
+});
+;define('ember-simple-auth/authenticators/devise', ['exports', 'ember-simple-auth/authenticators/base', 'fetch'], function (exports, _base, _fetch) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+
+
+  var assign = Ember.assign || Ember.merge;
+
+  var JSON_CONTENT_TYPE = 'application/json';
+
+  /**
+    Authenticator that works with the Ruby gem
+    [devise](https://github.com/plataformatec/devise).
+  
+    __As token authentication is not actually part of devise anymore, the server
+    needs to implement some customizations__ to work with this authenticator -
+    see [this gist](https://gist.github.com/josevalim/fb706b1e933ef01e4fb6).
+  
+    @class DeviseAuthenticator
+    @module ember-simple-auth/authenticators/devise
+    @extends BaseAuthenticator
+    @public
+  */
+  exports.default = _base.default.extend({
+    /**
+      The endpoint on the server that the authentication request is sent to.
+       @property serverTokenEndpoint
+      @type String
+      @default '/users/sign_in'
+      @public
+    */
+    serverTokenEndpoint: '/users/sign_in',
+
+    /**
+      The devise resource name. __This will be used in the request and also be
+      expected in the server's response.__
+       @property resourceName
+      @type String
+      @default 'user'
+      @public
+    */
+    resourceName: 'user',
+
+    /**
+      The token attribute name. __This will be used in the request and also be
+      expected in the server's response.__
+       @property tokenAttributeName
+      @type String
+      @default 'token'
+      @public
+    */
+    tokenAttributeName: 'token',
+
+    /**
+      The identification attribute name. __This will be used in the request and
+      also be expected in the server's response.__
+       @property identificationAttributeName
+      @type String
+      @default 'email'
+      @public
+    */
+    identificationAttributeName: 'email',
+
+    /**
+      When authentication fails, the rejection callback is provided with the whole
+      Fetch API [Response](https://fetch.spec.whatwg.org/#response-class) object
+      instead of its responseJSON or responseText.
+       This is useful for cases when the backend provides additional context not
+      available in the response body.
+       @property rejectWithXhr
+      @type Boolean
+      @default false
+      @deprecated DeviseAuthenticator/rejectWithResponse:property
+      @public
+    */
+    rejectWithXhr: Ember.computed.deprecatingAlias('rejectWithResponse', {
+      id: 'ember-simple-auth.authenticator.reject-with-xhr',
+      until: '2.0.0'
+    }),
+
+    /**
+      When authentication fails, the rejection callback is provided with the whole
+      Fetch API [Response](https://fetch.spec.whatwg.org/#response-class) object
+      instead of its responseJSON or responseText.
+       This is useful for cases when the backend provides additional context not
+      available in the response body.
+       @property rejectWithResponse
+      @type Boolean
+      @default false
+      @public
+    */
+    rejectWithResponse: false,
+
+    /**
+      Restores the session from a session data object; __returns a resolving
+      promise when there are non-empty
+      {{#crossLink "DeviseAuthenticator/tokenAttributeName:property"}}token{{/crossLink}}
+      and
+      {{#crossLink "DeviseAuthenticator/identificationAttributeName:property"}}identification{{/crossLink}}
+      values in `data`__ and a rejecting promise otherwise.
+       @method restore
+      @param {Object} data The data to restore the session from
+      @return {Ember.RSVP.Promise} A promise that when it resolves results in the session becoming or remaining authenticated
+      @public
+    */
+    restore: function restore(data) {
+      // eslint-disable-next-line prefer-promise-reject-errors
+      return this._validate(data) ? Ember.RSVP.Promise.resolve(data) : Ember.RSVP.Promise.reject();
+    },
+
+
+    /**
+      Authenticates the session with the specified `identification` and
+      `password`; the credentials are `POST`ed to the
+      {{#crossLink "DeviseAuthenticator/serverTokenEndpoint:property"}}server{{/crossLink}}.
+      If the credentials are valid the server will responds with a
+      {{#crossLink "DeviseAuthenticator/tokenAttributeName:property"}}token{{/crossLink}}
+      and
+      {{#crossLink "DeviseAuthenticator/identificationAttributeName:property"}}identification{{/crossLink}}.
+      __If the credentials are valid and authentication succeeds, a promise that
+      resolves with the server's response is returned__, otherwise a promise that
+      rejects with the server error is returned.
+       @method authenticate
+      @param {String} identification The user's identification
+      @param {String} password The user's password
+      @return {Ember.RSVP.Promise} A promise that when it resolves results in the session becoming authenticated
+      @public
+    */
+    authenticate: function authenticate(identification, password) {
+      var _this = this;
+
+      return new Ember.RSVP.Promise(function (resolve, reject) {
+        var useResponse = _this.get('rejectWithResponse');
+
+        var _getProperties = _this.getProperties('resourceName', 'identificationAttributeName', 'tokenAttributeName'),
+            resourceName = _getProperties.resourceName,
+            identificationAttributeName = _getProperties.identificationAttributeName,
+            tokenAttributeName = _getProperties.tokenAttributeName;
+
+        var data = {};
+        data[resourceName] = { password: password };
+        data[resourceName][identificationAttributeName] = identification;
+
+        _this.makeRequest(data).then(function (response) {
+          if (response.ok) {
+            response.json().then(function (json) {
+              if (_this._validate(json)) {
+                var _resourceName = _this.get('resourceName');
+                var _json = json[_resourceName] ? json[_resourceName] : json;
+                Ember.run(null, resolve, _json);
+              } else {
+                Ember.run(null, reject, 'Check that server response includes ' + tokenAttributeName + ' and ' + identificationAttributeName);
+              }
+            });
+          } else {
+            if (useResponse) {
+              Ember.run(null, reject, response);
+            } else {
+              response.json().then(function (json) {
+                return Ember.run(null, reject, json);
+              });
+            }
+          }
+        }).catch(function (error) {
+          return Ember.run(null, reject, error);
+        });
+      });
+    },
+
+
+    /**
+      Does nothing
+       @method invalidate
+      @return {Ember.RSVP.Promise} A resolving promise
+      @public
+    */
+    invalidate: function invalidate() {
+      return Ember.RSVP.Promise.resolve();
+    },
+
+
+    /**
+      Makes a request to the Devise server using
+      [ember-fetch](https://github.com/stefanpenner/ember-fetch).
+       @method makeRequest
+      @param {Object} data The request data
+      @param {Object} options request options that are passed to `fetch`
+      @return {Promise} The promise returned by `fetch`
+      @protected
+    */
+    makeRequest: function makeRequest(data) {
+      var options = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : {};
+
+      var url = options.url || this.get('serverTokenEndpoint');
+      var requestOptions = {};
+      var body = JSON.stringify(data);
+      assign(requestOptions, {
+        body: body,
+        method: 'POST',
+        headers: {
+          'accept': JSON_CONTENT_TYPE,
+          'content-type': JSON_CONTENT_TYPE
+        }
+      });
+      assign(requestOptions, options || {});
+
+      return (0, _fetch.default)(url, requestOptions);
+    },
+    _validate: function _validate(data) {
+      var tokenAttributeName = this.get('tokenAttributeName');
+      var identificationAttributeName = this.get('identificationAttributeName');
+      var resourceName = this.get('resourceName');
+      var _data = data[resourceName] ? data[resourceName] : data;
+
+      return !Ember.isEmpty(_data[tokenAttributeName]) && !Ember.isEmpty(_data[identificationAttributeName]);
+    }
+  });
+});
+;define('ember-simple-auth/authenticators/oauth2-implicit-grant', ['exports', 'ember-simple-auth/authenticators/base'], function (exports, _base) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = _base.default.extend({
+    /**
+     Restores the session from a session data object; __will return a resolving
+     promise when there is a non-empty `access_token` in the session data__ and
+     a rejecting promise otherwise.
+      @method restore
+     @param {Object} data The data to restore the session from
+     @return {Ember.RSVP.Promise} A promise that when it resolves results in the session becoming or remaining authenticated
+     @public
+     */
+    restore: function restore(data) {
+      var _this = this;
+
+      return new Ember.RSVP.Promise(function (resolve, reject) {
+        if (!_this._validateData(data)) {
+          return reject('Could not restore session - "access_token" missing.');
+        }
+
+        return resolve(data);
+      });
+    },
+
+
+    /**
+     Authenticates the session using the specified location `hash`
+     (see https://tools.ietf.org/html/rfc6749#section-4.2.2).
+      __If the access token is valid and thus authentication succeeds, a promise that
+     resolves with the access token is returned__, otherwise a promise that rejects
+     with the error code as returned by the server is returned
+     (see https://tools.ietf.org/html/rfc6749#section-4.2.2.1).
+      @method authenticate
+     @param {Object} hash The location hash
+     @return {Ember.RSVP.Promise} A promise that when it resolves results in the session becoming authenticated
+     @public
+     */
+    authenticate: function authenticate(hash) {
+      var _this2 = this;
+
+      return new Ember.RSVP.Promise(function (resolve, reject) {
+        if (hash.error) {
+          reject(hash.error);
+        } else if (!_this2._validateData(hash)) {
+          reject('Invalid auth params - "access_token" missing.');
+        } else {
+          resolve(hash);
+        }
+      });
+    },
+
+
+    /**
+     This method simply returns a resolving promise.
+      @method invalidate
+     @return {Ember.RSVP.Promise} A promise that when it resolves results in the session being invalidated
+     @public
+     */
+    invalidate: function invalidate() {
+      return Ember.RSVP.Promise.resolve();
+    },
+    _validateData: function _validateData(data) {
+      // see https://tools.ietf.org/html/rfc6749#section-4.2.2
+
+      return !Ember.isEmpty(data) && !Ember.isEmpty(data.access_token);
+    }
+  });
+});
+;define('ember-simple-auth/authenticators/oauth2-password-grant', ['exports', 'ember-simple-auth/authenticators/base', 'fetch'], function (exports, _base, _fetch) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+
+
+  var assign = Ember.assign || Ember.merge;
+  var keys = Object.keys || Ember.keys; // Ember.keys deprecated in 1.13
+
+  /**
+    Authenticator that conforms to OAuth 2
+    ([RFC 6749](http://tools.ietf.org/html/rfc6749)), specifically the _"Resource
+    Owner Password Credentials Grant Type"_.
+  
+    This authenticator also automatically refreshes access tokens (see
+    [RFC 6749, section 6](http://tools.ietf.org/html/rfc6749#section-6)) if the
+    server supports it.
+  
+    @class OAuth2PasswordGrantAuthenticator
+    @module ember-simple-auth/authenticators/oauth2-password-grant
+    @extends BaseAuthenticator
+    @public
+  */
+  exports.default = _base.default.extend({
+    /**
+      Triggered when the authenticator refreshed the access token (see
+      [RFC 6749, section 6](http://tools.ietf.org/html/rfc6749#section-6)).
+       @event sessionDataUpdated
+      @param {Object} data The updated session data
+      @public
+    */
+
+    /**
+      The client_id to be sent to the authentication server (see
+      https://tools.ietf.org/html/rfc6749#appendix-A.1). __This should only be
+      used for statistics or logging etc. as it cannot actually be trusted since
+      it could have been manipulated on the client!__
+       @property clientId
+      @type String
+      @default null
+      @public
+    */
+    clientId: null,
+
+    /**
+      The endpoint on the server that authentication and token refresh requests
+      are sent to.
+       @property serverTokenEndpoint
+      @type String
+      @default '/token'
+      @public
+    */
+    serverTokenEndpoint: '/token',
+
+    /**
+      The endpoint on the server that token revocation requests are sent to. Only
+      set this if the server actually supports token revocation. If this is
+      `null`, the authenticator will not revoke tokens on session invalidation.
+       __If token revocation is enabled but fails, session invalidation will be
+      intercepted and the session will remain authenticated (see
+      {{#crossLink "OAuth2PasswordGrantAuthenticator/invalidate:method"}}{{/crossLink}}).__
+       @property serverTokenRevocationEndpoint
+      @type String
+      @default null
+      @public
+    */
+    serverTokenRevocationEndpoint: null,
+
+    /**
+      Sets whether the authenticator automatically refreshes access tokens if the
+      server supports it.
+       @property refreshAccessTokens
+      @type Boolean
+      @default true
+      @public
+    */
+    refreshAccessTokens: true,
+
+    /**
+      The offset time in milliseconds to refresh the access token. This must
+      return a random number. This randomization is needed because in case of
+      multiple tabs, we need to prevent the tabs from sending refresh token
+      request at the same exact moment.
+       __When overriding this property, make sure to mark the overridden property
+      as volatile so it will actually have a different value each time it is
+      accessed.__
+       @property tokenRefreshOffset
+      @type Integer
+      @default a random number between 5 and 10
+      @public
+    */
+    tokenRefreshOffset: Ember.computed(function () {
+      var min = 5;
+      var max = 10;
+
+      return (Math.floor(Math.random() * (max - min)) + min) * 1000;
+    }).volatile(),
+
+    _refreshTokenTimeout: null,
+
+    _clientIdHeader: Ember.computed('clientId', function () {
+      var clientId = this.get('clientId');
+
+      if (!Ember.isEmpty(clientId)) {
+        var base64ClientId = window.base64.encode(clientId.concat(':'));
+        return { Authorization: 'Basic ' + base64ClientId };
+      }
+    }),
+
+    /**
+      When authentication fails, the rejection callback is provided with the whole
+      Fetch API [Response](https://fetch.spec.whatwg.org/#response-class) object
+      instead of its responseJSON or responseText.
+       This is useful for cases when the backend provides additional context not
+      available in the response body.
+       @property rejectWithXhr
+      @type Boolean
+      @default false
+      @deprecated OAuth2PasswordGrantAuthenticator/rejectWithResponse:property
+      @public
+    */
+    rejectWithXhr: Ember.computed.deprecatingAlias('rejectWithResponse', {
+      id: 'ember-simple-auth.authenticator.reject-with-xhr',
+      until: '2.0.0'
+    }),
+
+    /**
+      When authentication fails, the rejection callback is provided with the whole
+      Fetch API [Response](https://fetch.spec.whatwg.org/#response-class) object
+      instead of its responseJSON or responseText.
+       This is useful for cases when the backend provides additional context not
+      available in the response body.
+       @property rejectWithResponse
+      @type Boolean
+      @default false
+      @public
+    */
+    rejectWithResponse: false,
+
+    /**
+      Restores the session from a session data object; __will return a resolving
+      promise when there is a non-empty `access_token` in the session data__ and
+      a rejecting promise otherwise.
+       If the server issues
+      [expiring access tokens](https://tools.ietf.org/html/rfc6749#section-5.1)
+      and there is an expired access token in the session data along with a
+      refresh token, the authenticator will try to refresh the access token and
+      return a promise that resolves with the new access token if the refresh was
+      successful. If there is no refresh token or the token refresh is not
+      successful, a rejecting promise will be returned.
+       @method restore
+      @param {Object} data The data to restore the session from
+      @return {Ember.RSVP.Promise} A promise that when it resolves results in the session becoming or remaining authenticated
+      @public
+    */
+    restore: function restore(data) {
+      var _this = this;
+
+      return new Ember.RSVP.Promise(function (resolve, reject) {
+        var now = new Date().getTime();
+        var refreshAccessTokens = _this.get('refreshAccessTokens');
+        if (!Ember.isEmpty(data['expires_at']) && data['expires_at'] < now) {
+          if (refreshAccessTokens) {
+            _this._refreshAccessToken(data['expires_in'], data['refresh_token']).then(resolve, reject);
+          } else {
+            reject();
+          }
+        } else {
+          if (!_this._validate(data)) {
+            reject();
+          } else {
+            _this._scheduleAccessTokenRefresh(data['expires_in'], data['expires_at'], data['refresh_token']);
+            resolve(data);
+          }
+        }
+      });
+    },
+
+
+    /**
+      Authenticates the session with the specified `identification`, `password`
+      and optional `scope`; issues a `POST` request to the
+      {{#crossLink "OAuth2PasswordGrantAuthenticator/serverTokenEndpoint:property"}}{{/crossLink}}
+      and receives the access token in response (see
+      http://tools.ietf.org/html/rfc6749#section-4.3).
+       __If the credentials are valid (and the optionally requested scope is
+      granted) and thus authentication succeeds, a promise that resolves with the
+      server's response is returned__, otherwise a promise that rejects with the
+      error as returned by the server is returned.
+       __If the
+      [server supports it](https://tools.ietf.org/html/rfc6749#section-5.1), this
+      method also schedules refresh requests for the access token before it
+      expires.__
+       @method authenticate
+      @param {String} identification The resource owner username
+      @param {String} password The resource owner password
+      @param {String|Array} scope The scope of the access request (see [RFC 6749, section 3.3](http://tools.ietf.org/html/rfc6749#section-3.3))
+      @param {Object} headers Optional headers that particular backends may require (for example sending 2FA challenge responses)
+      @return {Ember.RSVP.Promise} A promise that when it resolves results in the session becoming authenticated
+      @public
+    */
+    authenticate: function authenticate(identification, password) {
+      var _this2 = this;
+
+      var scope = arguments.length > 2 && arguments[2] !== undefined ? arguments[2] : [];
+      var headers = arguments.length > 3 && arguments[3] !== undefined ? arguments[3] : {};
+
+      return new Ember.RSVP.Promise(function (resolve, reject) {
+        var data = { 'grant_type': 'password', username: identification, password: password };
+        var serverTokenEndpoint = _this2.get('serverTokenEndpoint');
+        var useResponse = _this2.get('rejectWithResponse');
+        var scopesString = Ember.makeArray(scope).join(' ');
+        if (!Ember.isEmpty(scopesString)) {
+          data.scope = scopesString;
+        }
+        _this2.makeRequest(serverTokenEndpoint, data, headers).then(function (response) {
+          Ember.run(function () {
+            if (!_this2._validate(response)) {
+              reject('access_token is missing in server response');
+            }
+
+            var expiresAt = _this2._absolutizeExpirationTime(response['expires_in']);
+            _this2._scheduleAccessTokenRefresh(response['expires_in'], expiresAt, response['refresh_token']);
+            if (!Ember.isEmpty(expiresAt)) {
+              response = assign(response, { 'expires_at': expiresAt });
+            }
+
+            resolve(response);
+          });
+        }, function (response) {
+          Ember.run(null, reject, useResponse ? response : response.responseJSON || response.responseText);
+        });
+      });
+    },
+
+
+    /**
+      If token revocation is enabled, this will revoke the access token (and the
+      refresh token if present). If token revocation succeeds, this method
+      returns a resolving promise, otherwise it will return a rejecting promise,
+      thus intercepting session invalidation.
+       If token revocation is not enabled this method simply returns a resolving
+      promise.
+       @method invalidate
+      @param {Object} data The current authenticated session data
+      @return {Ember.RSVP.Promise} A promise that when it resolves results in the session being invalidated
+      @public
+    */
+    invalidate: function invalidate(data) {
+      var _this3 = this;
+
+      var serverTokenRevocationEndpoint = this.get('serverTokenRevocationEndpoint');
+      function success(resolve) {
+        Ember.run.cancel(this._refreshTokenTimeout);
+        delete this._refreshTokenTimeout;
+        resolve();
+      }
+      return new Ember.RSVP.Promise(function (resolve) {
+        if (Ember.isEmpty(serverTokenRevocationEndpoint)) {
+          success.apply(_this3, [resolve]);
+        } else {
+          var requests = [];
+          Ember.A(['access_token', 'refresh_token']).forEach(function (tokenType) {
+            var token = data[tokenType];
+            if (!Ember.isEmpty(token)) {
+              requests.push(_this3.makeRequest(serverTokenRevocationEndpoint, {
+                'token_type_hint': tokenType, token: token
+              }));
+            }
+          });
+          var succeed = function succeed() {
+            success.apply(_this3, [resolve]);
+          };
+          Ember.RSVP.all(requests).then(succeed, succeed);
+        }
+      });
+    },
+
+
+    /**
+      Makes a request to the OAuth 2.0 server.
+       @method makeRequest
+      @param {String} url The request URL
+      @param {Object} data The request data
+      @param {Object} headers Additional headers to send in request
+      @return {Promise} A promise that resolves with the response object
+      @protected
+    */
+    makeRequest: function makeRequest(url, data) {
+      var headers = arguments.length > 2 && arguments[2] !== undefined ? arguments[2] : {};
+
+      headers['Content-Type'] = 'application/x-www-form-urlencoded';
+
+      var body = keys(data).map(function (key) {
+        return encodeURIComponent(key) + '=' + encodeURIComponent(data[key]);
+      }).join('&');
+
+      var options = {
+        body: body,
+        headers: headers,
+        method: 'POST'
+      };
+
+      var clientIdHeader = this.get('_clientIdHeader');
+      if (!Ember.isEmpty(clientIdHeader)) {
+        Ember.merge(options.headers, clientIdHeader);
+      }
+
+      return new Ember.RSVP.Promise(function (resolve, reject) {
+        (0, _fetch.default)(url, options).then(function (response) {
+          response.text().then(function (text) {
+            try {
+              var json = JSON.parse(text);
+              if (!response.ok) {
+                response.responseJSON = json;
+                reject(response);
+              } else {
+                resolve(json);
+              }
+            } catch (SyntaxError) {
+              response.responseText = text;
+              reject(response);
+            }
+          });
+        }).catch(reject);
+      });
+    },
+    _scheduleAccessTokenRefresh: function _scheduleAccessTokenRefresh(expiresIn, expiresAt, refreshToken) {
+      var refreshAccessTokens = this.get('refreshAccessTokens');
+      if (refreshAccessTokens) {
+        var now = new Date().getTime();
+        if (Ember.isEmpty(expiresAt) && !Ember.isEmpty(expiresIn)) {
+          expiresAt = new Date(now + expiresIn * 1000).getTime();
+        }
+        var offset = this.get('tokenRefreshOffset');
+        if (!Ember.isEmpty(refreshToken) && !Ember.isEmpty(expiresAt) && expiresAt > now - offset) {
+          Ember.run.cancel(this._refreshTokenTimeout);
+          delete this._refreshTokenTimeout;
+          if (!Ember.testing) {
+            this._refreshTokenTimeout = Ember.run.later(this, this._refreshAccessToken, expiresIn, refreshToken, expiresAt - now - offset);
+          }
+        }
+      }
+    },
+    _refreshAccessToken: function _refreshAccessToken(expiresIn, refreshToken) {
+      var _this4 = this;
+
+      var data = { 'grant_type': 'refresh_token', 'refresh_token': refreshToken };
+      var serverTokenEndpoint = this.get('serverTokenEndpoint');
+      return new Ember.RSVP.Promise(function (resolve, reject) {
+        _this4.makeRequest(serverTokenEndpoint, data).then(function (response) {
+          Ember.run(function () {
+            expiresIn = response['expires_in'] || expiresIn;
+            refreshToken = response['refresh_token'] || refreshToken;
+            var expiresAt = _this4._absolutizeExpirationTime(expiresIn);
+            var data = assign(response, { 'expires_in': expiresIn, 'expires_at': expiresAt, 'refresh_token': refreshToken });
+            _this4._scheduleAccessTokenRefresh(expiresIn, null, refreshToken);
+            _this4.trigger('sessionDataUpdated', data);
+            resolve(data);
+          });
+        }, function (response) {
+          (true && Ember.warn('Access token could not be refreshed - server responded with ' + response.responseJSON + '.', false, { id: 'ember-simple-auth.failedOAuth2TokenRefresh' }));
+
+          reject();
+        });
+      });
+    },
+    _absolutizeExpirationTime: function _absolutizeExpirationTime(expiresIn) {
+      if (!Ember.isEmpty(expiresIn)) {
+        return new Date(new Date().getTime() + expiresIn * 1000).getTime();
+      }
+    },
+    _validate: function _validate(data) {
+      return !Ember.isEmpty(data['access_token']);
+    }
+  });
+});
+;define('ember-simple-auth/authenticators/test', ['exports', 'ember-simple-auth/authenticators/base'], function (exports, _base) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = _base.default.extend({
+    restore: function restore(data) {
+      return Ember.RSVP.resolve(data);
+    },
+    authenticate: function authenticate(data) {
+      return Ember.RSVP.resolve(data);
+    },
+    invalidate: function invalidate() {
+      return Ember.RSVP.resolve();
+    }
+  });
+});
+;define('ember-simple-auth/authenticators/torii', ['exports', 'ember-simple-auth/authenticators/base'], function (exports, _base) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = _base.default.extend({
+    _provider: null,
+
+    /**
+      Restores the session by calling the torii provider's `fetch` method.
+       __Many torii providers do not implement the `fetch` method__. If the
+      provider in use does not implement the method simply add it as follows:
+       ```js
+      // app/torii-providers/facebook.js
+      import FacebookOauth2Provider from 'torii/providers/facebook-oauth2';
+       export default FacebookOauth2Provider.extend({
+        fetch(data) {
+          return data;
+        }
+      });
+      ```
+       @method restore
+      @param {Object} data The data to restore the session from
+      @return {Ember.RSVP.Promise} A promise that when it resolves results in the session becoming or remaining authenticated
+      @public
+    */
+    restore: function restore(data) {
+      var _this = this;
+
+      this._assertToriiIsPresent();
+
+      data = data || {};
+      if (!Ember.isEmpty(data.provider)) {
+        var _data = data,
+            provider = _data.provider;
+
+
+        return this.get('torii').fetch(data.provider, data).then(function (fetchedData) {
+          _this._authenticateWithProvider(provider, fetchedData);
+          return Ember.assign(data, fetchedData);
+        }, function () {
+          return delete _this._provider;
+        });
+      } else {
+        delete this._provider;
+        return Ember.RSVP.reject();
+      }
+    },
+
+
+    /**
+      Authenticates the session by opening the specified torii provider. For more
+      documentation on torii and its providers abstraction, see the
+      [project's README](https://github.com/Vestorly/torii#readme), specifically
+      the
+      [section on providers](https://github.com/Vestorly/torii#configuring-a-torii-provider).
+       @method authenticate
+      @param {String} provider The torii provider to authenticate the session with
+      @param {Object} options The options to pass to the torii provider
+      @return {Ember.RSVP.Promise} A promise that when it resolves results in the session becoming authenticated
+      @public
+    */
+    authenticate: function authenticate(provider, options) {
+      var _this2 = this;
+
+      this._assertToriiIsPresent();
+
+      return this.get('torii').open(provider, options || {}).then(function (data) {
+        _this2._authenticateWithProvider(provider, data);
+        return data;
+      });
+    },
+
+
+    /**
+      Closes the torii provider. If the provider is successfully closed, this
+      method returns a resolving promise, otherwise it will return a rejecting
+      promise, thus intercepting session invalidation.
+       @method invalidate
+      @return {Ember.RSVP.Promise} A promise that when it resolves results in the session being invalidated
+      @public
+    */
+    invalidate: function invalidate(data) {
+      var _this3 = this;
+
+      return this.get('torii').close(this._provider, data).then(function () {
+        delete _this3._provider;
+      });
+    },
+    _authenticateWithProvider: function _authenticateWithProvider(provider, data) {
+      data.provider = provider;
+      this._provider = data.provider;
+    },
+    _assertToriiIsPresent: function _assertToriiIsPresent() {
+      var torii = this.get('torii');
+      (true && !(Ember.isPresent(torii)) && Ember.assert('You are trying to use the torii authenticator but torii is not available. Inject torii into the authenticator with "torii: Ember.inject.service()".', Ember.isPresent(torii)));
+    }
+  });
+});
+;define('ember-simple-auth/authorizers/base', ['exports'], function (exports) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = Ember.Object.extend({
+    init: function init() {
+      this._super.apply(this, arguments);
+      Ember.deprecate('Ember Simple Auth: Authorizers are deprecated in favour of setting headers directly.', false, {
+        id: 'ember-simple-auth.baseAuthorizer',
+        until: '2.0.0',
+        url: 'https://github.com/simplabs/ember-simple-auth#deprecation-of-authorizers'
+      });
+    },
+
+    /**
+      Authorizes a block of code. This method will be invoked by the session
+      service's {{#crossLink "SessionService/authorize:method"}}{{/crossLink}}
+      method which will pass the current authenticated session data (see
+      {{#crossLink "SessionService/data:property"}}{{/crossLink}}) and a block.
+      Depending on the mechanism it implements, the authorizer transforms the
+      session data into authorization data and invokes the block with that data.
+       `BaseAuthorizer`'s implementation does nothing. __This method must be
+      overridden in custom authorizers.__
+       @method authorize
+      @param {Object} data The current authenticated session data
+      @param {Function} block The callback to call with the authorization data
+      @public
+    */
+    authorize: function authorize() {}
+  });
+});
+;define('ember-simple-auth/authorizers/devise', ['exports', 'ember-simple-auth/authorizers/base'], function (exports, _base) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = _base.default.extend({
+    /**
+      The token attribute name.
+       @property tokenAttributeName
+      @type String
+      @default 'token'
+      @public
+    */
+    tokenAttributeName: 'token',
+
+    /**
+      The identification attribute name.
+       @property identificationAttributeName
+      @type String
+      @default 'email'
+      @public
+    */
+    identificationAttributeName: 'email',
+
+    /**
+      Includes the user's token (see
+      {{#crossLink "DeviseAuthenticator/tokenAttributeName:property"}}{{/crossLink}})
+      and identification (see
+      {{#crossLink "DeviseAuthenticator/identificationAttributeName:property"}}{{/crossLink}})
+      in the `Authorization` header.
+       @method authorize
+      @param {Object} data The data that the session currently holds
+      @param {Function} block(headerName,headerContent) The callback to call with the authorization data; will receive the header name and header content as arguments.
+      @public
+    */
+    authorize: function authorize(data, block) {
+      var _getProperties = this.getProperties('tokenAttributeName', 'identificationAttributeName'),
+          tokenAttributeName = _getProperties.tokenAttributeName,
+          identificationAttributeName = _getProperties.identificationAttributeName;
+
+      var userToken = data[tokenAttributeName];
+      var userIdentification = data[identificationAttributeName];
+
+      if (!Ember.isEmpty(userToken) && !Ember.isEmpty(userIdentification)) {
+        var authData = tokenAttributeName + '="' + userToken + '", ' + identificationAttributeName + '="' + userIdentification + '"';
+        block('Authorization', 'Token ' + authData);
+      }
+    }
+  });
+});
+;define('ember-simple-auth/authorizers/oauth2-bearer', ['exports', 'ember-simple-auth/authorizers/base'], function (exports, _base) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = _base.default.extend({
+    /**
+      Includes the access token from the session data into the `Authorization`
+      header as a Bearer token, e.g.:
+       ```
+      Authorization: Bearer 234rtgjneroigne4
+      ```
+       @method authorize
+      @param {Object} data The data that the session currently holds
+      @param {Function} block(headerName,headerContent) The callback to call with the authorization data; will receive the header name and header content as arguments
+      @public
+    */
+    authorize: function authorize(data, block) {
+      var accessToken = data['access_token'];
+
+      if (!Ember.isEmpty(accessToken)) {
+        block('Authorization', 'Bearer ' + accessToken);
+      }
+    }
+  });
+});
+;define('ember-simple-auth/configuration', ['exports'], function (exports) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+
+
+  var DEFAULTS = {
+    baseURL: '',
+    authenticationRoute: 'login',
+    routeAfterAuthentication: 'index',
+    routeIfAlreadyAuthenticated: 'index'
+  };
+
+  /**
+    Ember Simple Auth's configuration object.
+  
+    @class Configuration
+    @extends Object
+    @module ember-simple-auth/configuration
+    @public
+  */
+  exports.default = {
+    /**
+      The base URL of the application as configured in `config/environment.js`.
+       @property baseURL
+      @readOnly
+      @static
+      @type String
+      @default ''
+      @public
+    */
+    baseURL: DEFAULTS.baseURL,
+
+    /**
+      The route to transition to for authentication. The
+      {{#crossLink "AuthenticatedRouteMixin"}}{{/crossLink}} will transition to
+      this route when a route that implements the mixin is accessed when the
+      route is not authenticated.
+       @property authenticationRoute
+      @deprecated AuthenticatedRouteMixin/authenticationRoute:property
+      @readOnly
+      @static
+      @type String
+      @default 'login'
+      @public
+    */
+    authenticationRoute: DEFAULTS.authenticationRoute,
+
+    /**
+      The route to transition to after successful authentication.
+       @property routeAfterAuthentication
+      @deprecated ApplicationRouteMixin/routeAfterAuthentication:property
+      @readOnly
+      @static
+      @type String
+      @default 'index'
+      @public
+    */
+    routeAfterAuthentication: DEFAULTS.routeAfterAuthentication,
+
+    /**
+      The route to transition to if a route that implements the
+      {{#crossLink "UnauthenticatedRouteMixin"}}{{/crossLink}} is accessed when
+      the session is authenticated.
+       @property routeIfAlreadyAuthenticated
+      @deprecated UnauthenticatedRouteMixin/routeIfAlreadyAuthenticated:property
+      @readOnly
+      @static
+      @type String
+      @default 'index'
+      @public
+    */
+    routeIfAlreadyAuthenticated: DEFAULTS.routeIfAlreadyAuthenticated,
+
+    load: function load(config) {
+      for (var property in this) {
+        if (this.hasOwnProperty(property) && Ember.typeOf(this[property]) !== 'function') {
+          if (['authenticationRoute', 'routeAfterAuthentication', 'routeIfAlreadyAuthenticated'].indexOf(property) >= 0 && DEFAULTS[property] !== this[property]) {
+            Ember.deprecate('Ember Simple Auth: ' + property + ' should no longer be overridden in the configuration. Instead, override the ' + property + ' property in the route.', false, {
+              id: 'ember-simple-auth.configuration.routes',
+              until: '2.0.0'
+            });
+          }
+
+          this[property] = Ember.getWithDefault(config, property, DEFAULTS[property]);
+        }
+      }
+    }
+  };
+});
+;define('ember-simple-auth/initializers/setup-session-restoration', ['exports'], function (exports) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = setupSessionRestoration;
+  function setupSessionRestoration(registry) {
+    var ApplicationRoute = registry.resolveRegistration ? registry.resolveRegistration('route:application') : registry.resolve('route:application');
+
+    ApplicationRoute.reopen({
+      init: function init() {
+        this._super.apply(this, arguments);
+
+        var originalBeforeModel = this.beforeModel;
+        this.beforeModel = function () {
+          var _this = this,
+              _arguments = arguments;
+
+          var session = Ember.getOwner(this).lookup('session:main');
+
+          return session.restore().then(function () {
+            return originalBeforeModel.apply(_this, _arguments);
+          }, function () {
+            return originalBeforeModel.apply(_this, _arguments);
+          });
+        };
+      }
+    });
+  }
+});
+;define('ember-simple-auth/initializers/setup-session-service', ['exports', 'ember-simple-auth/utils/inject'], function (exports, _inject) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = setupSessionStore;
+  function setupSessionStore(registry) {
+    (0, _inject.default)(registry, 'service:session', 'session', 'session:main');
+  }
+});
+;define('ember-simple-auth/initializers/setup-session', ['exports', 'ember-simple-auth/internal-session', 'ember-simple-auth/session-stores/ephemeral', 'ember-simple-auth/utils/inject'], function (exports, _internalSession, _ephemeral, _inject) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = setupSession;
+  function setupSession(registry) {
+    registry.register('session:main', _internalSession.default);
+
+    var store = 'session-store:application';
+    if (Ember.testing) {
+      store = 'session-store:test';
+      registry.register(store, _ephemeral.default);
+    }
+
+    (0, _inject.default)(registry, 'session:main', 'store', store);
+  }
+});
+;define('ember-simple-auth/internal-session', ['exports'], function (exports) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+
+  function _toConsumableArray(arr) {
+    if (Array.isArray(arr)) {
+      for (var i = 0, arr2 = Array(arr.length); i < arr.length; i++) {
+        arr2[i] = arr[i];
+      }
+
+      return arr2;
+    } else {
+      return Array.from(arr);
+    }
+  }
+
+  var assign = Ember.assign || Ember.merge;
+
+  exports.default = Ember.ObjectProxy.extend(Ember.Evented, {
+    authenticator: null,
+    store: null,
+    isAuthenticated: false,
+    attemptedTransition: null,
+
+    init: function init() {
+      this._super.apply(this, arguments);
+      this.set('content', { authenticated: {} });
+      this._busy = false;
+      this._bindToStoreEvents();
+    },
+    authenticate: function authenticate(authenticatorFactory) {
+      var _this = this;
+
+      this._busy = true;
+      (true && !(!Ember.isEmpty(authenticatorFactory)) && Ember.assert('Session#authenticate requires the authenticator to be specified, was "' + authenticatorFactory + '"!', !Ember.isEmpty(authenticatorFactory)));
+
+      var authenticator = this._lookupAuthenticator(authenticatorFactory);
+      (true && !(!Ember.isNone(authenticator)) && Ember.assert('No authenticator for factory "' + authenticatorFactory + '" could be found!', !Ember.isNone(authenticator)));
+
+      for (var _len = arguments.length, args = Array(_len > 1 ? _len - 1 : 0), _key = 1; _key < _len; _key++) {
+        args[_key - 1] = arguments[_key];
+      }
+
+      return authenticator.authenticate.apply(authenticator, _toConsumableArray(args)).then(function (content) {
+        _this._busy = false;
+        return _this._setup(authenticatorFactory, content, true);
+      }, function (error) {
+        var rejectWithError = function rejectWithError() {
+          return Ember.RSVP.Promise.reject(error);
+        };
+
+        _this._busy = false;
+        return _this._clear().then(rejectWithError, rejectWithError);
+      });
+    },
+    invalidate: function invalidate() {
+      var _this2 = this;
+
+      this._busy = true;
+
+      if (!this.get('isAuthenticated')) {
+        this._busy = false;
+        return Ember.RSVP.Promise.resolve();
+      }
+
+      var authenticator = this._lookupAuthenticator(this.authenticator);
+      return authenticator.invalidate.apply(authenticator, [this.content.authenticated].concat(Array.prototype.slice.call(arguments))).then(function () {
+        authenticator.off('sessionDataUpdated');
+        _this2._busy = false;
+        return _this2._clear(true);
+      }, function (error) {
+        _this2.trigger('sessionInvalidationFailed', error);
+        _this2._busy = false;
+        return Ember.RSVP.Promise.reject(error);
+      });
+    },
+    restore: function restore() {
+      var _this3 = this;
+
+      this._busy = true;
+      var reject = function reject() {
+        return Ember.RSVP.Promise.reject();
+      };
+
+      return this._callStoreAsync('restore').then(function (restoredContent) {
+        var _ref = restoredContent.authenticated || {},
+            authenticatorFactory = _ref.authenticator;
+
+        if (authenticatorFactory) {
+          delete restoredContent.authenticated.authenticator;
+          var authenticator = _this3._lookupAuthenticator(authenticatorFactory);
+          return authenticator.restore(restoredContent.authenticated).then(function (content) {
+            _this3.set('content', restoredContent);
+            _this3._busy = false;
+            return _this3._setup(authenticatorFactory, content);
+          }, function (err) {
+            Ember.debug('The authenticator "' + authenticatorFactory + '" rejected to restore the session - invalidating\u2026');
+            if (err) {
+              Ember.debug(err);
+            }
+            _this3._busy = false;
+            return _this3._clearWithContent(restoredContent).then(reject, reject);
+          });
+        } else {
+          delete (restoredContent || {}).authenticated;
+          _this3._busy = false;
+          return _this3._clearWithContent(restoredContent).then(reject, reject);
+        }
+      }, function () {
+        _this3._busy = false;
+        return _this3._clear().then(reject, reject);
+      });
+    },
+    _callStoreAsync: function _callStoreAsync(method) {
+      var _store;
+
+      for (var _len2 = arguments.length, params = Array(_len2 > 1 ? _len2 - 1 : 0), _key2 = 1; _key2 < _len2; _key2++) {
+        params[_key2 - 1] = arguments[_key2];
+      }
+
+      var result = (_store = this.store)[method].apply(_store, _toConsumableArray(params));
+
+      if (typeof result === 'undefined' || typeof result.then === 'undefined') {
+        Ember.deprecate('Ember Simple Auth: Synchronous stores have been deprecated. Make sure your custom store\'s ' + method + ' method returns a promise.', false, {
+          id: 'ember-simple-auth.session-store.synchronous-' + method,
+          until: '2.0.0'
+        });
+        return Ember.RSVP.Promise.resolve(result);
+      } else {
+        return result;
+      }
+    },
+    _setup: function _setup(authenticator, authenticatedContent, trigger) {
+      var _this4 = this;
+
+      trigger = Boolean(trigger) && !this.get('isAuthenticated');
+      this.setProperties({
+        isAuthenticated: true,
+        authenticator: authenticator,
+        'content.authenticated': authenticatedContent
+      });
+      this._bindToAuthenticatorEvents();
+
+      return this._updateStore().then(function () {
+        if (trigger) {
+          _this4.trigger('authenticationSucceeded');
+        }
+      }, function () {
+        _this4.setProperties({
+          isAuthenticated: false,
+          authenticator: null,
+          'content.authenticated': {}
+        });
+      });
+    },
+    _clear: function _clear(trigger) {
+      var _this5 = this;
+
+      trigger = Boolean(trigger) && this.get('isAuthenticated');
+      this.setProperties({
+        isAuthenticated: false,
+        authenticator: null,
+        'content.authenticated': {}
+      });
+
+      return this._updateStore().then(function () {
+        if (trigger) {
+          _this5.trigger('invalidationSucceeded');
+        }
+      });
+    },
+    _clearWithContent: function _clearWithContent(content, trigger) {
+      this.set('content', content);
+      return this._clear(trigger);
+    },
+    setUnknownProperty: function setUnknownProperty(key, value) {
+      (true && !(key !== 'authenticated') && Ember.assert('"authenticated" is a reserved key used by Ember Simple Auth!', key !== 'authenticated'));
+
+      var result = this._super(key, value);
+      if (!/^_/.test(key)) {
+        this._updateStore();
+      }
+      return result;
+    },
+    _updateStore: function _updateStore() {
+      var data = this.content;
+      if (!Ember.isEmpty(this.authenticator)) {
+        Ember.set(data, 'authenticated', assign({ authenticator: this.authenticator }, data.authenticated || {}));
+      }
+      return this._callStoreAsync('persist', data);
+    },
+    _bindToAuthenticatorEvents: function _bindToAuthenticatorEvents() {
+      var _this6 = this;
+
+      var authenticator = this._lookupAuthenticator(this.authenticator);
+      authenticator.off('sessionDataUpdated');
+      authenticator.off('sessionDataInvalidated');
+      authenticator.on('sessionDataUpdated', function (content) {
+        _this6._setup(_this6.authenticator, content);
+      });
+      authenticator.on('sessionDataInvalidated', function () {
+        _this6._clear(true);
+      });
+    },
+    _bindToStoreEvents: function _bindToStoreEvents() {
+      var _this7 = this;
+
+      this.store.on('sessionDataUpdated', function (content) {
+        if (!_this7._busy) {
+          _this7._busy = true;
+
+          var _ref2 = content.authenticated || {},
+              authenticatorFactory = _ref2.authenticator;
+
+          if (authenticatorFactory) {
+            delete content.authenticated.authenticator;
+            var authenticator = _this7._lookupAuthenticator(authenticatorFactory);
+            authenticator.restore(content.authenticated).then(function (authenticatedContent) {
+              _this7.set('content', content);
+              _this7._busy = false;
+              _this7._setup(authenticatorFactory, authenticatedContent, true);
+            }, function (err) {
+              Ember.debug('The authenticator "' + authenticatorFactory + '" rejected to restore the session - invalidating\u2026');
+              if (err) {
+                Ember.debug(err);
+              }
+              _this7._busy = false;
+              _this7._clearWithContent(content, true);
+            });
+          } else {
+            _this7._busy = false;
+            _this7._clearWithContent(content, true);
+          }
+        }
+      });
+    },
+    _lookupAuthenticator: function _lookupAuthenticator(authenticator) {
+      return Ember.getOwner(this).lookup(authenticator);
+    }
+  });
+});
+;define('ember-simple-auth/mixins/application-route-mixin', ['exports', 'ember-simple-auth/configuration'], function (exports, _configuration) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+
+  var _slicedToArray = function () {
+    function sliceIterator(arr, i) {
+      var _arr = [];
+      var _n = true;
+      var _d = false;
+      var _e = undefined;
+
+      try {
+        for (var _i = arr[Symbol.iterator](), _s; !(_n = (_s = _i.next()).done); _n = true) {
+          _arr.push(_s.value);
+
+          if (i && _arr.length === i) break;
+        }
+      } catch (err) {
+        _d = true;
+        _e = err;
+      } finally {
+        try {
+          if (!_n && _i["return"]) _i["return"]();
+        } finally {
+          if (_d) throw _e;
+        }
+      }
+
+      return _arr;
+    }
+
+    return function (arr, i) {
+      if (Array.isArray(arr)) {
+        return arr;
+      } else if (Symbol.iterator in Object(arr)) {
+        return sliceIterator(arr, i);
+      } else {
+        throw new TypeError("Invalid attempt to destructure non-iterable instance");
+      }
+    };
+  }();
+
+  exports.default = Ember.Mixin.create({
+    /**
+      The session service.
+       @property session
+      @readOnly
+      @type SessionService
+      @public
+    */
+    session: Ember.inject.service('session'),
+
+    _isFastBoot: Ember.computed(function () {
+      var fastboot = Ember.getOwner(this).lookup('service:fastboot');
+
+      return fastboot ? fastboot.get('isFastBoot') : false;
+    }),
+
+    /**
+      The route to transition to after successful authentication.
+       @property routeAfterAuthentication
+      @type String
+      @default 'index'
+      @public
+    */
+    routeAfterAuthentication: Ember.computed(function () {
+      return _configuration.default.routeAfterAuthentication;
+    }),
+
+    init: function init() {
+      this._super.apply(this, arguments);
+      this._subscribeToSessionEvents();
+    },
+    _subscribeToSessionEvents: function _subscribeToSessionEvents() {
+      var _this = this,
+          _arguments = arguments;
+
+      Ember.A([['authenticationSucceeded', 'sessionAuthenticated'], ['invalidationSucceeded', 'sessionInvalidated']]).forEach(function (_ref) {
+        var _ref2 = _slicedToArray(_ref, 2),
+            event = _ref2[0],
+            method = _ref2[1];
+
+        _this.get('session').on(event, Ember.run.bind(_this, function () {
+          _this[method].apply(_this, _arguments);
+        }));
+      });
+    },
+
+
+    /**
+      This method handles the session's
+      {{#crossLink "SessionService/authenticationSucceeded:event"}}{{/crossLink}}
+      event. If there is a transition that was previously intercepted by the
+      {{#crossLink "AuthenticatedRouteMixin/beforeModel:method"}}
+      AuthenticatedRouteMixin's `beforeModel` method{{/crossLink}} it will retry
+      it. If there is no such transition, the `ember_simple_auth-redirectTarget`
+      cookie will be checked for a url that represents an attemptedTransition
+      that was aborted in Fastboot mode, otherwise this action transitions to the
+      {{#crossLink "Configuration/routeAfterAuthentication:property"}}{{/crossLink}}.
+        @method sessionAuthenticated
+      @public
+    */
+    sessionAuthenticated: function sessionAuthenticated() {
+      var attemptedTransition = this.get('session.attemptedTransition');
+      var cookies = Ember.getOwner(this).lookup('service:cookies');
+      var redirectTarget = cookies.read('ember_simple_auth-redirectTarget');
+
+      if (attemptedTransition) {
+        attemptedTransition.retry();
+        this.set('session.attemptedTransition', null);
+      } else if (redirectTarget) {
+        this.transitionTo(redirectTarget);
+        cookies.clear('ember_simple_auth-redirectTarget');
+      } else {
+        this.transitionTo(this.get('routeAfterAuthentication'));
+      }
+    },
+
+
+    /**
+      This method handles the session's
+      {{#crossLink "SessionService/invalidationSucceeded:event"}}{{/crossLink}}
+      event. __It reloads the Ember.js application__ by redirecting the browser
+      to the application's root URL so that all in-memory data (such as Ember
+      Data stores etc.) gets cleared.
+       If the Ember.js application will be used in an environment where the users
+      don't have direct access to any data stored on the client (e.g.
+      [cordova](http://cordova.apache.org)) this action can be overridden to e.g.
+      simply transition to the index route.
+       @method sessionInvalidated
+      @public
+    */
+    sessionInvalidated: function sessionInvalidated() {
+      if (!Ember.testing) {
+        if (this.get('_isFastBoot')) {
+          this.transitionTo(_configuration.default.baseURL);
+        } else {
+          window.location.replace(_configuration.default.baseURL);
+        }
+      }
+    }
+  });
+});
+;define('ember-simple-auth/mixins/authenticated-route-mixin', ['exports', 'ember-simple-auth/configuration'], function (exports, _configuration) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = Ember.Mixin.create({
+    /**
+      The session service.
+       @property session
+      @readOnly
+      @type SessionService
+      @public
+    */
+    session: Ember.inject.service('session'),
+
+    _isFastBoot: Ember.computed(function () {
+      var fastboot = Ember.getOwner(this).lookup('service:fastboot');
+
+      return fastboot ? fastboot.get('isFastBoot') : false;
+    }),
+
+    /**
+      The route to transition to for authentication. The
+      {{#crossLink "AuthenticatedRouteMixin"}}{{/crossLink}} will transition to
+      this route when a route that implements the mixin is accessed when the
+      route is not authenticated.
+       @property authenticationRoute
+      @type String
+      @default 'login'
+      @public
+    */
+    authenticationRoute: Ember.computed(function () {
+      return _configuration.default.authenticationRoute;
+    }),
+
+    /**
+      Checks whether the session is authenticated and if it is not aborts the
+      current transition and instead transitions to the
+      {{#crossLink "Configuration/authenticationRoute:property"}}{{/crossLink}}.
+      If the current transition is aborted, this method will save it in the
+      session service's
+      {{#crossLink "SessionService/attemptedTransition:property"}}{{/crossLink}}
+      property so that  it can be retried after the session is authenticated
+      (see
+      {{#crossLink "ApplicationRouteMixin/sessionAuthenticated:method"}}{{/crossLink}}).
+      If the transition is aborted in Fastboot mode, the transition's target
+      URL will be saved in a `ember_simple_auth-redirectTarget` cookie for use by
+      the browser after authentication is complete.
+       __If `beforeModel` is overridden in a route that uses this mixin, the route's
+     implementation must call `this._super(...arguments)`__ so that the mixin's
+     `beforeModel` method is actually executed.
+       @method beforeModel
+      @param {Transition} transition The transition that lead to this route
+      @public
+    */
+    beforeModel: function beforeModel(transition) {
+      if (!this.get('session.isAuthenticated')) {
+        if (this.get('_isFastBoot')) {
+          var fastboot = Ember.getOwner(this).lookup('service:fastboot');
+          var cookies = Ember.getOwner(this).lookup('service:cookies');
+
+          cookies.write('ember_simple_auth-redirectTarget', transition.intent.url, {
+            path: '/',
+            secure: fastboot.get('request.protocol') === 'https'
+          });
+        } else {
+          this.set('session.attemptedTransition', transition);
+        }
+
+        this.triggerAuthentication();
+      } else {
+        return this._super.apply(this, arguments);
+      }
+    },
+
+
+    /**
+      Triggers authentication; by default this method transitions to the
+      `authenticationRoute`. In case the application uses an authentication
+      mechanism that does not use an authentication route, this method can be
+      overridden.
+       @method triggerAuthentication
+      @protected
+    */
+    triggerAuthentication: function triggerAuthentication() {
+      var authenticationRoute = this.get('authenticationRoute');
+      (true && !(this.get('routeName') !== authenticationRoute) && Ember.assert('The route configured as Configuration.authenticationRoute cannot implement the AuthenticatedRouteMixin mixin as that leads to an infinite transitioning loop!', this.get('routeName') !== authenticationRoute));
+
+
+      this.transitionTo(authenticationRoute);
+    }
+  });
+});
+;define('ember-simple-auth/mixins/data-adapter-mixin', ['exports'], function (exports) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = Ember.Mixin.create({
+    /**
+      The session service.
+       @property session
+      @readOnly
+      @type SessionService
+      @public
+    */
+    session: Ember.inject.service('session'),
+
+    /**
+      The authorizer that is used to authorize API requests. The authorizer has
+      to call the authorization callback (see
+      {{#crossLink "BaseAuthorizer/authorize:method"}}{{/crossLink}}) with header
+      name and header content arguments. __This property must be overridden in
+      adapters using this mixin.__
+       @property authorizer
+      @type String
+      @default null
+      @public
+    */
+    authorizer: null,
+
+    /**
+      Defines a `beforeSend` hook (see http://api.jquery.com/jQuery.ajax/) that
+      injects a request header containing the authorization data as constructed
+      by the {{#crossLink "DataAdapterMixin/authorizer:property"}}{{/crossLink}}
+      (see
+      {{#crossLink "SessionService/authorize:method"}}{{/crossLink}}). The
+      specific header name and contents depend on the actual authorizer that is
+      used.
+       Until [emberjs/rfcs#171](https://github.com/emberjs/rfcs/pull/171)
+      gets resolved and [ds-improved-ajax](https://github.com/emberjs/data/pull/3099)
+      [feature flag](https://github.com/emberjs/data/blob/master/FEATURES.md#feature-flags)
+      is enabled, this method will be called for **every** ember-data version.
+      `headersForRequest` *should* replace it after the resolution of the RFC.
+       @method ajaxOptions
+      @protected
+    */
+    ajaxOptions: function ajaxOptions() {
+      var _this = this;
+
+      var hash = this._super.apply(this, arguments);
+      var beforeSend = hash.beforeSend;
+
+
+      hash.beforeSend = function (xhr) {
+        if (_this.get('authorizer')) {
+          var authorizer = _this.get('authorizer');
+          _this.get('session').authorize(authorizer, function (headerName, headerValue) {
+            xhr.setRequestHeader(headerName, headerValue);
+          });
+        } else {
+          _this.authorize(xhr);
+        }
+
+        if (beforeSend) {
+          beforeSend(xhr);
+        }
+      };
+      return hash;
+    },
+    authorize: function authorize() {
+      (true && !(false) && Ember.assert('The `authorize` method should be overridden in your application adapter. It should accept a single argument, the request object.'));
+    },
+
+
+    /**
+      Adds request headers containing the authorization data as constructed
+      by the {{#crossLink "DataAdapterMixin/authorizer:property"}}{{/crossLink}}.
+       Until [emberjs/rfcs#171](https://github.com/emberjs/rfcs/pull/171)
+      gets resolved and [ds-improved-ajax](https://github.com/emberjs/data/pull/3099)
+      [feature flag](https://github.com/emberjs/data/blob/master/FEATURES.md#feature-flags)
+      is enabled, this method will **not** be used.
+      See `ajaxOptions` instead.
+       @method headersForRequest
+      @protected
+     */
+    headersForRequest: function headersForRequest() {
+      var authorizer = this.get('authorizer');
+      (true && !(Ember.isPresent(authorizer)) && Ember.assert("You're using the DataAdapterMixin without specifying an authorizer. Please add `authorizer: 'authorizer:application'` to your adapter.", Ember.isPresent(authorizer)));
+
+
+      var headers = this._super.apply(this, arguments);
+      headers = Object(headers);
+      this.get('session').authorize(authorizer, function (headerName, headerValue) {
+        headers[headerName] = headerValue;
+      });
+      return headers;
+    },
+
+
+    /**
+      This method is called for every response that the adapter receives from the
+      API. If the response has a 401 status code it invalidates the session (see
+      {{#crossLink "SessionService/invalidate:method"}}{{/crossLink}}).
+       @method handleResponse
+      @param {Number} status The response status as received from the API
+      @param  {Object} headers HTTP headers as received from the API
+      @param {Any} payload The response body as received from the API
+      @param {Object} requestData the original request information
+      @protected
+    */
+    handleResponse: function handleResponse(status, headers, payload, requestData) {
+      this.ensureResponseAuthorized(status, headers, payload, requestData);
+      return this._super.apply(this, arguments);
+    },
+
+
+    /**
+     The default implementation for handleResponse.
+     If the response has a 401 status code it invalidates the session (see
+      {{#crossLink "SessionService/invalidate:method"}}{{/crossLink}}).
+      Override this method if you want custom invalidation logic for incoming responses.
+     @method ensureResponseAuthorized
+     @param {Number} status The response status as received from the API
+     @param  {Object} headers HTTP headers as received from the API
+     @param {Any} payload The response body as received from the API
+     @param {Object} requestData the original request information
+    */
+    ensureResponseAuthorized: function ensureResponseAuthorized(status /* ,headers, payload, requestData */) {
+      if (status === 401 && this.get('session.isAuthenticated')) {
+        this.get('session').invalidate();
+      }
+    }
+  });
+});
+;define('ember-simple-auth/mixins/oauth2-implicit-grant-callback-route-mixin', ['exports'], function (exports) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = Ember.Mixin.create({
+    /**
+     The session service.
+      @property session
+     @readOnly
+     @type SessionService
+     @public
+     */
+    session: Ember.inject.service('session'),
+
+    /**
+      The authenticator that should be used to authenticate the callback. This
+      must be a subclass of the
+      {{#crossLink "OAuth2ImplicitGrantAuthenticator"}}{{/crossLink}}
+      authenticator.
+       @property authenticator
+      @type String
+      @default null
+      @public
+    */
+    authenticator: null,
+
+    /**
+      Any error that potentially occurs during authentication will be stored in
+      this property.
+       @property error
+      @type String
+      @default null
+      @public
+    */
+    error: null,
+
+    /**
+      Passes the hash received with the redirection from the authentication
+      server to the
+      {{#crossLink "OAuth2ImplicitGrantAuthenticator"}}{{/crossLink}} and
+      authenticates the session with the authenticator.
+       @method activate
+      @public
+    */
+    activate: function activate() {
+      var _this = this;
+
+      if (this.get('_isFastBoot')) {
+        return;
+      }
+
+      var authenticator = this.get('authenticator');
+
+      var hash = this._parseResponse(this._windowLocationHash());
+
+      this.get('session').authenticate(authenticator, hash).catch(function (err) {
+        _this.set('error', err);
+      });
+    },
+
+
+    _isFastBoot: Ember.computed(function () {
+      var fastboot = Ember.getOwner(this).lookup('service:fastboot');
+
+      return fastboot ? fastboot.get('isFastBoot') : false;
+    }),
+
+    _windowLocationHash: function _windowLocationHash() {
+      // we wrap this so we can stub it with sinon
+      return window.location.hash;
+    },
+    _parseResponse: function _parseResponse(locationHash) {
+      var params = {};
+      var query = locationHash.substring(locationHash.indexOf('?'));
+      var regex = /([^#?&=]+)=([^&]*)/g;
+      var match = void 0;
+
+      // decode all parameter pairs
+      while ((match = regex.exec(query)) !== null) {
+        params[decodeURIComponent(match[1])] = decodeURIComponent(match[2]);
+      }
+
+      return params;
+    }
+  });
+});
+;define('ember-simple-auth/mixins/unauthenticated-route-mixin', ['exports', 'ember-simple-auth/configuration'], function (exports, _configuration) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = Ember.Mixin.create({
+    /**
+      The session service.
+       @property session
+      @readOnly
+      @type SessionService
+      @public
+    */
+    session: Ember.inject.service('session'),
+
+    _isFastBoot: Ember.computed(function () {
+      var fastboot = Ember.getOwner(this).lookup('service:fastboot');
+
+      return fastboot ? fastboot.get('isFastBoot') : false;
+    }),
+
+    /**
+      The route to transition to if a route that implements the
+      {{#crossLink "UnauthenticatedRouteMixin"}}{{/crossLink}} is accessed when
+      the session is authenticated.
+       @property routeIfAlreadyAuthenticated
+      @type String
+      @default 'index'
+      @public
+    */
+    routeIfAlreadyAuthenticated: Ember.computed(function () {
+      return _configuration.default.routeIfAlreadyAuthenticated;
+    }),
+
+    /**
+      Checks whether the session is authenticated and if it is aborts the current
+      transition and instead transitions to the
+      {{#crossLink "Configuration/routeIfAlreadyAuthenticated:property"}}{{/crossLink}}.
+       __If `beforeModel` is overridden in a route that uses this mixin, the route's
+     implementation must call `this._super(...arguments)`__ so that the mixin's
+     `beforeModel` method is actually executed.
+       @method beforeModel
+      @param {Transition} transition The transition that lead to this route
+      @public
+    */
+    beforeModel: function beforeModel() {
+      if (this.get('session').get('isAuthenticated')) {
+        var routeIfAlreadyAuthenticated = this.get('routeIfAlreadyAuthenticated');
+        (true && !(this.get('routeName') !== routeIfAlreadyAuthenticated) && Ember.assert('The route configured as Configuration.routeIfAlreadyAuthenticated cannot implement the UnauthenticatedRouteMixin mixin as that leads to an infinite transitioning loop!', this.get('routeName') !== routeIfAlreadyAuthenticated));
+
+
+        this.transitionTo(routeIfAlreadyAuthenticated);
+      } else {
+        return this._super.apply(this, arguments);
+      }
+    }
+  });
+});
+;define('ember-simple-auth/services/session', ['exports'], function (exports) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+
+
+  var SESSION_DATA_KEY_PREFIX = /^data\./;
+
+  /**
+    __The session service provides access to the current session as well as
+    methods to authenticate it, invalidate it, etc.__ It is the main interface for
+    the application to Ember Simple Auth's functionality. It can be injected via
+  
+    ```js
+    // app/components/login-form.js
+    import Ember from 'ember';
+  
+    export default Ember.Component.extend({
+      session: Ember.inject.service('session')
+    });
+    ```
+  
+    @class SessionService
+    @module ember-simple-auth/services/session
+    @extends Ember.Service
+    @uses Ember.Evented
+    @public
+  */
+  exports.default = Ember.Service.extend(Ember.Evented, {
+    /**
+      Triggered whenever the session is successfully authenticated. This happens
+      when the session gets authenticated via
+      {{#crossLink "SessionService/authenticate:method"}}{{/crossLink}} but also
+      when the session is authenticated in another tab or window of the same
+      application and the session state gets synchronized across tabs or windows
+      via the store (see
+      {{#crossLink "BaseStore/sessionDataUpdated:event"}}{{/crossLink}}).
+       When using the {{#crossLink "ApplicationRouteMixin"}}{{/crossLink}} this
+      event will automatically get handled (see
+      {{#crossLink "ApplicationRouteMixin/sessionAuthenticated:method"}}{{/crossLink}}).
+       @event authenticationSucceeded
+      @public
+    */
+
+    /**
+      Triggered whenever the session is successfully invalidated. This happens
+      when the session gets invalidated via
+      {{#crossLink "SessionService/invalidate:method"}}{{/crossLink}} but also
+      when the session is invalidated in another tab or window of the same
+      application and the session state gets synchronized across tabs or windows
+      via the store (see
+      {{#crossLink "BaseStore/sessionDataUpdated:event"}}{{/crossLink}}).
+       When using the {{#crossLink "ApplicationRouteMixin"}}{{/crossLink}} this
+      event will automatically get handled (see
+      {{#crossLink "ApplicationRouteMixin/sessionInvalidated:method"}}{{/crossLink}}).
+       @event invalidationSucceeded
+      @public
+    */
+
+    /**
+      Returns whether the session is currently authenticated.
+       @property isAuthenticated
+      @type Boolean
+      @readOnly
+      @default false
+      @public
+    */
+    isAuthenticated: Ember.computed.oneWay('session.isAuthenticated'),
+
+    /**
+      The current session data as a plain object. The
+      `authenticated` key holds the session data that the authenticator resolved
+      with when the session was authenticated (see
+      {{#crossLink "BaseAuthenticator/authenticate:method"}}{{/crossLink}}) and
+      that will be cleared when the session is invalidated. This data cannot be
+      written. All other session data is writable and will not be cleared when
+      the session is invalidated.
+       @property data
+      @type Object
+      @readOnly
+      @default { authenticated: {} }
+      @public
+    */
+    data: Ember.computed.oneWay('session.content'),
+
+    /**
+      The session store.
+       @property store
+      @type BaseStore
+      @readOnly
+      @default null
+      @public
+    */
+    store: Ember.computed.oneWay('session.store'),
+
+    /**
+      A previously attempted but intercepted transition (e.g. by the
+      {{#crossLink "AuthenticatedRouteMixin"}}{{/crossLink}}). If an attempted
+      transition is present, the
+      {{#crossLink "ApplicationRouteMixin"}}{{/crossLink}} will retry it when the
+      session becomes authenticated (see
+      {{#crossLink "ApplicationRouteMixin/sessionAuthenticated:method"}}{{/crossLink}}).
+       @property attemptedTransition
+      @type Transition
+      @default null
+      @public
+    */
+    attemptedTransition: Ember.computed.alias('session.attemptedTransition'),
+
+    init: function init() {
+      this._super.apply(this, arguments);
+      this._forwardSessionEvents();
+    },
+    set: function set(key, value) {
+      var setsSessionData = SESSION_DATA_KEY_PREFIX.test(key);
+      if (setsSessionData) {
+        var sessionDataKey = 'session.' + key.replace(SESSION_DATA_KEY_PREFIX, '');
+        return this._super(sessionDataKey, value);
+      } else {
+        return this._super.apply(this, arguments);
+      }
+    },
+    _forwardSessionEvents: function _forwardSessionEvents() {
+      var _this = this,
+          _arguments = arguments;
+
+      Ember.A(['authenticationSucceeded', 'invalidationSucceeded']).forEach(function (event) {
+        var session = _this.get('session');
+        // the internal session won't be available in route unit tests
+        if (session) {
+          session.on(event, function () {
+            _this.trigger.apply(_this, [event].concat(Array.prototype.slice.call(_arguments)));
+          });
+        }
+      });
+    },
+
+
+    /**
+      __Authenticates the session with an `authenticator`__ and appropriate
+      arguments. The authenticator implements the actual steps necessary to
+      authenticate the session (see
+      {{#crossLink "BaseAuthenticator/authenticate:method"}}{{/crossLink}}) and
+      returns a promise after doing so. The session handles the returned promise
+      and when it resolves becomes authenticated, otherwise remains
+      unauthenticated. All data the authenticator resolves with will be
+      accessible via the
+      {{#crossLink "SessionService/data:property"}}session data's{{/crossLink}}
+      `authenticated` property.
+       __This method returns a promise. A resolving promise indicates that the
+      session was successfully authenticated__ while a rejecting promise
+      indicates that authentication failed and the session remains
+      unauthenticated. The promise does not resolve with a value; instead, the
+      data returned from the authenticator is available via the
+      {{#crossLink "SessionService/data:property"}}{{/crossLink}} property.
+       When authentication succeeds this will trigger the
+      {{#crossLink "SessionService/authenticationSucceeded:event"}}{{/crossLink}}
+      event.
+       @method authenticate
+      @param {String} authenticator The authenticator to use to authenticate the session
+      @param {Any} [...args] The arguments to pass to the authenticator; depending on the type of authenticator these might be a set of credentials, a Facebook OAuth Token, etc.
+      @return {Ember.RSVP.Promise} A promise that resolves when the session was authenticated successfully and rejects otherwise
+      @public
+    */
+    authenticate: function authenticate() {
+      var session = this.get('session');
+
+      return session.authenticate.apply(session, arguments);
+    },
+
+
+    /**
+      __Invalidates the session with the authenticator it is currently
+      authenticated with__ (see
+      {{#crossLink "SessionService/authenticate:method"}}{{/crossLink}}). This
+      invokes the authenticator's
+      {{#crossLink "BaseAuthenticator/invalidate:method"}}{{/crossLink}} method
+      and handles the returned promise accordingly.
+       This method returns a promise. A resolving promise indicates that the
+      session was successfully invalidated while a rejecting promise indicates
+      that invalidation failed and the session remains authenticated. Once the
+      session is successfully invalidated it clears all of its authenticated data
+      (see {{#crossLink "SessionService/data:property"}}{{/crossLink}}).
+       When invalidation succeeds this will trigger the
+      {{#crossLink "SessionService/invalidationSucceeded:event"}}{{/crossLink}}
+      event.
+       When calling the {{#crossLink "BaseAuthenticator/invalidate:method"}}{{/crossLink}}
+      on an already unauthenticated session, the method will return a resolved Promise
+      immediately.
+       @method invalidate
+      @param {Array} ...args arguments that will be passed to the authenticator
+      @return {Ember.RSVP.Promise} A promise that resolves when the session was invalidated successfully and rejects otherwise
+      @public
+    */
+    invalidate: function invalidate() {
+      var session = this.get('session');
+
+      return session.invalidate.apply(session, arguments);
+    },
+
+
+    /**
+      Authorizes a block of code with an authorizer (see
+      {{#crossLink "BaseAuthorizer/authorize:method"}}{{/crossLink}}) if the
+      session is authenticated. If the session is not currently authenticated
+      this method does nothing.
+       ```js
+      this.get('session').authorize('authorizer:oauth2-bearer', (headerName, headerValue) => {
+        xhr.setRequestHeader(headerName, headerValue);
+      });
+      ```
+       @method authorize
+      @param {String} authorizer The authorizer to authorize the block with
+      @param {Function} block The block of code to call with the authorization data generated by the authorizer
+      @deprecated Session/authorize:method
+      @public
+    */
+    authorize: function authorize(authorizerFactory, block) {
+      Ember.deprecate('Ember Simple Auth: \'authorize\' is deprecated.', false, {
+        id: 'ember-simple-auth.session.authorize',
+        until: '2.0.0',
+        url: 'https://github.com/simplabs/ember-simple-auth#authorizers'
+      });
+      if (this.get('isAuthenticated')) {
+        var authorizer = Ember.getOwner(this).lookup(authorizerFactory);
+        (true && !(!Ember.isNone(authorizer)) && Ember.assert('No authorizer for factory ' + authorizerFactory + ' could be found!', !Ember.isNone(authorizer)));
+
+        var sessionData = this.get('data.authenticated');
+        authorizer.authorize(sessionData, block);
+      }
+    }
+  });
+});
+;define('ember-simple-auth/session-stores/adaptive', ['exports', 'ember-simple-auth/session-stores/base', 'ember-simple-auth/session-stores/local-storage', 'ember-simple-auth/session-stores/cookie'], function (exports, _base, _localStorage, _cookie) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  /* global localStorage */
+  var LOCAL_STORAGE_TEST_KEY = '_ember_simple_auth_test_key';
+
+  var proxyToInternalStore = function proxyToInternalStore() {
+    return Ember.computed({
+      get: function get(key) {
+        return this.get('_' + key);
+      },
+      set: function set(key, value) {
+        this.set('_' + key, value);
+        var _store = this.get('_store');
+        if (_store) {
+          _store.set(key, value);
+        }
+        return value;
+      }
+    });
+  };
+
+  /**
+    Session store that persists data in the browser's `localStorage` (see
+    {{#crossLink "LocalStorageStore"}}{{/crossLink}}) if that is available or in
+    a cookie (see {{#crossLink "CookieStore"}}{{/crossLink}}) if it is not.
+  
+    __This is the default store that Ember Simple Auth will use when the
+    application doesn't define a custom store.__
+  
+    __This session store does not work with FastBoot. In order to use Ember
+    Simple Auth with FastBoot, configure the
+    {{#crossLink "CookieStore"}}{{/crossLink}} as the application's session
+    store.__
+  
+    @class AdaptiveStore
+    @module ember-simple-auth/session-stores/adaptive
+    @extends BaseStore
+    @public
+  */
+  exports.default = _base.default.extend({
+    /**
+      The `localStorage` key the store persists data in if `localStorage` is
+      available.
+       @property localStorageKey
+      @type String
+      @default 'ember_simple_auth-session'
+      @public
+    */
+    localStorageKey: 'ember_simple_auth-session',
+
+    /**
+      The domain to use for the cookie if `localStorage` is not available, e.g.,
+      "example.com", ".example.com" (which includes all subdomains) or
+      "subdomain.example.com". If not explicitly set, the cookie domain defaults
+      to the domain the session was authenticated on.
+       @property cookieDomain
+      @type String
+      @default null
+      @public
+    */
+    _cookieDomain: null,
+    cookieDomain: proxyToInternalStore(),
+
+    /**
+      The name of the cookie to use if `localStorage` is not available.
+       @property cookieName
+      @type String
+      @default ember_simple_auth-session
+      @public
+    */
+    _cookieName: 'ember_simple_auth-session',
+    cookieName: proxyToInternalStore(),
+
+    /**
+      The path to use for the cookie, e.g., "/", "/something".
+       @property cookiePath
+      @type String
+      @default '/'
+      @public
+    */
+    _cookiePath: '/',
+    cookiePath: proxyToInternalStore(),
+
+    /**
+      The expiration time for the cookie in seconds if `localStorage` is not
+      available. A value of `null` will make the cookie a session cookie that
+      expires and gets deleted when the browser is closed.
+       @property cookieExpirationTime
+      @default null
+      @type Integer
+      @public
+    */
+    _cookieExpirationTime: null,
+    cookieExpirationTime: proxyToInternalStore(),
+
+    _cookies: Ember.inject.service('cookies'),
+
+    _fastboot: Ember.computed(function () {
+      var owner = Ember.getOwner(this);
+
+      return owner && owner.lookup('service:fastboot');
+    }),
+
+    _isLocalStorageAvailable: Ember.computed(function () {
+      try {
+        localStorage.setItem(LOCAL_STORAGE_TEST_KEY, true);
+        localStorage.removeItem(LOCAL_STORAGE_TEST_KEY);
+        return true;
+      } catch (e) {
+        return false;
+      }
+    }),
+
+    init: function init() {
+      this._super.apply(this, arguments);
+
+      var store = void 0;
+      if (this.get('_isLocalStorageAvailable')) {
+        var options = { key: this.get('localStorageKey') };
+        options._isFastBoot = false;
+        store = this._createStore(_localStorage.default, options);
+      } else {
+        var _options = this.getProperties('cookieDomain', 'cookieName', 'cookieExpirationTime', 'cookiePath');
+        _options._fastboot = this.get('_fastboot');
+        _options._cookies = this.get('_cookies');
+
+        store = this._createStore(_cookie.default, _options);
+        this.set('cookieExpirationTime', store.get('cookieExpirationTime'));
+      }
+      this.set('_store', store);
+    },
+    _createStore: function _createStore(storeType, options) {
+      var _this = this;
+
+      var owner = Ember.getOwner(this);
+      var store = storeType.create(owner.ownerInjection(), options);
+
+      store.on('sessionDataUpdated', function (data) {
+        _this.trigger('sessionDataUpdated', data);
+      });
+      return store;
+    },
+
+
+    /**
+      Persists the `data` in the `localStorage` if it is available or in a cookie
+      if it is not.
+       @method persist
+      @param {Object} data The data to persist
+      @return {Ember.RSVP.Promise} A promise that resolves when the data has successfully been persisted and rejects otherwise.
+      @public
+    */
+    persist: function persist() {
+      var _get;
+
+      return (_get = this.get('_store')).persist.apply(_get, arguments);
+    },
+
+
+    /**
+      Returns all data currently stored in the `localStorage` if that is
+      available - or if it is not, in the cookie - as a plain object.
+       @method restore
+      @return {Ember.RSVP.Promise} A promise that resolves with the data currently persisted in the store when the data has been restored successfully and rejects otherwise.
+      @public
+    */
+    restore: function restore() {
+      return this.get('_store').restore();
+    },
+
+
+    /**
+      Clears the store by deleting the
+      {{#crossLink "LocalStorageStore/key:property"}}{{/crossLink}} from
+      `localStorage` if that is available or by deleting the cookie if it is not.
+       @method clear
+      @return {Ember.RSVP.Promise} A promise that resolves when the store has been cleared successfully and rejects otherwise.
+      @public
+    */
+    clear: function clear() {
+      return this.get('_store').clear();
+    }
+  });
+});
+;define('ember-simple-auth/session-stores/base', ['exports'], function (exports) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = Ember.Object.extend(Ember.Evented, {
+    /**
+      Triggered when the session store's data changes due to an external event,
+      e.g., from another tab or window of the same application. The session
+      handles that event, passes the updated data to its authenticator's
+      {{#crossLink "BaseAuthenticator/restore:method"}}{{/crossLink}} method and
+      handles the result of that invocation accordingly.
+       @event sessionDataUpdated
+      @param {Object} data The updated session data
+      @public
+    */
+
+    /**
+      Persists the `data`. This replaces all currently stored data.
+       `BaseStores`'s implementation always returns a rejecting promise. __This
+      method must be overridden in subclasses__.
+       @method persist
+      @param {Object} data The data to persist
+      @return {Ember.RSVP.Promise} A promise that resolves when the data has successfully been persisted and rejects otherwise.
+      @public
+    */
+    persist: function persist() {
+      return Ember.RSVP.reject();
+    },
+
+
+    /**
+      Returns all data currently stored as a plain object.
+       `BaseStores`'s implementation always returns a rejecting promise. __This
+      method must be overridden in subclasses__.
+       @method restore
+      @return {Ember.RSVP.Promise} A promise that resolves with the data currently persisted in the store when the data has been restored successfully and rejects otherwise.
+      @public
+    */
+    restore: function restore() {
+      return Ember.RSVP.reject();
+    },
+
+
+    /**
+      Clears the store.
+       `BaseStores`'s implementation always returns a rejecting promise. __This
+      method must be overridden in subclasses__.
+       @method clear
+      @return {Ember.RSVP.Promise} A promise that resolves when the store has been cleared successfully and rejects otherwise.
+      @public
+    */
+    clear: function clear() {
+      return Ember.RSVP.reject();
+    }
+  });
+});
+;define('ember-simple-auth/session-stores/cookie', ['exports', 'ember-simple-auth/session-stores/base', 'ember-simple-auth/utils/objects-are-equal'], function (exports, _base, _objectsAreEqual) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+
+
+  var persistingProperty = function persistingProperty() {
+    var beforeSet = arguments.length > 0 && arguments[0] !== undefined ? arguments[0] : function () {};
+
+    return Ember.computed({
+      get: function get(key) {
+        return this.get('_' + key);
+      },
+      set: function set(key, value) {
+        beforeSet.apply(this, [key, value]);
+        this.set('_' + key, value);
+        Ember.run.scheduleOnce('actions', this, this.rewriteCookie);
+        return value;
+      }
+    });
+  };
+
+  /**
+    Session store that persists data in a cookie.
+  
+    By default the cookie session store uses a session cookie that expires and is
+    deleted when the browser is closed. The cookie expiration period can be
+    configured by setting the
+    {{#crossLink "CookieStore/cookieExpirationTime:property"}}{{/crossLink}}
+    property. This can be used to implement "remember me" functionality that will
+    either store the session persistently or in a session cookie depending on
+    whether the user opted in or not:
+  
+    ```js
+    // app/controllers/login.js
+    export default Ember.Controller.extend({
+      rememberMe: computed({
+        get(key) {
+          return false;
+        },
+        set(key, value) {
+          let expirationTime = value ? (14 * 24 * 60 * 60) : null;
+          this.set('session.store.cookieExpirationTime', expirationTime);
+          return value;
+        }
+      })
+    });
+    ```
+  
+    __Applications that use FastBoot must use this session store by defining the
+    application session store like this:__
+  
+    ```js
+    // app/session-stores/application.js
+    import CookieStore from 'ember-simple-auth/session-stores/cookie';
+  
+    export default CookieStore.extend();
+    ```
+  
+    @class CookieStore
+    @module ember-simple-auth/session-stores/cookie
+    @extends BaseStore
+    @public
+  */
+  exports.default = _base.default.extend({
+    _syncDataTimeout: null,
+    _renewExpirationTimeout: null,
+
+    /**
+      The domain to use for the cookie, e.g., "example.com", ".example.com"
+      (which includes all subdomains) or "subdomain.example.com". If not
+      explicitly set, the cookie domain defaults to the domain the session was
+      authenticated on.
+       @property cookieDomain
+      @type String
+      @default null
+      @public
+    */
+    _cookieDomain: null,
+    cookieDomain: persistingProperty(),
+
+    /**
+      The name of the cookie.
+       @property cookieName
+      @type String
+      @default ember_simple_auth-session
+      @public
+    */
+    _cookieName: 'ember_simple_auth-session',
+    cookieName: persistingProperty(function () {
+      this._oldCookieName = this._cookieName;
+    }),
+
+    /**
+      The path to use for the cookie, e.g., "/", "/something".
+       @property cookiePath
+      @type String
+      @default '/'
+      @public
+    */
+    _cookiePath: '/',
+    cookiePath: persistingProperty(),
+
+    /**
+      The expiration time for the cookie in seconds. A value of `null` will make
+      the cookie a session cookie that expires and gets deleted when the browser
+      is closed.
+       The recommended minimum value is 90 seconds. If your value is less than
+      that, the cookie may expire before its expiration time is extended
+      (expiration time is extended every 60 seconds).
+       @property cookieExpirationTime
+      @default null
+      @type Integer
+      @public
+    */
+    _cookieExpirationTime: null,
+    cookieExpirationTime: persistingProperty(function (key, value) {
+      // When nulling expiry time on purpose, we need to clear the cached value.
+      // Otherwise, `_calculateExpirationTime` will reuse it.
+      if (Ember.isNone(value)) {
+        this.get('_cookies').clear(this.get('cookieName') + '-expiration_time');
+      } else if (value < 90) {
+        (true && Ember.warn('The recommended minimum value for `cookieExpirationTime` is 90 seconds. If your value is less than that, the cookie may expire before its expiration time is extended (expiration time is extended every 60 seconds).', false, { id: 'ember-simple-auth.cookieExpirationTime' }));
+      }
+    }),
+
+    _cookies: Ember.inject.service('cookies'),
+
+    _fastboot: Ember.computed(function () {
+      var owner = Ember.getOwner(this);
+
+      return owner && owner.lookup('service:fastboot');
+    }),
+
+    _secureCookies: Ember.computed(function () {
+      if (this.get('_fastboot.isFastBoot')) {
+        return this.get('_fastboot.request.protocol') === 'https';
+      }
+
+      return window.location.protocol === 'https:';
+    }).volatile(),
+
+    _isPageVisible: Ember.computed(function () {
+      if (this.get('_fastboot.isFastBoot')) {
+        return false;
+      } else {
+        var visibilityState = typeof document !== 'undefined' ? document.visibilityState || 'visible' : false;
+        return visibilityState === 'visible';
+      }
+    }).volatile(),
+
+    init: function init() {
+      var _this = this;
+
+      this._super.apply(this, arguments);
+
+      var cachedExpirationTime = this._read(this.get('cookieName') + '-expiration_time');
+      if (cachedExpirationTime) {
+        this.set('cookieExpirationTime', parseInt(cachedExpirationTime, 10));
+      }
+
+      if (!this.get('_fastboot.isFastBoot')) {
+        Ember.run.next(function () {
+          _this._syncData().then(function () {
+            _this._renewExpiration();
+          });
+        });
+      } else {
+        this._renew();
+      }
+    },
+
+
+    /**
+      Persists the `data` in the cookie.
+       @method persist
+      @param {Object} data The data to persist
+      @return {Ember.RSVP.Promise} A promise that resolves when the data has successfully been persisted and rejects otherwise.
+      @public
+    */
+    persist: function persist(data) {
+      this._lastData = data;
+      data = JSON.stringify(data || {});
+      var expiration = this._calculateExpirationTime();
+      this._write(data, expiration);
+      return Ember.RSVP.resolve();
+    },
+
+
+    /**
+      Returns all data currently stored in the cookie as a plain object.
+       @method restore
+      @return {Ember.RSVP.Promise} A promise that resolves with the data currently persisted in the store when the data has been restored successfully and rejects otherwise.
+      @public
+    */
+    restore: function restore() {
+      var data = this._read(this.get('cookieName'));
+      if (Ember.isEmpty(data)) {
+        return Ember.RSVP.resolve({});
+      } else {
+        return Ember.RSVP.resolve(JSON.parse(data));
+      }
+    },
+
+
+    /**
+      Clears the store by deleting the cookie.
+       @method clear
+      @return {Ember.RSVP.Promise} A promise that resolves when the store has been cleared successfully and rejects otherwise.
+      @public
+    */
+    clear: function clear() {
+      this._write('', 0);
+      this._lastData = {};
+      return Ember.RSVP.resolve();
+    },
+    _read: function _read(name) {
+      return this.get('_cookies').read(name) || '';
+    },
+    _calculateExpirationTime: function _calculateExpirationTime() {
+      var cachedExpirationTime = this._read(this.get('cookieName') + '-expiration_time');
+      cachedExpirationTime = cachedExpirationTime ? new Date().getTime() + cachedExpirationTime * 1000 : null;
+      return this.get('cookieExpirationTime') ? new Date().getTime() + this.get('cookieExpirationTime') * 1000 : cachedExpirationTime;
+    },
+    _write: function _write(value, expiration) {
+      var _this2 = this;
+
+      var cookieOptions = {
+        domain: this.get('cookieDomain'),
+        expires: Ember.isEmpty(expiration) ? null : new Date(expiration),
+        path: this.get('cookiePath'),
+        secure: this.get('_secureCookies')
+      };
+      if (this._oldCookieName) {
+        Ember.A([this._oldCookieName, this._oldCookieName + '-expiration_time']).forEach(function (oldCookie) {
+          _this2.get('_cookies').clear(oldCookie);
+        });
+        delete this._oldCookieName;
+      }
+      this.get('_cookies').write(this.get('cookieName'), value, cookieOptions);
+      if (!Ember.isEmpty(expiration)) {
+        var expirationCookieName = this.get('cookieName') + '-expiration_time';
+        var cachedExpirationTime = this.get('_cookies').read(expirationCookieName);
+        this.get('_cookies').write(expirationCookieName, this.get('cookieExpirationTime') || cachedExpirationTime, cookieOptions);
+      }
+    },
+    _syncData: function _syncData() {
+      var _this3 = this;
+
+      return this.restore().then(function (data) {
+        if (!(0, _objectsAreEqual.default)(data, _this3._lastData)) {
+          _this3._lastData = data;
+          _this3.trigger('sessionDataUpdated', data);
+        }
+        if (!Ember.testing) {
+          Ember.run.cancel(_this3._syncDataTimeout);
+          _this3._syncDataTimeout = Ember.run.later(_this3, _this3._syncData, 500);
+        }
+      });
+    },
+    _renew: function _renew() {
+      var _this4 = this;
+
+      return this.restore().then(function (data) {
+        if (!Ember.isEmpty(data) && data !== {}) {
+          data = Ember.typeOf(data) === 'string' ? data : JSON.stringify(data || {});
+          var expiration = _this4._calculateExpirationTime();
+          _this4._write(data, expiration);
+        }
+      });
+    },
+    _renewExpiration: function _renewExpiration() {
+      if (!Ember.testing) {
+        Ember.run.cancel(this._renewExpirationTimeout);
+        this._renewExpirationTimeout = Ember.run.later(this, this._renewExpiration, 60000);
+      }
+      if (this.get('_isPageVisible')) {
+        return this._renew();
+      } else {
+        return Ember.RSVP.resolve();
+      }
+    },
+    rewriteCookie: function rewriteCookie() {
+      // if `cookieName` has not been renamed, `oldCookieName` will be nil
+      var cookieName = this._oldCookieName || this._cookieName;
+      var data = this._read(cookieName);
+      if (Ember.isPresent(data)) {
+        var expiration = this._calculateExpirationTime();
+        this._write(data, expiration);
+      }
+    }
+  });
+});
+;define('ember-simple-auth/session-stores/ephemeral', ['exports', 'ember-simple-auth/session-stores/base'], function (exports, _base) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = _base.default.extend({
+    init: function init() {
+      this._super.apply(this, arguments);
+      this.clear();
+    },
+
+
+    /**
+      Persists `data`. This replaces all currently stored data.
+       @method persist
+      @param {Object} data The data to persist
+      @return {Ember.RSVP.Promise} A promise that resolves when the data has successfully been persisted and rejects otherwise.
+      @public
+    */
+    persist: function persist(data) {
+      this._data = JSON.stringify(data || {});
+
+      return Ember.RSVP.resolve();
+    },
+
+
+    /**
+      Returns all data currently stored as a plain object.
+       @method restore
+      @return {Ember.RSVP.Promise} A promise that resolves with the data currently persisted in the store when the data has been restored successfully and rejects otherwise.
+      @public
+    */
+    restore: function restore() {
+      var data = JSON.parse(this._data) || {};
+
+      return Ember.RSVP.resolve(data);
+    },
+
+
+    /**
+      Clears the store.
+       @method clear
+      @return {Ember.RSVP.Promise} A promise that resolves when the store has been cleared successfully and rejects otherwise.
+      @public
+    */
+    clear: function clear() {
+      delete this._data;
+      this._data = '{}';
+
+      return Ember.RSVP.resolve();
+    }
+  });
+});
+;define('ember-simple-auth/session-stores/local-storage', ['exports', 'ember-simple-auth/session-stores/base', 'ember-simple-auth/utils/objects-are-equal'], function (exports, _base, _objectsAreEqual) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = _base.default.extend({
+    _isFastBoot: Ember.computed(function () {
+      var fastboot = Ember.getOwner(this).lookup('service:fastboot');
+
+      return fastboot ? fastboot.get('isFastBoot') : false;
+    }),
+
+    /**
+      The `localStorage` key the store persists data in.
+       @property key
+      @type String
+      @default 'ember_simple_auth-session'
+      @public
+    */
+    key: 'ember_simple_auth-session',
+
+    init: function init() {
+      this._super.apply(this, arguments);
+
+      this._boundHandler = Ember.run.bind(this, this._handleStorageEvent);
+      if (!this.get('_isFastBoot')) {
+        window.addEventListener('storage', this._boundHandler);
+      }
+    },
+    willDestroy: function willDestroy() {
+      if (!this.get('_isFastBoot')) {
+        window.removeEventListener('storage', this._boundHandler);
+      }
+    },
+
+
+    /**
+      Persists the `data` in the `localStorage`.
+       @method persist
+      @param {Object} data The data to persist
+      @return {Ember.RSVP.Promise} A promise that resolves when the data has successfully been persisted and rejects otherwise.
+      @public
+    */
+    persist: function persist(data) {
+      this._lastData = data;
+      data = JSON.stringify(data || {});
+      localStorage.setItem(this.key, data);
+
+      return Ember.RSVP.resolve();
+    },
+
+
+    /**
+      Returns all data currently stored in the `localStorage` as a plain object.
+       @method restore
+      @return {Ember.RSVP.Promise} A promise that resolves with the data currently persisted in the store when the data has been restored successfully and rejects otherwise.
+      @public
+    */
+    restore: function restore() {
+      var data = localStorage.getItem(this.key);
+
+      return Ember.RSVP.resolve(JSON.parse(data) || {});
+    },
+
+
+    /**
+      Clears the store by deleting the
+      {{#crossLink "LocalStorageStore/key:property"}}{{/crossLink}} from
+      `localStorage`.
+       @method clear
+      @return {Ember.RSVP.Promise} A promise that resolves when the store has been cleared successfully and rejects otherwise.
+      @public
+    */
+    clear: function clear() {
+      localStorage.removeItem(this.key);
+      this._lastData = {};
+
+      return Ember.RSVP.resolve();
+    },
+    _handleStorageEvent: function _handleStorageEvent(e) {
+      var _this = this;
+
+      if (e.key === this.get('key')) {
+        this.restore().then(function (data) {
+          if (!(0, _objectsAreEqual.default)(data, _this._lastData)) {
+            _this._lastData = data;
+            _this.trigger('sessionDataUpdated', data);
+          }
+        });
+      }
+    }
+  });
+});
+;define('ember-simple-auth/session-stores/session-storage', ['exports', 'ember-simple-auth/session-stores/base', 'ember-simple-auth/utils/objects-are-equal'], function (exports, _base, _objectsAreEqual) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = _base.default.extend({
+    _isFastBoot: Ember.computed(function () {
+      var fastboot = Ember.getOwner(this).lookup('service:fastboot');
+
+      return fastboot ? fastboot.get('isFastBoot') : false;
+    }),
+
+    /**
+      The `sessionStorage` key the store persists data in.
+       @property key
+      @type String
+      @default 'ember_simple_auth-session'
+      @public
+    */
+    key: 'ember_simple_auth-session',
+
+    init: function init() {
+      this._super.apply(this, arguments);
+
+      if (!this.get('_isFastBoot')) {
+        window.addEventListener('storage', Ember.run.bind(this, this._handleStorageEvent));
+      }
+    },
+    willDestroy: function willDestroy() {
+      if (!this.get('_isFastBoot')) {
+        window.removeEventListener('storage', Ember.run.bind(this, this._handleStorageEvent));
+      }
+    },
+
+
+    /**
+      Persists the `data` in the `sessionStorage`.
+       @method persist
+      @param {Object} data The data to persist
+      @return {Ember.RSVP.Promise} A promise that resolves when the data has successfully been persisted and rejects otherwise.
+      @public
+    */
+    persist: function persist(data) {
+      this._lastData = data;
+      data = JSON.stringify(data || {});
+      sessionStorage.setItem(this.key, data);
+
+      return Ember.RSVP.resolve();
+    },
+
+
+    /**
+      Returns all data currently stored in the `sessionStorage` as a plain object.
+       @method restore
+      @return {Ember.RSVP.Promise} A promise that resolves with the data currently persisted in the store when the data has been restored successfully and rejects otherwise.
+      @public
+    */
+    restore: function restore() {
+      var data = sessionStorage.getItem(this.key);
+
+      return Ember.RSVP.resolve(JSON.parse(data) || {});
+    },
+
+
+    /**
+      Clears the store by deleting the
+      {{#crossLink "sessionStorageStore/key:property"}}{{/crossLink}} from
+      `sessionStorage`.
+       @method clear
+      @return {Ember.RSVP.Promise} A promise that resolves when the store has been cleared successfully and rejects otherwise.
+      @public
+    */
+    clear: function clear() {
+      sessionStorage.removeItem(this.key);
+      this._lastData = {};
+
+      return Ember.RSVP.resolve();
+    },
+    _handleStorageEvent: function _handleStorageEvent(e) {
+      var _this = this;
+
+      if (e.key === this.get('key')) {
+        this.restore().then(function (data) {
+          if (!(0, _objectsAreEqual.default)(data, _this._lastData)) {
+            _this._lastData = data;
+            _this.trigger('sessionDataUpdated', data);
+          }
+        });
+      }
+    }
+  });
+});
+;define("ember-simple-auth/utils/inject", ["exports"], function (exports) {
+  "use strict";
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+
+  exports.default = function (registry, factoryNameOrType, property, injectionName) {
+    var inject = registry.inject || registry.injection;
+    inject.call(registry, factoryNameOrType, property, injectionName);
+  };
+});
+;define('ember-simple-auth/utils/objects-are-equal', ['exports'], function (exports) {
+  'use strict';
+
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = objectsAreEqual;
+
+  var _typeof = typeof Symbol === "function" && typeof Symbol.iterator === "symbol" ? function (obj) {
+    return typeof obj;
+  } : function (obj) {
+    return obj && typeof Symbol === "function" && obj.constructor === Symbol && obj !== Symbol.prototype ? "symbol" : typeof obj;
+  };
+
+  function objectsAreEqual(a, b) {
+    function compare(x, y) {
+      var property = void 0;
+      if (isNaN(x) && isNaN(y) && typeof x === 'number' && typeof y === 'number') {
+        return true;
+      }
+
+      if (x === y) {
+        return true;
+      }
+
+      if (!(x instanceof Object && y instanceof Object)) {
+        return false;
+      }
+
+      for (property in y) {
+        if (y.hasOwnProperty(property) !== x.hasOwnProperty(property)) {
+          return false;
+        } else if (_typeof(y[property]) !== _typeof(x[property])) {
+          return false;
+        }
+      }
+
+      for (property in x) {
+        if (y.hasOwnProperty(property) !== x.hasOwnProperty(property)) {
+          return false;
+        } else if (_typeof(y[property]) !== _typeof(x[property])) {
+          return false;
+        }
+
+        switch (_typeof(x[property])) {
+          case 'object':
+            if (!compare(x[property], y[property])) {
+              return false;
+            }
+            break;
+          default:
+            if (x[property] !== y[property]) {
+              return false;
+            }
+            break;
+        }
+      }
+
+      return true;
+    }
+
+    return compare(a, b);
   }
 });
 ;define('ember-welcome-page/components/welcome-page', ['exports', 'ember-welcome-page/templates/components/welcome-page'], function (exports, _welcomePage) {

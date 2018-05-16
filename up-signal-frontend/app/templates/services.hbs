@@ -19,7 +19,11 @@
   </div>
 
   <div class="col-md-12 button-services">
-    {{#link-to 'new-service'}}<button class="btn btn-primary">NOVA USLUGA</button>{{/link-to}}
+    {{#if session.isAuthenticated}}
+      {{#if (diff session.data.authenticated.user.role.name "SUPPLIER")}}
+        {{#link-to 'new-service'}}<button class="btn btn-primary">NOVA USLUGA</button>{{/link-to}}
+      {{/if}}
+    {{/if}}
     {{#link-to 'all-services'}}<button class="btn btn-primary">SVE USLUGE</button>{{/link-to}}
   </div>
 </div>

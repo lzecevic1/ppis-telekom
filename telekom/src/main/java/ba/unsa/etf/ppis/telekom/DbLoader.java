@@ -10,9 +10,6 @@ import ba.unsa.etf.ppis.telekom.services.SupplierService;
 import ba.unsa.etf.ppis.telekom.services.UserService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.CommandLineRunner;
-import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
-import org.springframework.security.crypto.password.DelegatingPasswordEncoder;
-import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
@@ -48,21 +45,18 @@ public class DbLoader implements CommandLineRunner {
             // Password of all users is pw = password
             Role role = roleService.find("ADMIN");
             Map encoders = new HashMap<>();
-            encoders.put("bcrypt", new BCryptPasswordEncoder());
-            PasswordEncoder passwordEncoder = new DelegatingPasswordEncoder("bcrypt",encoders);
             String password = "password";
-            String hashedPassword = passwordEncoder.encode(password);//"{bcrypt}$2a$10$O11zZDjYUaHT7Vc3v5jAH.2rA8mOgR//Wfyt5kC0vDFhBm4MuThae"
-            User user = new User("admin", password, hashedPassword, "admin@telekom.ba",
+            User user = new User("admin", password, "admin@telekom.ba",
                     "1111-1111-1111", User.Gender.MALE, role);
             userService.save(user);
 
             role = roleService.find("SERVICER");
-            user = new User("servicer", password, hashedPassword, "servicer@telekom.ba",
+            user = new User("servicer", password, "servicer@telekom.ba",
                     "1111-1111-1111", User.Gender.MALE, role);
             userService.save(user);
 
             role = roleService.find("SUPPLIER");
-            user = new User("supplier", password,hashedPassword, "supplier@telekom.ba",
+            user = new User("supplier", password, "supplier@telekom.ba",
                     "1111-1111-1111", User.Gender.FEMALE, role);
             userService.save(user);
         }
