@@ -14,8 +14,8 @@
             {{#if (diff session.data.authenticated.user.role.name "SERVICER")}}
                <br> <button class="btn btn-default list-item-btn" {{action "createContract" supplier.id}}>Novi Ugovor</button>
                 <button class="btn btn-default list-item-btn" {{action "setSupplierToDelete" supplier.id}}>Brisanje</button><br><br>
-                {{star-rating
-                    onClick=(action 'rateSupplier' supplier.id )
+                {{star-rating item=this
+                    onClick=(action 'rateSupplier' supplier.id item.rating)
                 }}
             {{/if}}
         {{/if}}

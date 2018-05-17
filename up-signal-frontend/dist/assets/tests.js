@@ -37,7 +37,7 @@ define('up-signal/tests/app.lint-test', [], function () {
 
   QUnit.test('controllers/all-suppliers.js', function (assert) {
     assert.expect(1);
-    assert.ok(false, 'controllers/all-suppliers.js should pass ESLint\n\n30:37 - \'rating\' is defined but never used. (no-unused-vars)');
+    assert.ok(true, 'controllers/all-suppliers.js should pass ESLint\n\n');
   });
 
   QUnit.test('controllers/login.js', function (assert) {

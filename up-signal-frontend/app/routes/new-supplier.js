@@ -27,6 +27,5 @@ export default LoginRoute.extend({
      this.get('_supplierService').addSupplier(this.controller.get('model'))
       .then(()=> this.transitionTo('services'));
     },
-
   }
 });

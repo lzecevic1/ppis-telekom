@@ -27,8 +27,10 @@ export default Ember.Controller.extend({
     this.set('supplierId', null);
   },
 
-  rateSupplier: function(supplierId,rating) {
-
+  rateSupplier: function(supplierId) {
+    this.get('_supplierService').addRating(supplierId).then(()=>{
+      this.get('target.router').refresh();
+    })
 
   }
 
