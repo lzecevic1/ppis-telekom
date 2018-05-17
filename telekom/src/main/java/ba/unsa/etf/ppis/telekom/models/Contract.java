@@ -1,6 +1,7 @@
 package ba.unsa.etf.ppis.telekom.models;
 
 import javax.persistence.*;
+import java.text.SimpleDateFormat;
 import java.util.Collection;
 import java.util.Date;
 
@@ -12,8 +13,11 @@ public class Contract {
     private Long id;
 
     private Date startDate;
+    private String startDateString;
     private Date endDate;
+    private String endDateString;
     private String responsiblePerson;
+    private boolean isActive;
 
     @ManyToMany(targetEntity = Product.class)
     @JoinTable(
@@ -29,11 +33,15 @@ public class Contract {
 
     public Contract() { }
 
-    public Contract(Date startDate, Date endDate, String responsiblePerson, Supplier supplier) {
+    public Contract(Date startDate, Date endDate, String responsiblePerson, Supplier supplier, boolean isActive) {
         this.startDate = startDate;
         this.endDate = endDate;
         this.responsiblePerson = responsiblePerson;
         this.supplier = supplier;
+        this.isActive = isActive;
+        this.startDateString = new SimpleDateFormat("dd.MM.yyyy").format(this.startDate);
+        this.endDateString = new SimpleDateFormat("dd.MM.yyyy").format(this.endDate);
+
     }
 
     public Long getId() {
@@ -84,4 +92,27 @@ public class Contract {
         this.products = products;
     }
 
+    public boolean isActive() {
+        return isActive;
+    }
+
+    public void setActive(boolean active) {
+        isActive = active;
+    }
+
+    public String getStartDateString() {
+        return startDateString;
+    }
+
+    public void setStartDateString(String startDateString) {
+        this.startDateString = startDateString;
+    }
+
+    public String getEndDateString() {
+        return endDateString;
+    }
+
+    public void setEndDateString(String endDateString) {
+        this.endDateString = endDateString;
+    }
 }

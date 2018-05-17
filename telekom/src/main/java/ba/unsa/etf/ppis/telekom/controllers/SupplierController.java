@@ -1,5 +1,6 @@
 package ba.unsa.etf.ppis.telekom.controllers;
 
+import ba.unsa.etf.ppis.telekom.controllers.dto.ContractDTO;
 import ba.unsa.etf.ppis.telekom.models.Rating;
 import ba.unsa.etf.ppis.telekom.models.Supplier;
 import ba.unsa.etf.ppis.telekom.services.SupplierService;
@@ -33,4 +34,5 @@ public class SupplierController extends BaseController<Supplier, SupplierService
         service.addRatingForSupplier(rating, id);
         return ResponseEntity.ok().build();
     }
+
 }
