@@ -1,18 +1,24 @@
 <div class="list-top">
     <p>PREGLED SVIH DOBAVLJACA</p>
 </div>
+
     <div class="container-supplier">
     {{#each model as |supplier|}}
+    {{#if (eq supplier.status "Aktivan")}}
       <div class="box first">
         <span class="icon-cont"><i class="glyphicon glyphicon-user"></i></span>
-        <h3>{{supplier.name}}</h3>
+        <div>
+            <h3>{{supplier.name}}</h3>
+        </div>
         <div class = "details">
+        <br>
         <p> <b> Adresa: </b> {{supplier.address}} </p>
         <p> <b> Status: </b> {{supplier.status}} </p>
         <p> <b> Kategorija: </b> {{supplier.category}} </p>
         {{#if session.isAuthenticated}}
         {{#if (diff session.data.authenticated.user.role.name "SERVICER")}}
            <br> <button class="btn btn-default list-item-btn" {{action "createContract" supplier.id}}>Novi Ugovor</button>
+           <br> <button class="btn btn-default list-item-btn" {{action "deactivateSupplier" supplier.id}}>Deaktiviraj</button>
             <button class="btn btn-default list-item-btn" {{action "setSupplierToDelete" supplier.id}}>Brisanje</button><br><br>
             {{star-rating
                 onClick=(action 'rateSupplier' supplier.id )
@@ -21,7 +27,8 @@
         {{/if}}
         </div>
     </div>
-{{/each}}
+    {{/if}}
+    {{/each}}
 </div>
 
 {{#bs-modal-simple

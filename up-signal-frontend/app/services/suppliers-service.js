@@ -56,4 +56,8 @@ export default BaseHttpService.extend({
   deleteSupplier: function (id) {
     return this.ajax('DELETE', `/suppliers/${id}`);
   },
+
+  deactivateSupplier: function(id) {
+    return this.ajax('GET',  `/suppliers/deactivate/${id}`);
+  }
 });

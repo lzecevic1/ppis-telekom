@@ -9,7 +9,8 @@ export default BaseHttpService.extend({
     let newContract = Ember.Object.create({
       startDate: '',
       endDate: '',
-      responsiblePerson: ''
+      responsiblePerson: '',
+      supplierId: ''
     });
     this.set('currentContract', newContract);
     return this.get('currentContract');

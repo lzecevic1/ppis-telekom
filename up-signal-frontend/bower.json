@@ -1,6 +1,5 @@
 {
   "name": "up-signal",
   "dependencies": {
-    "selectize": "miguelcobain/selectize.js#master"
   }
 }

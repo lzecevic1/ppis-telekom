@@ -69563,3685 +69563,6 @@ return Popper;
 
 }(jQuery);
  }
-;/**
- * sifter.js
- * Copyright (c) 2013 Brian Reavis & contributors
- *
- * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this
- * file except in compliance with the License. You may obtain a copy of the License at:
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software distributed under
- * the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF
- * ANY KIND, either express or implied. See the License for the specific language
- * governing permissions and limitations under the License.
- *
- * @author Brian Reavis <brian@thirdroute.com>
- */
-
-(function(root, factory) {
-	if (typeof define === 'function' && define.amd) {
-		define('sifter', factory);
-	} else if (typeof exports === 'object') {
-		module.exports = factory();
-	} else {
-		root.Sifter = factory();
-	}
-}(this, function() {
-
-	/**
-	 * Textually searches arrays and hashes of objects
-	 * by property (or multiple properties). Designed
-	 * specifically for autocomplete.
-	 *
-	 * @constructor
-	 * @param {array|object} items
-	 * @param {object} items
-	 */
-	var Sifter = function(items, settings) {
-		this.items = items;
-		this.settings = settings || {diacritics: true};
-	};
-
-	/**
-	 * Splits a search string into an array of individual
-	 * regexps to be used to match results.
-	 *
-	 * @param {string} query
-	 * @returns {array}
-	 */
-	Sifter.prototype.tokenize = function(query) {
-		query = trim(String(query || '').toLowerCase());
-		if (!query || !query.length) return [];
-
-		var i, n, regex, letter;
-		var tokens = [];
-		var words = query.split(/ +/);
-
-		for (i = 0, n = words.length; i < n; i++) {
-			regex = escape_regex(words[i]);
-			if (this.settings.diacritics) {
-				for (letter in DIACRITICS) {
-					if (DIACRITICS.hasOwnProperty(letter)) {
-						regex = regex.replace(new RegExp(letter, 'g'), DIACRITICS[letter]);
-					}
-				}
-			}
-			tokens.push({
-				string : words[i],
-				regex  : new RegExp(regex, 'i')
-			});
-		}
-
-		return tokens;
-	};
-
-	/**
-	 * Iterates over arrays and hashes.
-	 *
-	 * ```
-	 * this.iterator(this.items, function(item, id) {
-	 *    // invoked for each item
-	 * });
-	 * ```
-	 *
-	 * @param {array|object} object
-	 */
-	Sifter.prototype.iterator = function(object, callback) {
-		var iterator;
-		if (is_array(object)) {
-			iterator = Array.prototype.forEach || function(callback) {
-				for (var i = 0, n = this.length; i < n; i++) {
-					callback(this[i], i, this);
-				}
-			};
-		} else {
-			iterator = function(callback) {
-				for (var key in this) {
-					if (this.hasOwnProperty(key)) {
-						callback(this[key], key, this);
-					}
-				}
-			};
-		}
-
-		iterator.apply(object, [callback]);
-	};
-
-	/**
-	 * Returns a function to be used to score individual results.
-	 *
-	 * Good matches will have a higher score than poor matches.
-	 * If an item is not a match, 0 will be returned by the function.
-	 *
-	 * @param {object|string} search
-	 * @param {object} options (optional)
-	 * @returns {function}
-	 */
-	Sifter.prototype.getScoreFunction = function(search, options) {
-		var self, fields, tokens, token_count;
-
-		self        = this;
-		search      = self.prepareSearch(search, options);
-		tokens      = search.tokens;
-		fields      = search.options.fields;
-		token_count = tokens.length;
-
-		/**
-		 * Calculates how close of a match the
-		 * given value is against a search token.
-		 *
-		 * @param {mixed} value
-		 * @param {object} token
-		 * @return {number}
-		 */
-		var scoreValue = function(value, token) {
-			var score, pos;
-
-			if (!value) return 0;
-			value = String(value || '');
-			pos = value.search(token.regex);
-			if (pos === -1) return 0;
-			score = token.string.length / value.length;
-			if (pos === 0) score += 0.5;
-			return score;
-		};
-
-		/**
-		 * Calculates the score of an object
-		 * against the search query.
-		 *
-		 * @param {object} token
-		 * @param {object} data
-		 * @return {number}
-		 */
-		var scoreObject = (function() {
-			var field_count = fields.length;
-			if (!field_count) {
-				return function() { return 0; };
-			}
-			if (field_count === 1) {
-				return function(token, data) {
-					return scoreValue(data[fields[0]], token);
-				};
-			}
-			return function(token, data) {
-				for (var i = 0, sum = 0; i < field_count; i++) {
-					sum += scoreValue(data[fields[i]], token);
-				}
-				return sum / field_count;
-			};
-		})();
-
-		if (!token_count) {
-			return function() { return 0; };
-		}
-		if (token_count === 1) {
-			return function(data) {
-				return scoreObject(tokens[0], data);
-			};
-		}
-
-		if (search.options.conjunction === 'and') {
-			return function(data) {
-				var score;
-				for (var i = 0, sum = 0; i < token_count; i++) {
-					score = scoreObject(tokens[i], data);
-					if (score <= 0) return 0;
-					sum += score;
-				}
-				return sum / token_count;
-			};
-		} else {
-			return function(data) {
-				for (var i = 0, sum = 0; i < token_count; i++) {
-					sum += scoreObject(tokens[i], data);
-				}
-				return sum / token_count;
-			};
-		}
-	};
-
-	/**
-	 * Returns a function that can be used to compare two
-	 * results, for sorting purposes. If no sorting should
-	 * be performed, `null` will be returned.
-	 *
-	 * @param {string|object} search
-	 * @param {object} options
-	 * @return function(a,b)
-	 */
-	Sifter.prototype.getSortFunction = function(search, options) {
-		var i, n, self, field, fields, fields_count, multiplier, multipliers, get_field, implicit_score, sort;
-
-		self   = this;
-		search = self.prepareSearch(search, options);
-		sort   = (!search.query && options.sort_empty) || options.sort;
-
-		/**
-		 * Fetches the specified sort field value
-		 * from a search result item.
-		 *
-		 * @param  {string} name
-		 * @param  {object} result
-		 * @return {mixed}
-		 */
-		get_field = function(name, result) {
-			if (name === '$score') return result.score;
-			return self.items[result.id][name];
-		};
-
-		// parse options
-		fields = [];
-		if (sort) {
-			for (i = 0, n = sort.length; i < n; i++) {
-				if (search.query || sort[i].field !== '$score') {
-					fields.push(sort[i]);
-				}
-			}
-		}
-
-		// the "$score" field is implied to be the primary
-		// sort field, unless it's manually specified
-		if (search.query) {
-			implicit_score = true;
-			for (i = 0, n = fields.length; i < n; i++) {
-				if (fields[i].field === '$score') {
-					implicit_score = false;
-					break;
-				}
-			}
-			if (implicit_score) {
-				fields.unshift({field: '$score', direction: 'desc'});
-			}
-		} else {
-			for (i = 0, n = fields.length; i < n; i++) {
-				if (fields[i].field === '$score') {
-					fields.splice(i, 1);
-					break;
-				}
-			}
-		}
-
-		multipliers = [];
-		for (i = 0, n = fields.length; i < n; i++) {
-			multipliers.push(fields[i].direction === 'desc' ? -1 : 1);
-		}
-
-		// build function
-		fields_count = fields.length;
-		if (!fields_count) {
-			return null;
-		} else if (fields_count === 1) {
-			field = fields[0].field;
-			multiplier = multipliers[0];
-			return function(a, b) {
-				return multiplier * cmp(
-					get_field(field, a),
-					get_field(field, b)
-				);
-			};
-		} else {
-			return function(a, b) {
-				var i, result, a_value, b_value, field;
-				for (i = 0; i < fields_count; i++) {
-					field = fields[i].field;
-					result = multipliers[i] * cmp(
-						get_field(field, a),
-						get_field(field, b)
-					);
-					if (result) return result;
-				}
-				return 0;
-			};
-		}
-	};
-
-	/**
-	 * Parses a search query and returns an object
-	 * with tokens and fields ready to be populated
-	 * with results.
-	 *
-	 * @param {string} query
-	 * @param {object} options
-	 * @returns {object}
-	 */
-	Sifter.prototype.prepareSearch = function(query, options) {
-		if (typeof query === 'object') return query;
-
-		options = extend({}, options);
-
-		var option_fields     = options.fields;
-		var option_sort       = options.sort;
-		var option_sort_empty = options.sort_empty;
-
-		if (option_fields && !is_array(option_fields)) options.fields = [option_fields];
-		if (option_sort && !is_array(option_sort)) options.sort = [option_sort];
-		if (option_sort_empty && !is_array(option_sort_empty)) options.sort_empty = [option_sort_empty];
-
-		return {
-			options : options,
-			query   : String(query || '').toLowerCase(),
-			tokens  : this.tokenize(query),
-			total   : 0,
-			items   : []
-		};
-	};
-
-	/**
-	 * Searches through all items and returns a sorted array of matches.
-	 *
-	 * The `options` parameter can contain:
-	 *
-	 *   - fields {string|array}
-	 *   - sort {array}
-	 *   - score {function}
-	 *   - filter {bool}
-	 *   - limit {integer}
-	 *
-	 * Returns an object containing:
-	 *
-	 *   - options {object}
-	 *   - query {string}
-	 *   - tokens {array}
-	 *   - total {int}
-	 *   - items {array}
-	 *
-	 * @param {string} query
-	 * @param {object} options
-	 * @returns {object}
-	 */
-	Sifter.prototype.search = function(query, options) {
-		var self = this, value, score, search, calculateScore;
-		var fn_sort;
-		var fn_score;
-
-		search  = this.prepareSearch(query, options);
-		options = search.options;
-		query   = search.query;
-
-		// generate result scoring function
-		fn_score = options.score || self.getScoreFunction(search);
-
-		// perform search and sort
-		if (query.length) {
-			self.iterator(self.items, function(item, id) {
-				score = fn_score(item);
-				if (options.filter === false || score > 0) {
-					search.items.push({'score': score, 'id': id});
-				}
-			});
-		} else {
-			self.iterator(self.items, function(item, id) {
-				search.items.push({'score': 1, 'id': id});
-			});
-		}
-
-		fn_sort = self.getSortFunction(search, options);
-		if (fn_sort) search.items.sort(fn_sort);
-
-		// apply limits
-		search.total = search.items.length;
-		if (typeof options.limit === 'number') {
-			search.items = search.items.slice(0, options.limit);
-		}
-
-		return search;
-	};
-
-	// utilities
-	// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-
-	var cmp = function(a, b) {
-		if (typeof a === 'number' && typeof b === 'number') {
-			return a > b ? 1 : (a < b ? -1 : 0);
-		}
-		a = asciifold(String(a || ''));
-		b = asciifold(String(b || ''));
-		if (a > b) return 1;
-		if (b > a) return -1;
-		return 0;
-	};
-
-	var extend = function(a, b) {
-		var i, n, k, object;
-		for (i = 1, n = arguments.length; i < n; i++) {
-			object = arguments[i];
-			if (!object) continue;
-			for (k in object) {
-				if (object.hasOwnProperty(k)) {
-					a[k] = object[k];
-				}
-			}
-		}
-		return a;
-	};
-
-	var trim = function(str) {
-		return (str + '').replace(/^\s+|\s+$|/g, '');
-	};
-
-	var escape_regex = function(str) {
-		return (str + '').replace(/([.?*+^$[\]\\(){}|-])/g, '\\$1');
-	};
-
-	var is_array = Array.isArray || (typeof $ !== 'undefined' && $.isArray) || function(object) {
-		return Object.prototype.toString.call(object) === '[object Array]';
-	};
-
-	var DIACRITICS = {
-		'a': '[aÀÁÂÃÄÅàáâãäåĀāąĄ]',
-		'c': '[cÇçćĆčČ]',
-		'd': '[dđĐďĎð]',
-		'e': '[eÈÉÊËèéêëěĚĒēęĘ]',
-		'i': '[iÌÍÎÏìíîïĪī]',
-		'l': '[lłŁ]',
-		'n': '[nÑñňŇńŃ]',
-		'o': '[oÒÓÔÕÕÖØòóôõöøŌō]',
-		'r': '[rřŘ]',
-		's': '[sŠšśŚ]',
-		't': '[tťŤ]',
-		'u': '[uÙÚÛÜùúûüůŮŪū]',
-		'y': '[yŸÿýÝ]',
-		'z': '[zŽžżŻźŹ]'
-	};
-
-	var asciifold = (function() {
-		var i, n, k, chunk;
-		var foreignletters = '';
-		var lookup = {};
-		for (k in DIACRITICS) {
-			if (DIACRITICS.hasOwnProperty(k)) {
-				chunk = DIACRITICS[k].substring(2, DIACRITICS[k].length - 1);
-				foreignletters += chunk;
-				for (i = 0, n = chunk.length; i < n; i++) {
-					lookup[chunk.charAt(i)] = k;
-				}
-			}
-		}
-		var regexp = new RegExp('[' +  foreignletters + ']', 'g');
-		return function(str) {
-			return str.replace(regexp, function(foreignletter) {
-				return lookup[foreignletter];
-			}).toLowerCase();
-		};
-	})();
-
-
-	// export
-	// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-
-	return Sifter;
-}));
-
-
-
-/**
- * microplugin.js
- * Copyright (c) 2013 Brian Reavis & contributors
- *
- * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this
- * file except in compliance with the License. You may obtain a copy of the License at:
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software distributed under
- * the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF
- * ANY KIND, either express or implied. See the License for the specific language
- * governing permissions and limitations under the License.
- *
- * @author Brian Reavis <brian@thirdroute.com>
- */
-
-(function(root, factory) {
-	if (typeof define === 'function' && define.amd) {
-		define('microplugin', factory);
-	} else if (typeof exports === 'object') {
-		module.exports = factory();
-	} else {
-		root.MicroPlugin = factory();
-	}
-}(this, function() {
-	var MicroPlugin = {};
-
-	MicroPlugin.mixin = function(Interface) {
-		Interface.plugins = {};
-
-		/**
-		 * Initializes the listed plugins (with options).
-		 * Acceptable formats:
-		 *
-		 * List (without options):
-		 *   ['a', 'b', 'c']
-		 *
-		 * List (with options):
-		 *   [{'name': 'a', options: {}}, {'name': 'b', options: {}}]
-		 *
-		 * Hash (with options):
-		 *   {'a': { ... }, 'b': { ... }, 'c': { ... }}
-		 *
-		 * @param {mixed} plugins
-		 */
-		Interface.prototype.initializePlugins = function(plugins) {
-			var i, n, key;
-			var self  = this;
-			var queue = [];
-
-			self.plugins = {
-				names     : [],
-				settings  : {},
-				requested : {},
-				loaded    : {}
-			};
-
-			if (utils.isArray(plugins)) {
-				for (i = 0, n = plugins.length; i < n; i++) {
-					if (typeof plugins[i] === 'string') {
-						queue.push(plugins[i]);
-					} else {
-						self.plugins.settings[plugins[i].name] = plugins[i].options;
-						queue.push(plugins[i].name);
-					}
-				}
-			} else if (plugins) {
-				for (key in plugins) {
-					if (plugins.hasOwnProperty(key)) {
-						self.plugins.settings[key] = plugins[key];
-						queue.push(key);
-					}
-				}
-			}
-
-			while (queue.length) {
-				self.require(queue.shift());
-			}
-		};
-
-		Interface.prototype.loadPlugin = function(name) {
-			var self    = this;
-			var plugins = self.plugins;
-			var plugin  = Interface.plugins[name];
-
-			if (!Interface.plugins.hasOwnProperty(name)) {
-				throw new Error('Unable to find "' +  name + '" plugin');
-			}
-
-			plugins.requested[name] = true;
-			plugins.loaded[name] = plugin.fn.apply(self, [self.plugins.settings[name] || {}]);
-			plugins.names.push(name);
-		};
-
-		/**
-		 * Initializes a plugin.
-		 *
-		 * @param {string} name
-		 */
-		Interface.prototype.require = function(name) {
-			var self = this;
-			var plugins = self.plugins;
-
-			if (!self.plugins.loaded.hasOwnProperty(name)) {
-				if (plugins.requested[name]) {
-					throw new Error('Plugin has circular dependency ("' + name + '")');
-				}
-				self.loadPlugin(name);
-			}
-
-			return plugins.loaded[name];
-		};
-
-		/**
-		 * Registers a plugin.
-		 *
-		 * @param {string} name
-		 * @param {function} fn
-		 */
-		Interface.define = function(name, fn) {
-			Interface.plugins[name] = {
-				'name' : name,
-				'fn'   : fn
-			};
-		};
-	};
-
-	var utils = {
-		isArray: Array.isArray || function(vArg) {
-			return Object.prototype.toString.call(vArg) === '[object Array]';
-		}
-	};
-
-	return MicroPlugin;
-}));
-
-/**
- * selectize.js (v)
- * Copyright (c) 2013–2015 Brian Reavis & contributors
- *
- * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this
- * file except in compliance with the License. You may obtain a copy of the License at:
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software distributed under
- * the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF
- * ANY KIND, either express or implied. See the License for the specific language
- * governing permissions and limitations under the License.
- *
- * @author Brian Reavis <brian@thirdroute.com>
- */
-
-/*jshint curly:false */
-/*jshint browser:true */
-
-(function(root, factory) {
-	if (typeof define === 'function' && define.amd) {
-		define('selectize', ['jquery','sifter','microplugin'], factory);
-	} else if (typeof exports === 'object') {
-		module.exports = factory(require('jquery'), require('sifter'), require('microplugin'));
-	} else {
-		root.Selectize = factory(root.jQuery, root.Sifter, root.MicroPlugin);
-	}
-}(this, function($, Sifter, MicroPlugin) {
-	'use strict';
-
-	var highlight = function($element, pattern) {
-		if (typeof pattern === 'string' && !pattern.length) return;
-		var regex = (typeof pattern === 'string') ? new RegExp(pattern, 'i') : pattern;
-	
-		var highlight = function(node) {
-			var skip = 0;
-			if (node.nodeType === 3) {
-				var pos = node.data.search(regex);
-				if (pos >= 0 && node.data.length > 0) {
-					var match = node.data.match(regex);
-					var spannode = document.createElement('span');
-					spannode.className = 'highlight';
-					var middlebit = node.splitText(pos);
-					var endbit = middlebit.splitText(match[0].length);
-					var middleclone = middlebit.cloneNode(true);
-					spannode.appendChild(middleclone);
-					middlebit.parentNode.replaceChild(spannode, middlebit);
-					skip = 1;
-				}
-			} else if (node.nodeType === 1 && node.childNodes && !/(script|style)/i.test(node.tagName)) {
-				for (var i = 0; i < node.childNodes.length; ++i) {
-					i += highlight(node.childNodes[i]);
-				}
-			}
-			return skip;
-		};
-	
-		return $element.each(function() {
-			highlight(this);
-		});
-	};
-	
-	var MicroEvent = function() {};
-	MicroEvent.prototype = {
-		on: function(event, fct){
-			this._events = this._events || {};
-			this._events[event] = this._events[event] || [];
-			this._events[event].push(fct);
-		},
-		off: function(event, fct){
-			var n = arguments.length;
-			if (n === 0) return delete this._events;
-			if (n === 1) return delete this._events[event];
-	
-			this._events = this._events || {};
-			if (event in this._events === false) return;
-			this._events[event].splice(this._events[event].indexOf(fct), 1);
-		},
-		trigger: function(event /* , args... */){
-			this._events = this._events || {};
-			if (event in this._events === false) return;
-			for (var i = 0; i < this._events[event].length; i++){
-				this._events[event][i].apply(this, Array.prototype.slice.call(arguments, 1));
-			}
-		}
-	};
-	
-	/**
-	 * Mixin will delegate all MicroEvent.js function in the destination object.
-	 *
-	 * - MicroEvent.mixin(Foobar) will make Foobar able to use MicroEvent
-	 *
-	 * @param {object} the object which will support MicroEvent
-	 */
-	MicroEvent.mixin = function(destObject){
-		var props = ['on', 'off', 'trigger'];
-		for (var i = 0; i < props.length; i++){
-			destObject.prototype[props[i]] = MicroEvent.prototype[props[i]];
-		}
-	};
-	
-	var IS_MAC        = /Mac/.test(navigator.userAgent);
-	
-	var KEY_A         = 65;
-	var KEY_COMMA     = 188;
-	var KEY_RETURN    = 13;
-	var KEY_ESC       = 27;
-	var KEY_LEFT      = 37;
-	var KEY_UP        = 38;
-	var KEY_P         = 80;
-	var KEY_RIGHT     = 39;
-	var KEY_DOWN      = 40;
-	var KEY_N         = 78;
-	var KEY_BACKSPACE = 8;
-	var KEY_DELETE    = 46;
-	var KEY_SHIFT     = 16;
-	var KEY_CMD       = IS_MAC ? 91 : 17;
-	var KEY_CTRL      = IS_MAC ? 18 : 17;
-	var KEY_TAB       = 9;
-	
-	var TAG_SELECT    = 1;
-	var TAG_INPUT     = 2;
-	
-	// for now, android support in general is too spotty to support validity
-	var SUPPORTS_VALIDITY_API = !/android/i.test(window.navigator.userAgent) && !!document.createElement('form').validity;
-	
-	var isset = function(object) {
-		return typeof object !== 'undefined';
-	};
-	
-	/**
-	 * Converts a scalar to its best string representation
-	 * for hash keys and HTML attribute values.
-	 *
-	 * Transformations:
-	 *   'str'     -> 'str'
-	 *   null      -> ''
-	 *   undefined -> ''
-	 *   true      -> '1'
-	 *   false     -> '0'
-	 *   0         -> '0'
-	 *   1         -> '1'
-	 *
-	 * @param {string} value
-	 * @returns {string|null}
-	 */
-	var hash_key = function(value) {
-		if (typeof value === 'undefined' || value === null) return null;
-		if (typeof value === 'boolean') return value ? '1' : '0';
-		return value + '';
-	};
-	
-	/**
-	 * Escapes a string for use within HTML.
-	 *
-	 * @param {string} str
-	 * @returns {string}
-	 */
-	var escape_html = function(str) {
-		return (str + '')
-			.replace(/&/g, '&amp;')
-			.replace(/</g, '&lt;')
-			.replace(/>/g, '&gt;')
-			.replace(/"/g, '&quot;');
-	};
-	
-	/**
-	 * Escapes "$" characters in replacement strings.
-	 *
-	 * @param {string} str
-	 * @returns {string}
-	 */
-	var escape_replace = function(str) {
-		return (str + '').replace(/\$/g, '$$$$');
-	};
-	
-	var hook = {};
-	
-	/**
-	 * Wraps `method` on `self` so that `fn`
-	 * is invoked before the original method.
-	 *
-	 * @param {object} self
-	 * @param {string} method
-	 * @param {function} fn
-	 */
-	hook.before = function(self, method, fn) {
-		var original = self[method];
-		self[method] = function() {
-			fn.apply(self, arguments);
-			return original.apply(self, arguments);
-		};
-	};
-	
-	/**
-	 * Wraps `method` on `self` so that `fn`
-	 * is invoked after the original method.
-	 *
-	 * @param {object} self
-	 * @param {string} method
-	 * @param {function} fn
-	 */
-	hook.after = function(self, method, fn) {
-		var original = self[method];
-		self[method] = function() {
-			var result = original.apply(self, arguments);
-			fn.apply(self, arguments);
-			return result;
-		};
-	};
-	
-	/**
-	 * Wraps `fn` so that it can only be invoked once.
-	 *
-	 * @param {function} fn
-	 * @returns {function}
-	 */
-	var once = function(fn) {
-		var called = false;
-		return function() {
-			if (called) return;
-			called = true;
-			fn.apply(this, arguments);
-		};
-	};
-	
-	/**
-	 * Wraps `fn` so that it can only be called once
-	 * every `delay` milliseconds (invoked on the falling edge).
-	 *
-	 * @param {function} fn
-	 * @param {int} delay
-	 * @returns {function}
-	 */
-	var debounce = function(fn, delay) {
-		var timeout;
-		return function() {
-			var self = this;
-			var args = arguments;
-			window.clearTimeout(timeout);
-			timeout = window.setTimeout(function() {
-				fn.apply(self, args);
-			}, delay);
-		};
-	};
-	
-	/**
-	 * Debounce all fired events types listed in `types`
-	 * while executing the provided `fn`.
-	 *
-	 * @param {object} self
-	 * @param {array} types
-	 * @param {function} fn
-	 */
-	var debounce_events = function(self, types, fn) {
-		var type;
-		var trigger = self.trigger;
-		var event_args = {};
-	
-		// override trigger method
-		self.trigger = function() {
-			var type = arguments[0];
-			if (types.indexOf(type) !== -1) {
-				event_args[type] = arguments;
-			} else {
-				return trigger.apply(self, arguments);
-			}
-		};
-	
-		// invoke provided function
-		fn.apply(self, []);
-		self.trigger = trigger;
-	
-		// trigger queued events
-		for (type in event_args) {
-			if (event_args.hasOwnProperty(type)) {
-				trigger.apply(self, event_args[type]);
-			}
-		}
-	};
-	
-	/**
-	 * A workaround for http://bugs.jquery.com/ticket/6696
-	 *
-	 * @param {object} $parent - Parent element to listen on.
-	 * @param {string} event - Event name.
-	 * @param {string} selector - Descendant selector to filter by.
-	 * @param {function} fn - Event handler.
-	 */
-	var watchChildEvent = function($parent, event, selector, fn) {
-		$parent.on(event, selector, function(e) {
-			var child = e.target;
-			while (child && child.parentNode !== $parent[0]) {
-				child = child.parentNode;
-			}
-			e.currentTarget = child;
-			return fn.apply(this, [e]);
-		});
-	};
-	
-	/**
-	 * Determines the current selection within a text input control.
-	 * Returns an object containing:
-	 *   - start
-	 *   - length
-	 *
-	 * @param {object} input
-	 * @returns {object}
-	 */
-	var getSelection = function(input) {
-		var result = {};
-		if ('selectionStart' in input) {
-			result.start = input.selectionStart;
-			result.length = input.selectionEnd - result.start;
-		} else if (document.selection) {
-			input.focus();
-			var sel = document.selection.createRange();
-			var selLen = document.selection.createRange().text.length;
-			sel.moveStart('character', -input.value.length);
-			result.start = sel.text.length - selLen;
-			result.length = selLen;
-		}
-		return result;
-	};
-	
-	/**
-	 * Copies CSS properties from one element to another.
-	 *
-	 * @param {object} $from
-	 * @param {object} $to
-	 * @param {array} properties
-	 */
-	var transferStyles = function($from, $to, properties) {
-		var i, n, styles = {};
-		if (properties) {
-			for (i = 0, n = properties.length; i < n; i++) {
-				styles[properties[i]] = $from.css(properties[i]);
-			}
-		} else {
-			styles = $from.css();
-		}
-		$to.css(styles);
-	};
-	
-	/**
-	 * Measures the width of a string within a
-	 * parent element (in pixels).
-	 *
-	 * @param {string} str
-	 * @param {object} $parent
-	 * @returns {int}
-	 */
-	var measureString = function(str, $parent) {
-		if (!str) {
-			return 0;
-		}
-	
-		var $test = $('<test>').css({
-			position: 'absolute',
-			top: -99999,
-			left: -99999,
-			width: 'auto',
-			padding: 0,
-			whiteSpace: 'pre'
-		}).text(str).appendTo('body');
-	
-		transferStyles($parent, $test, [
-			'letterSpacing',
-			'fontSize',
-			'fontFamily',
-			'fontWeight',
-			'textTransform'
-		]);
-	
-		var width = $test.width();
-		$test.remove();
-	
-		return width;
-	};
-	
-	/**
-	 * Sets up an input to grow horizontally as the user
-	 * types. If the value is changed manually, you can
-	 * trigger the "update" handler to resize:
-	 *
-	 * $input.trigger('update');
-	 *
-	 * @param {object} $input
-	 */
-	var autoGrow = function($input) {
-		var currentWidth = null;
-	
-		var update = function(e, options) {
-			var value, keyCode, printable, placeholder, width;
-			var shift, character, selection;
-			e = e || window.event || {};
-			options = options || {};
-	
-			if (e.metaKey || e.altKey) return;
-			if (!options.force && $input.data('grow') === false) return;
-	
-			value = $input.val();
-			if (e.type && e.type.toLowerCase() === 'keydown') {
-				keyCode = e.keyCode;
-				printable = (
-					(keyCode >= 97 && keyCode <= 122) || // a-z
-					(keyCode >= 65 && keyCode <= 90)  || // A-Z
-					(keyCode >= 48 && keyCode <= 57)  || // 0-9
-					keyCode === 32 // space
-				);
-	
-				if (keyCode === KEY_DELETE || keyCode === KEY_BACKSPACE) {
-					selection = getSelection($input[0]);
-					if (selection.length) {
-						value = value.substring(0, selection.start) + value.substring(selection.start + selection.length);
-					} else if (keyCode === KEY_BACKSPACE && selection.start) {
-						value = value.substring(0, selection.start - 1) + value.substring(selection.start + 1);
-					} else if (keyCode === KEY_DELETE && typeof selection.start !== 'undefined') {
-						value = value.substring(0, selection.start) + value.substring(selection.start + 1);
-					}
-				} else if (printable) {
-					shift = e.shiftKey;
-					character = String.fromCharCode(e.keyCode);
-					if (shift) character = character.toUpperCase();
-					else character = character.toLowerCase();
-					value += character;
-				}
-			}
-	
-			placeholder = $input.attr('placeholder');
-			if (!value && placeholder) {
-				value = placeholder;
-			}
-	
-			width = measureString(value, $input) + 4;
-			if (width !== currentWidth) {
-				currentWidth = width;
-				$input.width(width);
-				$input.triggerHandler('resize');
-			}
-		};
-	
-		$input.on('keydown keyup update blur', update);
-		update();
-	};
-	
-	var domToString = function(d) {
-		var tmp = document.createElement('div');
-	
-		tmp.appendChild(d.cloneNode(true));
-	
-		return tmp.innerHTML;
-	};
-	
-	
-	var Selectize = function($input, settings) {
-		var key, i, n, dir, input, self = this;
-		input = $input[0];
-		input.selectize = self;
-	
-		// detect rtl environment
-		var computedStyle = window.getComputedStyle && window.getComputedStyle(input, null);
-		dir = computedStyle ? computedStyle.getPropertyValue('direction') : input.currentStyle && input.currentStyle.direction;
-		dir = dir || $input.parents('[dir]:first').attr('dir') || '';
-	
-		// setup default state
-		$.extend(self, {
-			order            : 0,
-			settings         : settings,
-			$input           : $input,
-			tabIndex         : $input.attr('tabindex') || '',
-			tagType          : input.tagName.toLowerCase() === 'select' ? TAG_SELECT : TAG_INPUT,
-			rtl              : /rtl/i.test(dir),
-	
-			eventNS          : '.selectize' + (++Selectize.count),
-			highlightedValue : null,
-			isOpen           : false,
-			isDisabled       : false,
-			isRequired       : $input.is('[required]'),
-			isInvalid        : false,
-			isLocked         : false,
-			isFocused        : false,
-			isInputHidden    : false,
-			isSetup          : false,
-			isShiftDown      : false,
-			isCmdDown        : false,
-			isCtrlDown       : false,
-			ignoreFocus      : false,
-			ignoreBlur       : false,
-			ignoreHover      : false,
-			hasOptions       : false,
-			currentResults   : null,
-			lastValue        : '',
-			caretPos         : 0,
-			loading          : 0,
-			loadedSearches   : {},
-	
-			$activeOption    : null,
-			$activeItems     : [],
-	
-			optgroups        : {},
-			options          : {},
-			userOptions      : {},
-			items            : [],
-			renderCache      : {},
-			onSearchChange   : settings.loadThrottle === null ? self.onSearchChange : debounce(self.onSearchChange, settings.loadThrottle)
-		});
-	
-		// search system
-		self.sifter = new Sifter(this.options, {diacritics: settings.diacritics});
-	
-		// build options table
-		if (self.settings.options) {
-			for (i = 0, n = self.settings.options.length; i < n; i++) {
-				self.registerOption(self.settings.options[i]);
-			}
-			delete self.settings.options;
-		}
-	
-		// build optgroup table
-		if (self.settings.optgroups) {
-			for (i = 0, n = self.settings.optgroups.length; i < n; i++) {
-				self.registerOptionGroup(self.settings.optgroups[i]);
-			}
-			delete self.settings.optgroups;
-		}
-	
-		// option-dependent defaults
-		self.settings.mode = self.settings.mode || (self.settings.maxItems === 1 ? 'single' : 'multi');
-		if (typeof self.settings.hideSelected !== 'boolean') {
-			self.settings.hideSelected = self.settings.mode === 'multi';
-		}
-	
-		self.initializePlugins(self.settings.plugins);
-		self.setupCallbacks();
-		self.setupTemplates();
-		self.setup();
-	};
-	
-	// mixins
-	// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-	
-	MicroEvent.mixin(Selectize);
-	MicroPlugin.mixin(Selectize);
-	
-	// methods
-	// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-	
-	$.extend(Selectize.prototype, {
-	
-		/**
-		 * Creates all elements and sets up event bindings.
-		 */
-		setup: function() {
-			var self      = this;
-			var settings  = self.settings;
-			var eventNS   = self.eventNS;
-			var $window   = $(window);
-			var $document = $(document);
-			var $input    = self.$input;
-	
-			var $wrapper;
-			var $control;
-			var $control_input;
-			var $dropdown;
-			var $dropdown_content;
-			var $dropdown_parent;
-			var inputMode;
-			var timeout_blur;
-			var timeout_focus;
-			var classes;
-			var classes_plugins;
-	
-			inputMode         = self.settings.mode;
-			classes           = $input.attr('class') || '';
-	
-			$wrapper          = $('<div>').addClass(settings.wrapperClass).addClass(classes).addClass(inputMode);
-			$control          = $('<div>').addClass(settings.inputClass).addClass('items').appendTo($wrapper);
-			$control_input    = $('<input type="text" autocomplete="off" />').appendTo($control).attr('tabindex', $input.is(':disabled') ? '-1' : self.tabIndex);
-			$dropdown_parent  = $(settings.dropdownParent || $wrapper);
-			$dropdown         = $('<div>').addClass(settings.dropdownClass).addClass(inputMode).hide().appendTo($dropdown_parent);
-			$dropdown_content = $('<div>').addClass(settings.dropdownContentClass).appendTo($dropdown);
-	
-			if(self.settings.copyClassesToDropdown) {
-				$dropdown.addClass(classes);
-			}
-	
-			$wrapper.css({
-				width: $input[0].style.width
-			});
-	
-			if (self.plugins.names.length) {
-				classes_plugins = 'plugin-' + self.plugins.names.join(' plugin-');
-				$wrapper.addClass(classes_plugins);
-				$dropdown.addClass(classes_plugins);
-			}
-	
-			if ((settings.maxItems === null || settings.maxItems > 1) && self.tagType === TAG_SELECT) {
-				$input.attr('multiple', 'multiple');
-			}
-	
-			if (self.settings.placeholder) {
-				$control_input.attr('placeholder', settings.placeholder);
-			}
-	
-			// if splitOn was not passed in, construct it from the delimiter to allow pasting universally
-			if (!self.settings.splitOn && self.settings.delimiter) {
-				var delimiterEscaped = self.settings.delimiter.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
-				self.settings.splitOn = new RegExp('\\s*' + delimiterEscaped + '+\\s*');
-			}
-	
-			if ($input.attr('autocorrect')) {
-				$control_input.attr('autocorrect', $input.attr('autocorrect'));
-			}
-	
-			if ($input.attr('autocapitalize')) {
-				$control_input.attr('autocapitalize', $input.attr('autocapitalize'));
-			}
-	
-			self.$wrapper          = $wrapper;
-			self.$control          = $control;
-			self.$control_input    = $control_input;
-			self.$dropdown         = $dropdown;
-			self.$dropdown_content = $dropdown_content;
-	
-			$dropdown.on('mouseenter', '[data-selectable]', function() { return self.onOptionHover.apply(self, arguments); });
-			$dropdown.on('mousedown click', '[data-selectable]', function() { return self.onOptionSelect.apply(self, arguments); });
-			watchChildEvent($control, 'mousedown', '*:not(input)', function() { return self.onItemSelect.apply(self, arguments); });
-			autoGrow($control_input);
-	
-			$control.on({
-				mousedown : function() { return self.onMouseDown.apply(self, arguments); },
-				click     : function() { return self.onClick.apply(self, arguments); }
-			});
-	
-			$control_input.on({
-				mousedown : function(e) { e.stopPropagation(); },
-				keydown   : function() { return self.onKeyDown.apply(self, arguments); },
-				keyup     : function() { return self.onKeyUp.apply(self, arguments); },
-				keypress  : function() { return self.onKeyPress.apply(self, arguments); },
-				resize    : function() { self.positionDropdown.apply(self, []); },
-				blur      : function() { return self.onBlur.apply(self, arguments); },
-				focus     : function() { self.ignoreBlur = false; return self.onFocus.apply(self, arguments); },
-				paste     : function() { return self.onPaste.apply(self, arguments); }
-			});
-	
-			$document.on('keydown' + eventNS, function(e) {
-				self.isCmdDown = e[IS_MAC ? 'metaKey' : 'ctrlKey'];
-				self.isCtrlDown = e[IS_MAC ? 'altKey' : 'ctrlKey'];
-				self.isShiftDown = e.shiftKey;
-			});
-	
-			$document.on('keyup' + eventNS, function(e) {
-				if (e.keyCode === KEY_CTRL) self.isCtrlDown = false;
-				if (e.keyCode === KEY_SHIFT) self.isShiftDown = false;
-				if (e.keyCode === KEY_CMD) self.isCmdDown = false;
-			});
-	
-			$document.on('mousedown' + eventNS, function(e) {
-				if (self.isFocused) {
-					// prevent events on the dropdown scrollbar from causing the control to blur
-					if (e.target === self.$dropdown[0] || e.target.parentNode === self.$dropdown[0]) {
-						return false;
-					}
-					// blur on click outside
-					if (!self.$control.has(e.target).length && e.target !== self.$control[0]) {
-						self.blur(e.target);
-					}
-				}
-			});
-	
-			$window.on(['scroll' + eventNS, 'resize' + eventNS].join(' '), function() {
-				if (self.isOpen) {
-					self.positionDropdown.apply(self, arguments);
-				}
-			});
-			$window.on('mousemove' + eventNS, function() {
-				self.ignoreHover = false;
-			});
-	
-			// store original children and tab index so that they can be
-			// restored when the destroy() method is called.
-			this.revertSettings = {
-				$children : $input.children().detach(),
-				tabindex  : $input.attr('tabindex')
-			};
-	
-			$input.attr('tabindex', -1).hide().after(self.$wrapper);
-	
-			if ($.isArray(settings.items)) {
-				self.setValue(settings.items);
-				delete settings.items;
-			}
-	
-			// feature detect for the validation API
-			if (SUPPORTS_VALIDITY_API) {
-				$input.on('invalid' + eventNS, function(e) {
-					e.preventDefault();
-					self.isInvalid = true;
-					self.refreshState();
-				});
-			}
-	
-			self.updateOriginalInput();
-			self.refreshItems();
-			self.refreshState();
-			self.updatePlaceholder();
-			self.isSetup = true;
-	
-			if ($input.is(':disabled')) {
-				self.disable();
-			}
-	
-			self.on('change', this.onChange);
-	
-			$input.data('selectize', self);
-			$input.addClass('selectized');
-			self.trigger('initialize');
-	
-			// preload options
-			if (settings.preload === true) {
-				self.onSearchChange('');
-			}
-	
-		},
-	
-		/**
-		 * Sets up default rendering functions.
-		 */
-		setupTemplates: function() {
-			var self = this;
-			var field_label = self.settings.labelField;
-			var field_optgroup = self.settings.optgroupLabelField;
-	
-			var templates = {
-				'optgroup': function(data) {
-					return '<div class="optgroup">' + data.html + '</div>';
-				},
-				'optgroup_header': function(data, escape) {
-					return '<div class="optgroup-header">' + escape(data[field_optgroup]) + '</div>';
-				},
-				'option': function(data, escape) {
-					return '<div class="option">' + escape(data[field_label]) + '</div>';
-				},
-				'item': function(data, escape) {
-					return '<div class="item">' + escape(data[field_label]) + '</div>';
-				},
-				'option_create': function(data, escape) {
-					return '<div class="create">Add <strong>' + escape(data.input) + '</strong>&hellip;</div>';
-				}
-			};
-	
-			self.settings.render = $.extend({}, templates, self.settings.render);
-		},
-	
-		/**
-		 * Maps fired events to callbacks provided
-		 * in the settings used when creating the control.
-		 */
-		setupCallbacks: function() {
-			var key, fn, callbacks = {
-				'initialize'      : 'onInitialize',
-				'change'          : 'onChange',
-				'item_add'        : 'onItemAdd',
-				'item_remove'     : 'onItemRemove',
-				'clear'           : 'onClear',
-				'option_add'      : 'onOptionAdd',
-				'option_remove'   : 'onOptionRemove',
-				'option_clear'    : 'onOptionClear',
-				'optgroup_add'    : 'onOptionGroupAdd',
-				'optgroup_remove' : 'onOptionGroupRemove',
-				'optgroup_clear'  : 'onOptionGroupClear',
-				'dropdown_open'   : 'onDropdownOpen',
-				'dropdown_close'  : 'onDropdownClose',
-				'type'            : 'onType',
-				'load'            : 'onLoad',
-				'focus'           : 'onFocus',
-				'blur'            : 'onBlur'
-			};
-	
-			for (key in callbacks) {
-				if (callbacks.hasOwnProperty(key)) {
-					fn = this.settings[callbacks[key]];
-					if (fn) this.on(key, fn);
-				}
-			}
-		},
-	
-		/**
-		 * Triggered when the main control element
-		 * has a click event.
-		 *
-		 * @param {object} e
-		 * @return {boolean}
-		 */
-		onClick: function(e) {
-			var self = this;
-	
-			// necessary for mobile webkit devices (manual focus triggering
-			// is ignored unless invoked within a click event)
-			if (!self.isFocused) {
-				self.focus();
-				e.preventDefault();
-			}
-		},
-	
-		/**
-		 * Triggered when the main control element
-		 * has a mouse down event.
-		 *
-		 * @param {object} e
-		 * @return {boolean}
-		 */
-		onMouseDown: function(e) {
-			var self = this;
-			var defaultPrevented = e.isDefaultPrevented();
-			var $target = $(e.target);
-	
-			if (self.isFocused) {
-				// retain focus by preventing native handling. if the
-				// event target is the input it should not be modified.
-				// otherwise, text selection within the input won't work.
-				if (e.target !== self.$control_input[0]) {
-					if (self.settings.mode === 'single') {
-						// toggle dropdown
-						self.isOpen ? self.close() : self.open();
-					} else if (!defaultPrevented) {
-						self.setActiveItem(null);
-					}
-					return false;
-				}
-			} else {
-				// give control focus
-				if (!defaultPrevented) {
-					window.setTimeout(function() {
-						self.focus();
-					}, 0);
-				}
-			}
-		},
-	
-		/**
-		 * Triggered when the value of the control has been changed.
-		 * This should propagate the event to the original DOM
-		 * input / select element.
-		 */
-		onChange: function() {
-			this.$input.trigger('change');
-		},
-	
-		/**
-		 * Triggered on <input> paste.
-		 *
-		 * @param {object} e
-		 * @returns {boolean}
-		 */
-		onPaste: function(e) {
-			var self = this;
-			if (self.isFull() || self.isInputHidden || self.isLocked) {
-				e.preventDefault();
-			} else {
-				// If a regex or string is included, this will split the pasted
-				// input and create Items for each separate value
-				if (self.settings.splitOn) {
-					setTimeout(function() {
-						var splitInput = $.trim(self.$control_input.val() || '').split(self.settings.splitOn);
-						for (var i = 0, n = splitInput.length; i < n; i++) {
-							self.createItem(splitInput[i]);
-						}
-					}, 0);
-				}
-			}
-		},
-	
-		/**
-		 * Triggered on <input> keypress.
-		 *
-		 * @param {object} e
-		 * @returns {boolean}
-		 */
-		onKeyPress: function(e) {
-			if (this.isLocked) return e && e.preventDefault();
-			var character = String.fromCharCode(e.keyCode || e.which);
-			if (this.settings.create && this.settings.mode === 'multi' && character === this.settings.delimiter) {
-				this.createItem();
-				e.preventDefault();
-				return false;
-			}
-		},
-	
-		/**
-		 * Triggered on <input> keydown.
-		 *
-		 * @param {object} e
-		 * @returns {boolean}
-		 */
-		onKeyDown: function(e) {
-			var isInput = e.target === this.$control_input[0];
-			var self = this;
-	
-			if (self.isLocked) {
-				if (e.keyCode !== KEY_TAB) {
-					e.preventDefault();
-				}
-				return;
-			}
-	
-			switch (e.keyCode) {
-				case KEY_A:
-					if (self.isCmdDown) {
-						self.selectAll();
-						return;
-					}
-					break;
-				case KEY_ESC:
-					if (self.isOpen) {
-						e.preventDefault();
-						e.stopPropagation();
-						self.close();
-					}
-					return;
-				case KEY_N:
-					if (!e.ctrlKey || e.altKey) break;
-				case KEY_DOWN:
-					if (!self.isOpen && self.hasOptions) {
-						self.open();
-					} else if (self.$activeOption) {
-						self.ignoreHover = true;
-						var $next = self.getAdjacentOption(self.$activeOption, 1);
-						if ($next.length) self.setActiveOption($next, true, true);
-					}
-					e.preventDefault();
-					return;
-				case KEY_P:
-					if (!e.ctrlKey || e.altKey) break;
-				case KEY_UP:
-					if (self.$activeOption) {
-						self.ignoreHover = true;
-						var $prev = self.getAdjacentOption(self.$activeOption, -1);
-						if ($prev.length) self.setActiveOption($prev, true, true);
-					}
-					e.preventDefault();
-					return;
-				case KEY_RETURN:
-					if (self.isOpen && self.$activeOption) {
-						self.onOptionSelect({currentTarget: self.$activeOption});
-						e.preventDefault();
-					}
-					return;
-				case KEY_LEFT:
-					self.advanceSelection(-1, e);
-					return;
-				case KEY_RIGHT:
-					self.advanceSelection(1, e);
-					return;
-				case KEY_TAB:
-					if (self.settings.selectOnTab && self.isOpen && self.$activeOption) {
-						self.onOptionSelect({currentTarget: self.$activeOption});
-	
-						// Default behaviour is to jump to the next field, we only want this
-						// if the current field doesn't accept any more entries
-						if (!self.isFull()) {
-							e.preventDefault();
-						}
-					}
-					if (self.settings.create && self.createItem()) {
-						e.preventDefault();
-					}
-					return;
-				case KEY_BACKSPACE:
-				case KEY_DELETE:
-					self.deleteSelection(e);
-					return;
-			}
-	
-			if ((self.isFull() || self.isInputHidden) && !(IS_MAC ? e.metaKey : e.ctrlKey)) {
-				e.preventDefault();
-				return;
-			}
-		},
-	
-		/**
-		 * Triggered on <input> keyup.
-		 *
-		 * @param {object} e
-		 * @returns {boolean}
-		 */
-		onKeyUp: function(e) {
-			var self = this;
-	
-			if (self.isLocked) return e && e.preventDefault();
-			var value = self.$control_input.val() || '';
-			if (self.lastValue !== value) {
-				self.lastValue = value;
-				self.onSearchChange(value);
-				self.refreshOptions();
-				self.trigger('type', value);
-			}
-		},
-	
-		/**
-		 * Invokes the user-provide option provider / loader.
-		 *
-		 * Note: this function is debounced in the Selectize
-		 * constructor (by `settings.loadDelay` milliseconds)
-		 *
-		 * @param {string} value
-		 */
-		onSearchChange: function(value) {
-			var self = this;
-			var fn = self.settings.load;
-			if (!fn) return;
-			if (self.loadedSearches.hasOwnProperty(value)) return;
-			self.loadedSearches[value] = true;
-			self.load(function(callback) {
-				fn.apply(self, [value, callback]);
-			});
-		},
-	
-		/**
-		 * Triggered on <input> focus.
-		 *
-		 * @param {object} e (optional)
-		 * @returns {boolean}
-		 */
-		onFocus: function(e) {
-			var self = this;
-			var wasFocused = self.isFocused;
-	
-			if (self.isDisabled) {
-				self.blur();
-				e && e.preventDefault();
-				return false;
-			}
-	
-			if (self.ignoreFocus) return;
-			self.isFocused = true;
-			if (self.settings.preload === 'focus') self.onSearchChange('');
-	
-			if (!wasFocused) self.trigger('focus');
-	
-			if (!self.$activeItems.length) {
-				self.showInput();
-				self.setActiveItem(null);
-				self.refreshOptions(!!self.settings.openOnFocus);
-			}
-	
-			self.refreshState();
-		},
-	
-		/**
-		 * Triggered on <input> blur.
-		 *
-		 * @param {object} e
-		 * @param {Element} dest
-		 */
-		onBlur: function(e, dest) {
-			var self = this;
-			if (!self.isFocused) return;
-			self.isFocused = false;
-	
-			if (self.ignoreFocus) {
-				return;
-			} else if (!self.ignoreBlur && document.activeElement === self.$dropdown_content[0]) {
-				// necessary to prevent IE closing the dropdown when the scrollbar is clicked
-				self.ignoreBlur = true;
-				self.onFocus(e);
-				return;
-			}
-	
-			var deactivate = function() {
-				self.close();
-				self.setTextboxValue('');
-				self.setActiveItem(null);
-				self.setActiveOption(null);
-				self.setCaret(self.items.length);
-				self.refreshState();
-	
-				// IE11 bug: element still marked as active
-				(dest || document.body).focus();
-	
-				self.ignoreFocus = false;
-				self.trigger('blur');
-			};
-	
-			self.ignoreFocus = true;
-			if (self.settings.create && self.settings.createOnBlur) {
-				self.createItem(null, false, deactivate);
-			} else {
-				deactivate();
-			}
-		},
-	
-		/**
-		 * Triggered when the user rolls over
-		 * an option in the autocomplete dropdown menu.
-		 *
-		 * @param {object} e
-		 * @returns {boolean}
-		 */
-		onOptionHover: function(e) {
-			if (this.ignoreHover) return;
-			this.setActiveOption(e.currentTarget, false);
-		},
-	
-		/**
-		 * Triggered when the user clicks on an option
-		 * in the autocomplete dropdown menu.
-		 *
-		 * @param {object} e
-		 * @returns {boolean}
-		 */
-		onOptionSelect: function(e) {
-			var value, $target, $option, self = this;
-	
-			if (e.preventDefault) {
-				e.preventDefault();
-				e.stopPropagation();
-			}
-	
-			$target = $(e.currentTarget);
-			if ($target.hasClass('create')) {
-				self.createItem(null, function() {
-					if (self.settings.closeAfterSelect) {
-						self.close();
-					}
-				});
-			} else {
-				value = $target.attr('data-value');
-				if (typeof value !== 'undefined') {
-					self.lastQuery = null;
-					self.setTextboxValue('');
-					self.addItem(value);
-					if (self.settings.closeAfterSelect) {
-						self.close();
-					} else if (!self.settings.hideSelected && e.type && /mouse/.test(e.type)) {
-						self.setActiveOption(self.getOption(value));
-					}
-				}
-			}
-		},
-	
-		/**
-		 * Triggered when the user clicks on an item
-		 * that has been selected.
-		 *
-		 * @param {object} e
-		 * @returns {boolean}
-		 */
-		onItemSelect: function(e) {
-			var self = this;
-	
-			if (self.isLocked) return;
-			if (self.settings.mode === 'multi') {
-				e.preventDefault();
-				self.setActiveItem(e.currentTarget, e);
-			}
-		},
-	
-		/**
-		 * Invokes the provided method that provides
-		 * results to a callback---which are then added
-		 * as options to the control.
-		 *
-		 * @param {function} fn
-		 */
-		load: function(fn) {
-			var self = this;
-			var $wrapper = self.$wrapper.addClass(self.settings.loadingClass);
-	
-			self.loading++;
-			fn.apply(self, [function(results) {
-				self.loading = Math.max(self.loading - 1, 0);
-				if (results && results.length) {
-					self.addOption(results);
-					self.refreshOptions(self.isFocused && !self.isInputHidden);
-				}
-				if (!self.loading) {
-					$wrapper.removeClass(self.settings.loadingClass);
-				}
-				self.trigger('load', results);
-			}]);
-		},
-	
-		/**
-		 * Sets the input field of the control to the specified value.
-		 *
-		 * @param {string} value
-		 */
-		setTextboxValue: function(value) {
-			var $input = this.$control_input;
-			var changed = $input.val() !== value;
-			if (changed) {
-				$input.val(value).triggerHandler('update');
-				this.lastValue = value;
-			}
-		},
-	
-		/**
-		 * Returns the value of the control. If multiple items
-		 * can be selected (e.g. <select multiple>), this returns
-		 * an array. If only one item can be selected, this
-		 * returns a string.
-		 *
-		 * @returns {mixed}
-		 */
-		getValue: function() {
-			if (this.tagType === TAG_SELECT && this.$input.attr('multiple')) {
-				return this.items;
-			} else {
-				return this.items.join(this.settings.delimiter);
-			}
-		},
-	
-		/**
-		 * Resets the selected items to the given value.
-		 *
-		 * @param {mixed} value
-		 */
-		setValue: function(value, silent) {
-			var events = silent ? [] : ['change'];
-	
-			debounce_events(this, events, function() {
-				this.clear(silent);
-				this.addItems(value, silent);
-			});
-		},
-	
-		/**
-		 * Sets the selected item.
-		 *
-		 * @param {object} $item
-		 * @param {object} e (optional)
-		 */
-		setActiveItem: function($item, e) {
-			var self = this;
-			var eventName;
-			var i, idx, begin, end, item, swap;
-			var $last;
-	
-			if (self.settings.mode === 'single') return;
-			$item = $($item);
-	
-			// clear the active selection
-			if (!$item.length) {
-				$(self.$activeItems).removeClass('active');
-				self.$activeItems = [];
-				if (self.isFocused) {
-					self.showInput();
-				}
-				return;
-			}
-	
-			// modify selection
-			eventName = e && e.type.toLowerCase();
-	
-			if (eventName === 'mousedown' && self.isShiftDown && self.$activeItems.length) {
-				$last = self.$control.children('.active:last');
-				begin = Array.prototype.indexOf.apply(self.$control[0].childNodes, [$last[0]]);
-				end   = Array.prototype.indexOf.apply(self.$control[0].childNodes, [$item[0]]);
-				if (begin > end) {
-					swap  = begin;
-					begin = end;
-					end   = swap;
-				}
-				for (i = begin; i <= end; i++) {
-					item = self.$control[0].childNodes[i];
-					if (self.$activeItems.indexOf(item) === -1) {
-						$(item).addClass('active');
-						self.$activeItems.push(item);
-					}
-				}
-				e.preventDefault();
-			} else if ((eventName === 'mousedown' && self.isCtrlDown) || (eventName === 'keydown' && this.isShiftDown)) {
-				if ($item.hasClass('active')) {
-					idx = self.$activeItems.indexOf($item[0]);
-					self.$activeItems.splice(idx, 1);
-					$item.removeClass('active');
-				} else {
-					self.$activeItems.push($item.addClass('active')[0]);
-				}
-			} else {
-				$(self.$activeItems).removeClass('active');
-				self.$activeItems = [$item.addClass('active')[0]];
-			}
-	
-			// ensure control has focus
-			self.hideInput();
-			if (!this.isFocused) {
-				self.focus();
-			}
-		},
-	
-		/**
-		 * Sets the selected item in the dropdown menu
-		 * of available options.
-		 *
-		 * @param {object} $object
-		 * @param {boolean} scroll
-		 * @param {boolean} animate
-		 */
-		setActiveOption: function($option, scroll, animate) {
-			var height_menu, height_item, y;
-			var scroll_top, scroll_bottom;
-			var self = this;
-	
-			if (self.$activeOption) self.$activeOption.removeClass('active');
-			self.$activeOption = null;
-	
-			$option = $($option);
-			if (!$option.length) return;
-	
-			self.$activeOption = $option.addClass('active');
-	
-			if (scroll || !isset(scroll)) {
-	
-				height_menu   = self.$dropdown_content.height();
-				height_item   = self.$activeOption.outerHeight(true);
-				scroll        = self.$dropdown_content.scrollTop() || 0;
-				y             = self.$activeOption.offset().top - self.$dropdown_content.offset().top + scroll;
-				scroll_top    = y;
-				scroll_bottom = y - height_menu + height_item;
-	
-				if (y + height_item > height_menu + scroll) {
-					self.$dropdown_content.stop().animate({scrollTop: scroll_bottom}, animate ? self.settings.scrollDuration : 0);
-				} else if (y < scroll) {
-					self.$dropdown_content.stop().animate({scrollTop: scroll_top}, animate ? self.settings.scrollDuration : 0);
-				}
-	
-			}
-		},
-	
-		/**
-		 * Selects all items (CTRL + A).
-		 */
-		selectAll: function() {
-			var self = this;
-			if (self.settings.mode === 'single') return;
-	
-			self.$activeItems = Array.prototype.slice.apply(self.$control.children(':not(input)').addClass('active'));
-			if (self.$activeItems.length) {
-				self.hideInput();
-				self.close();
-			}
-			self.focus();
-		},
-	
-		/**
-		 * Hides the input element out of view, while
-		 * retaining its focus.
-		 */
-		hideInput: function() {
-			var self = this;
-	
-			self.setTextboxValue('');
-			self.$control_input.css({opacity: 0, position: 'absolute', left: self.rtl ? 10000 : -10000});
-			self.isInputHidden = true;
-		},
-	
-		/**
-		 * Restores input visibility.
-		 */
-		showInput: function() {
-			this.$control_input.css({opacity: 1, position: 'relative', left: 0});
-			this.isInputHidden = false;
-		},
-	
-		/**
-		 * Gives the control focus.
-		 */
-		focus: function() {
-			var self = this;
-			if (self.isDisabled) return;
-	
-			self.ignoreFocus = true;
-			self.$control_input[0].focus();
-			window.setTimeout(function() {
-				self.ignoreFocus = false;
-				self.onFocus();
-			}, 0);
-		},
-	
-		/**
-		 * Forces the control out of focus.
-		 *
-		 * @param {Element} dest
-		 */
-		blur: function(dest) {
-			this.$control_input[0].blur();
-			this.onBlur(null, dest);
-		},
-	
-		/**
-		 * Returns a function that scores an object
-		 * to show how good of a match it is to the
-		 * provided query.
-		 *
-		 * @param {string} query
-		 * @param {object} options
-		 * @return {function}
-		 */
-		getScoreFunction: function(query) {
-			return this.sifter.getScoreFunction(query, this.getSearchOptions());
-		},
-	
-		/**
-		 * Returns search options for sifter (the system
-		 * for scoring and sorting results).
-		 *
-		 * @see https://github.com/brianreavis/sifter.js
-		 * @return {object}
-		 */
-		getSearchOptions: function() {
-			var settings = this.settings;
-			var sort = settings.sortField;
-			if (typeof sort === 'string') {
-				sort = [{field: sort}];
-			}
-	
-			return {
-				fields      : settings.searchField,
-				conjunction : settings.searchConjunction,
-				sort        : sort
-			};
-		},
-	
-		/**
-		 * Searches through available options and returns
-		 * a sorted array of matches.
-		 *
-		 * Returns an object containing:
-		 *
-		 *   - query {string}
-		 *   - tokens {array}
-		 *   - total {int}
-		 *   - items {array}
-		 *
-		 * @param {string} query
-		 * @returns {object}
-		 */
-		search: function(query) {
-			var i, value, score, result, calculateScore;
-			var self     = this;
-			var settings = self.settings;
-			var options  = this.getSearchOptions();
-	
-			// validate user-provided result scoring function
-			if (settings.score) {
-				calculateScore = self.settings.score.apply(this, [query]);
-				if (typeof calculateScore !== 'function') {
-					throw new Error('Selectize "score" setting must be a function that returns a function');
-				}
-			}
-	
-			// perform search
-			if (query !== self.lastQuery) {
-				self.lastQuery = query;
-				result = self.sifter.search(query, $.extend(options, {score: calculateScore}));
-				self.currentResults = result;
-			} else {
-				result = $.extend(true, {}, self.currentResults);
-			}
-	
-			// filter out selected items
-			if (settings.hideSelected) {
-				for (i = result.items.length - 1; i >= 0; i--) {
-					if (self.items.indexOf(hash_key(result.items[i].id)) !== -1) {
-						result.items.splice(i, 1);
-					}
-				}
-			}
-	
-			return result;
-		},
-	
-		/**
-		 * Refreshes the list of available options shown
-		 * in the autocomplete dropdown menu.
-		 *
-		 * @param {boolean} triggerDropdown
-		 */
-		refreshOptions: function(triggerDropdown) {
-			var i, j, k, n, groups, groups_order, option, option_html, optgroup, optgroups, html, html_children, has_create_option;
-			var $active, $active_before, $create;
-	
-			if (typeof triggerDropdown === 'undefined') {
-				triggerDropdown = true;
-			}
-	
-			var self              = this;
-			var query             = $.trim(self.$control_input.val());
-			var results           = self.search(query);
-			var $dropdown_content = self.$dropdown_content;
-			var active_before     = self.$activeOption && hash_key(self.$activeOption.attr('data-value'));
-	
-			// build markup
-			n = results.items.length;
-			if (typeof self.settings.maxOptions === 'number') {
-				n = Math.min(n, self.settings.maxOptions);
-			}
-	
-			// render and group available options individually
-			groups = {};
-			groups_order = [];
-	
-			for (i = 0; i < n; i++) {
-				option      = self.options[results.items[i].id];
-				option_html = self.render('option', option);
-				optgroup    = option[self.settings.optgroupField] || '';
-				optgroups   = $.isArray(optgroup) ? optgroup : [optgroup];
-	
-				for (j = 0, k = optgroups && optgroups.length; j < k; j++) {
-					optgroup = optgroups[j];
-					if (!self.optgroups.hasOwnProperty(optgroup)) {
-						optgroup = '';
-					}
-					if (!groups.hasOwnProperty(optgroup)) {
-						groups[optgroup] = document.createDocumentFragment();
-						groups_order.push(optgroup);
-					}
-					groups[optgroup].appendChild(option_html);
-				}
-			}
-	
-			// sort optgroups
-			if (this.settings.lockOptgroupOrder) {
-				groups_order.sort(function(a, b) {
-					var a_order = self.optgroups[a].$order || 0;
-					var b_order = self.optgroups[b].$order || 0;
-					return a_order - b_order;
-				});
-			}
-	
-			// render optgroup headers & join groups
-			html = document.createDocumentFragment();
-			for (i = 0, n = groups_order.length; i < n; i++) {
-				optgroup = groups_order[i];
-				if (self.optgroups.hasOwnProperty(optgroup) && groups[optgroup].childNodes.length) {
-					// render the optgroup header and options within it,
-					// then pass it to the wrapper template
-					html_children = document.createDocumentFragment();
-					html_children.appendChild(self.render('optgroup_header', self.optgroups[optgroup]));
-					html_children.appendChild(groups[optgroup]);
-	
-					html.appendChild(self.render('optgroup', $.extend({}, self.optgroups[optgroup], {
-						html: domToString(html_children),
-						dom:  html_children
-					})));
-				} else {
-					html.appendChild(groups[optgroup]);
-				}
-			}
-	
-			$dropdown_content.html(html);
-	
-			// highlight matching terms inline
-			if (self.settings.highlight && results.query.length && results.tokens.length) {
-				for (i = 0, n = results.tokens.length; i < n; i++) {
-					highlight($dropdown_content, results.tokens[i].regex);
-				}
-			}
-	
-			// add "selected" class to selected options
-			if (!self.settings.hideSelected) {
-				for (i = 0, n = self.items.length; i < n; i++) {
-					self.getOption(self.items[i]).addClass('selected');
-				}
-			}
-	
-			// add create option
-			has_create_option = self.canCreate(query);
-			if (has_create_option) {
-				$dropdown_content.prepend(self.render('option_create', {input: query}));
-				$create = $($dropdown_content[0].childNodes[0]);
-			}
-	
-			// activate
-			self.hasOptions = results.items.length > 0 || has_create_option;
-			if (self.hasOptions) {
-				if (results.items.length > 0) {
-					$active_before = active_before && self.getOption(active_before);
-					if ($active_before && $active_before.length) {
-						$active = $active_before;
-					} else if (self.settings.mode === 'single' && self.items.length) {
-						$active = self.getOption(self.items[0]);
-					}
-					if (!$active || !$active.length) {
-						if ($create && !self.settings.addPrecedence) {
-							$active = self.getAdjacentOption($create, 1);
-						} else {
-							$active = $dropdown_content.find('[data-selectable]:first');
-						}
-					}
-				} else {
-					$active = $create;
-				}
-				self.setActiveOption($active);
-				if (triggerDropdown && !self.isOpen) { self.open(); }
-			} else {
-				self.setActiveOption(null);
-				if (triggerDropdown && self.isOpen) { self.close(); }
-			}
-		},
-	
-		/**
-		 * Adds an available option. If it already exists,
-		 * nothing will happen. Note: this does not refresh
-		 * the options list dropdown (use `refreshOptions`
-		 * for that).
-		 *
-		 * Usage:
-		 *
-		 *   this.addOption(data)
-		 *
-		 * @param {object|array} data
-		 */
-		addOption: function(data) {
-			var i, n, value, self = this;
-	
-			if ($.isArray(data)) {
-				for (i = 0, n = data.length; i < n; i++) {
-					self.addOption(data[i]);
-				}
-				return;
-			}
-	
-			if (value = self.registerOption(data)) {
-				self.userOptions[value] = true;
-				self.lastQuery = null;
-				self.trigger('option_add', value, data);
-			}
-		},
-	
-		/**
-		 * Registers an option to the pool of options.
-		 *
-		 * @param {object} data
-		 * @return {boolean|string}
-		 */
-		registerOption: function(data) {
-			var key = hash_key(data[this.settings.valueField]);
-			if (!key || this.options.hasOwnProperty(key)) return false;
-			data.$order = data.$order || ++this.order;
-			this.options[key] = data;
-			return key;
-		},
-	
-		/**
-		 * Registers an option group to the pool of option groups.
-		 *
-		 * @param {object} data
-		 * @return {boolean|string}
-		 */
-		registerOptionGroup: function(data) {
-			var key = hash_key(data[this.settings.optgroupValueField]);
-			if (!key) return false;
-	
-			data.$order = data.$order || ++this.order;
-			this.optgroups[key] = data;
-			return key;
-		},
-	
-		/**
-		 * Registers a new optgroup for options
-		 * to be bucketed into.
-		 *
-		 * @param {string} id
-		 * @param {object} data
-		 */
-		addOptionGroup: function(id, data) {
-			data[this.settings.optgroupValueField] = id;
-			if (id = this.registerOptionGroup(data)) {
-				this.trigger('optgroup_add', id, data);
-			}
-		},
-	
-		/**
-		 * Removes an existing option group.
-		 *
-		 * @param {string} id
-		 */
-		removeOptionGroup: function(id) {
-			if (this.optgroups.hasOwnProperty(id)) {
-				delete this.optgroups[id];
-				this.renderCache = {};
-				this.trigger('optgroup_remove', id);
-			}
-		},
-	
-		/**
-		 * Clears all existing option groups.
-		 */
-		clearOptionGroups: function() {
-			this.optgroups = {};
-			this.renderCache = {};
-			this.trigger('optgroup_clear');
-		},
-	
-		/**
-		 * Updates an option available for selection. If
-		 * it is visible in the selected items or options
-		 * dropdown, it will be re-rendered automatically.
-		 *
-		 * @param {string} value
-		 * @param {object} data
-		 */
-		updateOption: function(value, data) {
-			var self = this;
-			var $item, $item_new;
-			var value_new, index_item, cache_items, cache_options, order_old;
-	
-			value     = hash_key(value);
-			value_new = hash_key(data[self.settings.valueField]);
-	
-			// sanity checks
-			if (value === null) return;
-			if (!self.options.hasOwnProperty(value)) return;
-			if (typeof value_new !== 'string') throw new Error('Value must be set in option data');
-	
-			order_old = self.options[value].$order;
-	
-			// update references
-			if (value_new !== value) {
-				delete self.options[value];
-				index_item = self.items.indexOf(value);
-				if (index_item !== -1) {
-					self.items.splice(index_item, 1, value_new);
-				}
-			}
-			data.$order = data.$order || order_old;
-			self.options[value_new] = data;
-	
-			// invalidate render cache
-			cache_items = self.renderCache['item'];
-			cache_options = self.renderCache['option'];
-	
-			if (cache_items) {
-				delete cache_items[value];
-				delete cache_items[value_new];
-			}
-			if (cache_options) {
-				delete cache_options[value];
-				delete cache_options[value_new];
-			}
-	
-			// update the item if it's selected
-			if (self.items.indexOf(value_new) !== -1) {
-				$item = self.getItem(value);
-				$item_new = $(self.render('item', data));
-				if ($item.hasClass('active')) $item_new.addClass('active');
-				$item.replaceWith($item_new);
-			}
-	
-			// invalidate last query because we might have updated the sortField
-			self.lastQuery = null;
-	
-			// update dropdown contents
-			if (self.isOpen) {
-				self.refreshOptions(false);
-			}
-		},
-	
-		/**
-		 * Removes a single option.
-		 *
-		 * @param {string} value
-		 * @param {boolean} silent
-		 */
-		removeOption: function(value, silent) {
-			var self = this;
-			value = hash_key(value);
-	
-			var cache_items = self.renderCache['item'];
-			var cache_options = self.renderCache['option'];
-			if (cache_items) delete cache_items[value];
-			if (cache_options) delete cache_options[value];
-	
-			delete self.userOptions[value];
-			delete self.options[value];
-			self.lastQuery = null;
-			self.trigger('option_remove', value);
-			self.removeItem(value, silent);
-		},
-	
-		/**
-		 * Clears all options.
-		 */
-		clearOptions: function() {
-			var self = this;
-	
-			self.loadedSearches = {};
-			self.userOptions = {};
-			self.renderCache = {};
-			self.options = self.sifter.items = {};
-			self.lastQuery = null;
-			self.trigger('option_clear');
-			self.clear();
-		},
-	
-		/**
-		 * Returns the jQuery element of the option
-		 * matching the given value.
-		 *
-		 * @param {string} value
-		 * @returns {object}
-		 */
-		getOption: function(value) {
-			return this.getElementWithValue(value, this.$dropdown_content.find('[data-selectable]'));
-		},
-	
-		/**
-		 * Returns the jQuery element of the next or
-		 * previous selectable option.
-		 *
-		 * @param {object} $option
-		 * @param {int} direction  can be 1 for next or -1 for previous
-		 * @return {object}
-		 */
-		getAdjacentOption: function($option, direction) {
-			var $options = this.$dropdown.find('[data-selectable]');
-			var index    = $options.index($option) + direction;
-	
-			return index >= 0 && index < $options.length ? $options.eq(index) : $();
-		},
-	
-		/**
-		 * Finds the first element with a "data-value" attribute
-		 * that matches the given value.
-		 *
-		 * @param {mixed} value
-		 * @param {object} $els
-		 * @return {object}
-		 */
-		getElementWithValue: function(value, $els) {
-			value = hash_key(value);
-	
-			if (typeof value !== 'undefined' && value !== null) {
-				for (var i = 0, n = $els.length; i < n; i++) {
-					if ($els[i].getAttribute('data-value') === value) {
-						return $($els[i]);
-					}
-				}
-			}
-	
-			return $();
-		},
-	
-		/**
-		 * Returns the jQuery element of the item
-		 * matching the given value.
-		 *
-		 * @param {string} value
-		 * @returns {object}
-		 */
-		getItem: function(value) {
-			return this.getElementWithValue(value, this.$control.children());
-		},
-	
-		/**
-		 * "Selects" multiple items at once. Adds them to the list
-		 * at the current caret position.
-		 *
-		 * @param {string} value
-		 * @param {boolean} silent
-		 */
-		addItems: function(values, silent) {
-			var items = $.isArray(values) ? values : [values];
-			for (var i = 0, n = items.length; i < n; i++) {
-				this.isPending = (i < n - 1);
-				this.addItem(items[i], silent);
-			}
-		},
-	
-		/**
-		 * "Selects" an item. Adds it to the list
-		 * at the current caret position.
-		 *
-		 * @param {string} value
-		 * @param {boolean} silent
-		 */
-		addItem: function(value, silent) {
-			var events = silent ? [] : ['change'];
-	
-			debounce_events(this, events, function() {
-				var $item, $option, $options;
-				var self = this;
-				var inputMode = self.settings.mode;
-				var i, active, value_next, wasFull;
-				value = hash_key(value);
-	
-				if (self.items.indexOf(value) !== -1) {
-					if (inputMode === 'single') self.close();
-					return;
-				}
-	
-				if (!self.options.hasOwnProperty(value)) return;
-				if (inputMode === 'single') self.clear(silent);
-				if (inputMode === 'multi' && self.isFull()) return;
-	
-				$item = $(self.render('item', self.options[value]));
-				wasFull = self.isFull();
-				self.items.splice(self.caretPos, 0, value);
-				self.insertAtCaret($item);
-				if (!self.isPending || (!wasFull && self.isFull())) {
-					self.refreshState();
-				}
-	
-				if (self.isSetup) {
-					$options = self.$dropdown_content.find('[data-selectable]');
-	
-					// update menu / remove the option (if this is not one item being added as part of series)
-					if (!self.isPending) {
-						$option = self.getOption(value);
-						value_next = self.getAdjacentOption($option, 1).attr('data-value');
-						self.refreshOptions(self.isFocused && inputMode !== 'single');
-						if (value_next) {
-							self.setActiveOption(self.getOption(value_next));
-						}
-					}
-	
-					// hide the menu if the maximum number of items have been selected or no options are left
-					if (!$options.length || self.isFull()) {
-						self.close();
-					} else {
-						self.positionDropdown();
-					}
-	
-					self.updatePlaceholder();
-					self.trigger('item_add', value, $item);
-					self.updateOriginalInput({silent: silent});
-				}
-			});
-		},
-	
-		/**
-		 * Removes the selected item matching
-		 * the provided value.
-		 *
-		 * @param {string} value
-		 */
-		removeItem: function(value, silent) {
-			var self = this;
-			var $item, i, idx;
-	
-			$item = (typeof value === 'object') ? value : self.getItem(value);
-			value = hash_key($item.attr('data-value'));
-			i = self.items.indexOf(value);
-	
-			if (i !== -1) {
-				$item.remove();
-				if ($item.hasClass('active')) {
-					idx = self.$activeItems.indexOf($item[0]);
-					self.$activeItems.splice(idx, 1);
-				}
-	
-				self.items.splice(i, 1);
-				self.lastQuery = null;
-				if (!self.settings.persist && self.userOptions.hasOwnProperty(value)) {
-					self.removeOption(value, silent);
-				}
-	
-				if (i < self.caretPos) {
-					self.setCaret(self.caretPos - 1);
-				}
-	
-				self.refreshState();
-				self.updatePlaceholder();
-				self.updateOriginalInput({silent: silent});
-				self.positionDropdown();
-				self.trigger('item_remove', value, $item);
-			}
-		},
-	
-		/**
-		 * Invokes the `create` method provided in the
-		 * selectize options that should provide the data
-		 * for the new item, given the user input.
-		 *
-		 * Once this completes, it will be added
-		 * to the item list.
-		 *
-		 * @param {string} value
-		 * @param {boolean} [triggerDropdown]
-		 * @param {function} [callback]
-		 * @return {boolean}
-		 */
-		createItem: function(input, triggerDropdown) {
-			var self  = this;
-			var caret = self.caretPos;
-			input = input || $.trim(self.$control_input.val() || '');
-	
-			var callback = arguments[arguments.length - 1];
-			if (typeof callback !== 'function') callback = function() {};
-	
-			if (typeof triggerDropdown !== 'boolean') {
-				triggerDropdown = true;
-			}
-	
-			if (!self.canCreate(input)) {
-				callback();
-				return false;
-			}
-	
-			self.lock();
-	
-			var setup = (typeof self.settings.create === 'function') ? this.settings.create : function(input) {
-				var data = {};
-				data[self.settings.labelField] = input;
-				data[self.settings.valueField] = input;
-				return data;
-			};
-	
-			var create = once(function(data) {
-				self.unlock();
-	
-				if (!data || typeof data !== 'object') return callback();
-				var value = hash_key(data[self.settings.valueField]);
-				if (typeof value !== 'string') return callback();
-	
-				self.setTextboxValue('');
-				self.addOption(data);
-				self.setCaret(caret);
-				self.addItem(value);
-				self.refreshOptions(triggerDropdown && self.settings.mode !== 'single');
-				callback(data);
-			});
-	
-			var output = setup.apply(this, [input, create]);
-			if (typeof output !== 'undefined') {
-				create(output);
-			}
-	
-			return true;
-		},
-	
-		/**
-		 * Re-renders the selected item lists.
-		 */
-		refreshItems: function() {
-			this.lastQuery = null;
-	
-			if (this.isSetup) {
-				this.addItem(this.items);
-			}
-	
-			this.refreshState();
-			this.updateOriginalInput();
-		},
-	
-		/**
-		 * Updates all state-dependent attributes
-		 * and CSS classes.
-		 */
-		refreshState: function() {
-			var invalid, self = this;
-			if (self.isRequired) {
-				if (self.items.length) self.isInvalid = false;
-				self.$control_input.prop('required', invalid);
-			}
-			self.refreshClasses();
-		},
-	
-		/**
-		 * Updates all state-dependent CSS classes.
-		 */
-		refreshClasses: function() {
-			var self     = this;
-			var isFull   = self.isFull();
-			var isLocked = self.isLocked;
-	
-			self.$wrapper
-				.toggleClass('rtl', self.rtl);
-	
-			self.$control
-				.toggleClass('focus', self.isFocused)
-				.toggleClass('disabled', self.isDisabled)
-				.toggleClass('required', self.isRequired)
-				.toggleClass('invalid', self.isInvalid)
-				.toggleClass('locked', isLocked)
-				.toggleClass('full', isFull).toggleClass('not-full', !isFull)
-				.toggleClass('input-active', self.isFocused && !self.isInputHidden)
-				.toggleClass('dropdown-active', self.isOpen)
-				.toggleClass('has-options', !$.isEmptyObject(self.options))
-				.toggleClass('has-items', self.items.length > 0);
-	
-			self.$control_input.data('grow', !isFull && !isLocked);
-		},
-	
-		/**
-		 * Determines whether or not more items can be added
-		 * to the control without exceeding the user-defined maximum.
-		 *
-		 * @returns {boolean}
-		 */
-		isFull: function() {
-			return this.settings.maxItems !== null && this.items.length >= this.settings.maxItems;
-		},
-	
-		/**
-		 * Refreshes the original <select> or <input>
-		 * element to reflect the current state.
-		 */
-		updateOriginalInput: function(opts) {
-			var i, n, options, label, self = this;
-			opts = opts || {};
-	
-			if (self.tagType === TAG_SELECT) {
-				options = [];
-				for (i = 0, n = self.items.length; i < n; i++) {
-					label = self.options[self.items[i]][self.settings.labelField] || '';
-					options.push('<option value="' + escape_html(self.items[i]) + '" selected="selected">' + escape_html(label) + '</option>');
-				}
-				if (!options.length && !this.$input.attr('multiple')) {
-					options.push('<option value="" selected="selected"></option>');
-				}
-				self.$input.html(options.join(''));
-			} else {
-				self.$input.val(self.getValue());
-				self.$input.attr('value',self.$input.val());
-			}
-	
-			if (self.isSetup) {
-				if (!opts.silent) {
-					self.trigger('change', self.$input.val());
-				}
-			}
-		},
-	
-		/**
-		 * Shows/hide the input placeholder depending
-		 * on if there items in the list already.
-		 */
-		updatePlaceholder: function() {
-			if (!this.settings.placeholder) return;
-			var $input = this.$control_input;
-	
-			if (this.items.length) {
-				$input.removeAttr('placeholder');
-			} else {
-				$input.attr('placeholder', this.settings.placeholder);
-			}
-			$input.triggerHandler('update', {force: true});
-		},
-	
-		/**
-		 * Shows the autocomplete dropdown containing
-		 * the available options.
-		 */
-		open: function() {
-			var self = this;
-	
-			if (self.isLocked || self.isOpen || (self.settings.mode === 'multi' && self.isFull())) return;
-			self.focus();
-			self.isOpen = true;
-			self.refreshState();
-			self.$dropdown.css({visibility: 'hidden', display: 'block'});
-			self.positionDropdown();
-			self.$dropdown.css({visibility: 'visible'});
-			self.trigger('dropdown_open', self.$dropdown);
-		},
-	
-		/**
-		 * Closes the autocomplete dropdown menu.
-		 */
-		close: function() {
-			var self = this;
-			var trigger = self.isOpen;
-	
-			if (self.settings.mode === 'single' && self.items.length) {
-				self.hideInput();
-			}
-	
-			self.isOpen = false;
-			self.$dropdown.hide();
-			self.setActiveOption(null);
-			self.refreshState();
-	
-			if (trigger) self.trigger('dropdown_close', self.$dropdown);
-		},
-	
-		/**
-		 * Calculates and applies the appropriate
-		 * position of the dropdown.
-		 */
-		positionDropdown: function() {
-			var $control = this.$control;
-			var offset = this.settings.dropdownParent === 'body' ? $control.offset() : $control.position();
-			offset.top += $control.outerHeight(true);
-	
-			this.$dropdown.css({
-				width : $control.outerWidth(),
-				top   : offset.top,
-				left  : offset.left
-			});
-		},
-	
-		/**
-		 * Resets / clears all selected items
-		 * from the control.
-		 *
-		 * @param {boolean} silent
-		 */
-		clear: function(silent) {
-			var self = this;
-	
-			if (!self.items.length) return;
-			self.$control.children(':not(input)').remove();
-			self.items = [];
-			self.lastQuery = null;
-			self.setCaret(0);
-			self.setActiveItem(null);
-			self.updatePlaceholder();
-			self.updateOriginalInput({silent: silent});
-			self.refreshState();
-			self.showInput();
-			self.trigger('clear');
-		},
-	
-		/**
-		 * A helper method for inserting an element
-		 * at the current caret position.
-		 *
-		 * @param {object} $el
-		 */
-		insertAtCaret: function($el) {
-			var caret = Math.min(this.caretPos, this.items.length);
-			if (caret === 0) {
-				this.$control.prepend($el);
-			} else {
-				$(this.$control[0].childNodes[caret]).before($el);
-			}
-			this.setCaret(caret + 1);
-		},
-	
-		/**
-		 * Removes the current selected item(s).
-		 *
-		 * @param {object} e (optional)
-		 * @returns {boolean}
-		 */
-		deleteSelection: function(e) {
-			var i, n, direction, selection, values, caret, option_select, $option_select, $tail;
-			var self = this;
-	
-			direction = (e && e.keyCode === KEY_BACKSPACE) ? -1 : 1;
-			selection = getSelection(self.$control_input[0]);
-	
-			if (self.$activeOption && !self.settings.hideSelected) {
-				option_select = self.getAdjacentOption(self.$activeOption, -1).attr('data-value');
-			}
-	
-			// determine items that will be removed
-			values = [];
-	
-			if (self.$activeItems.length) {
-				$tail = self.$control.children('.active:' + (direction > 0 ? 'last' : 'first'));
-				caret = self.$control.children(':not(input)').index($tail);
-				if (direction > 0) { caret++; }
-	
-				for (i = 0, n = self.$activeItems.length; i < n; i++) {
-					values.push($(self.$activeItems[i]).attr('data-value'));
-				}
-				if (e) {
-					e.preventDefault();
-					e.stopPropagation();
-				}
-			} else if ((self.isFocused || self.settings.mode === 'single') && self.items.length) {
-				if (direction < 0 && selection.start === 0 && selection.length === 0) {
-					values.push(self.items[self.caretPos - 1]);
-				} else if (direction > 0 && selection.start === self.$control_input.val().length) {
-					values.push(self.items[self.caretPos]);
-				}
-			}
-	
-			// allow the callback to abort
-			if (!values.length || (typeof self.settings.onDelete === 'function' && self.settings.onDelete.apply(self, [values]) === false)) {
-				return false;
-			}
-	
-			// perform removal
-			if (typeof caret !== 'undefined') {
-				self.setCaret(caret);
-			}
-			while (values.length) {
-				self.removeItem(values.pop());
-			}
-	
-			self.showInput();
-			self.positionDropdown();
-			self.refreshOptions(true);
-	
-			// select previous option
-			if (option_select) {
-				$option_select = self.getOption(option_select);
-				if ($option_select.length) {
-					self.setActiveOption($option_select);
-				}
-			}
-	
-			return true;
-		},
-	
-		/**
-		 * Selects the previous / next item (depending
-		 * on the `direction` argument).
-		 *
-		 * > 0 - right
-		 * < 0 - left
-		 *
-		 * @param {int} direction
-		 * @param {object} e (optional)
-		 */
-		advanceSelection: function(direction, e) {
-			var tail, selection, idx, valueLength, cursorAtEdge, $tail;
-			var self = this;
-	
-			if (direction === 0) return;
-			if (self.rtl) direction *= -1;
-	
-			tail = direction > 0 ? 'last' : 'first';
-			selection = getSelection(self.$control_input[0]);
-	
-			if (self.isFocused && !self.isInputHidden) {
-				valueLength = self.$control_input.val().length;
-				cursorAtEdge = direction < 0
-					? selection.start === 0 && selection.length === 0
-					: selection.start === valueLength;
-	
-				if (cursorAtEdge && !valueLength) {
-					self.advanceCaret(direction, e);
-				}
-			} else {
-				$tail = self.$control.children('.active:' + tail);
-				if ($tail.length) {
-					idx = self.$control.children(':not(input)').index($tail);
-					self.setActiveItem(null);
-					self.setCaret(direction > 0 ? idx + 1 : idx);
-				}
-			}
-		},
-	
-		/**
-		 * Moves the caret left / right.
-		 *
-		 * @param {int} direction
-		 * @param {object} e (optional)
-		 */
-		advanceCaret: function(direction, e) {
-			var self = this, fn, $adj;
-	
-			if (direction === 0) return;
-	
-			fn = direction > 0 ? 'next' : 'prev';
-			if (self.isShiftDown) {
-				$adj = self.$control_input[fn]();
-				if ($adj.length) {
-					self.hideInput();
-					self.setActiveItem($adj);
-					e && e.preventDefault();
-				}
-			} else {
-				self.setCaret(self.caretPos + direction);
-			}
-		},
-	
-		/**
-		 * Moves the caret to the specified index.
-		 *
-		 * @param {int} i
-		 */
-		setCaret: function(i) {
-			var self = this;
-	
-			if (self.settings.mode === 'single') {
-				i = self.items.length;
-			} else {
-				i = Math.max(0, Math.min(self.items.length, i));
-			}
-	
-			if(!self.isPending) {
-				// the input must be moved by leaving it in place and moving the
-				// siblings, due to the fact that focus cannot be restored once lost
-				// on mobile webkit devices
-				var j, n, fn, $children, $child;
-				$children = self.$control.children(':not(input)');
-				for (j = 0, n = $children.length; j < n; j++) {
-					$child = $($children[j]).detach();
-					if (j <  i) {
-						self.$control_input.before($child);
-					} else {
-						self.$control.append($child);
-					}
-				}
-			}
-	
-			self.caretPos = i;
-		},
-	
-		/**
-		 * Disables user input on the control. Used while
-		 * items are being asynchronously created.
-		 */
-		lock: function() {
-			this.close();
-			this.isLocked = true;
-			this.refreshState();
-		},
-	
-		/**
-		 * Re-enables user input on the control.
-		 */
-		unlock: function() {
-			this.isLocked = false;
-			this.refreshState();
-		},
-	
-		/**
-		 * Disables user input on the control completely.
-		 * While disabled, it cannot receive focus.
-		 */
-		disable: function() {
-			var self = this;
-			self.$input.prop('disabled', true);
-			self.$control_input.prop('disabled', true).prop('tabindex', -1);
-			self.isDisabled = true;
-			self.lock();
-		},
-	
-		/**
-		 * Enables the control so that it can respond
-		 * to focus and user input.
-		 */
-		enable: function() {
-			var self = this;
-			self.$input.prop('disabled', false);
-			self.$control_input.prop('disabled', false).prop('tabindex', self.tabIndex);
-			self.isDisabled = false;
-			self.unlock();
-		},
-	
-		/**
-		 * Completely destroys the control and
-		 * unbinds all event listeners so that it can
-		 * be garbage collected.
-		 */
-		destroy: function() {
-			var self = this;
-			var eventNS = self.eventNS;
-			var revertSettings = self.revertSettings;
-	
-			self.trigger('destroy');
-			self.off();
-			self.$wrapper.remove();
-			self.$dropdown.remove();
-	
-			self.$input
-				.html('')
-				.append(revertSettings.$children)
-				.removeAttr('tabindex')
-				.removeClass('selectized')
-				.attr({tabindex: revertSettings.tabindex})
-				.show();
-	
-			self.$control_input.removeData('grow');
-			self.$input.removeData('selectize');
-	
-			$(window).off(eventNS);
-			$(document).off(eventNS);
-			$(document.body).off(eventNS);
-	
-			delete self.$input[0].selectize;
-		},
-	
-		/**
-		 * A helper method for rendering "item" and
-		 * "option" templates, given the data.
-		 *
-		 * @param {string} templateName
-		 * @param {object} data
-		 * @returns {string}
-		 */
-		render: function(templateName, data) {
-			var value, id, label;
-			var html = '';
-			var cache = false;
-			var self = this;
-			var regex_tag = /^[\t \r\n]*<([a-z][a-z0-9\-_]*(?:\:[a-z][a-z0-9\-_]*)?)/i;
-	
-			if (templateName === 'option' || templateName === 'item') {
-				value = hash_key(data[self.settings.valueField]);
-				cache = !!value;
-			}
-	
-			// pull markup from cache if it exists
-			if (cache) {
-				if (!isset(self.renderCache[templateName])) {
-					self.renderCache[templateName] = {};
-				}
-				if (self.renderCache[templateName].hasOwnProperty(value)) {
-					return self.renderCache[templateName][value];
-				}
-			}
-	
-			// render markup
-			html = $(self.settings.render[templateName].apply(this, [data, escape_html]));
-	
-			// add mandatory attributes
-			if (templateName === 'option' || templateName === 'option_create') {
-				html.attr('data-selectable', '');
-			}
-			else if (templateName === 'optgroup') {
-				id = data[self.settings.optgroupValueField] || '';
-				html.attr('data-group', id);
-			}
-			if (templateName === 'option' || templateName === 'item') {
-				html.attr('data-value', value || '');
-			}
-	
-			// update cache
-			if (cache) {
-				self.renderCache[templateName][value] = html[0];
-			}
-	
-			return html[0];
-		},
-	
-		/**
-		 * Clears the render cache for a template. If
-		 * no template is given, clears all render
-		 * caches.
-		 *
-		 * @param {string} templateName
-		 */
-		clearCache: function(templateName) {
-			var self = this;
-			if (typeof templateName === 'undefined') {
-				self.renderCache = {};
-			} else {
-				delete self.renderCache[templateName];
-			}
-		},
-	
-		/**
-		 * Determines whether or not to display the
-		 * create item prompt, given a user input.
-		 *
-		 * @param {string} input
-		 * @return {boolean}
-		 */
-		canCreate: function(input) {
-			var self = this;
-			if (!self.settings.create) return false;
-			var filter = self.settings.createFilter;
-			return input.length
-				&& (typeof filter !== 'function' || filter.apply(self, [input]))
-				&& (typeof filter !== 'string' || new RegExp(filter).test(input))
-				&& (!(filter instanceof RegExp) || filter.test(input));
-		}
-	
-	});
-	
-	
-	Selectize.count = 0;
-	Selectize.defaults = {
-		options: [],
-		optgroups: [],
-	
-		plugins: [],
-		delimiter: ',',
-		splitOn: null, // regexp or string for splitting up values from a paste command
-		persist: true,
-		diacritics: true,
-		create: false,
-		createOnBlur: false,
-		createFilter: null,
-		highlight: true,
-		openOnFocus: true,
-		maxOptions: 1000,
-		maxItems: null,
-		hideSelected: null,
-		addPrecedence: false,
-		selectOnTab: false,
-		preload: false,
-		allowEmptyOption: false,
-		closeAfterSelect: false,
-	
-		scrollDuration: 60,
-		loadThrottle: 300,
-		loadingClass: 'loading',
-	
-		dataAttr: 'data-data',
-		optgroupField: 'optgroup',
-		valueField: 'value',
-		labelField: 'text',
-		optgroupLabelField: 'label',
-		optgroupValueField: 'value',
-		lockOptgroupOrder: false,
-	
-		sortField: '$order',
-		searchField: ['text'],
-		searchConjunction: 'and',
-	
-		mode: null,
-		wrapperClass: 'selectize-control',
-		inputClass: 'selectize-input',
-		dropdownClass: 'selectize-dropdown',
-		dropdownContentClass: 'selectize-dropdown-content',
-	
-		dropdownParent: null,
-	
-		copyClassesToDropdown: true,
-	
-		/*
-		load                 : null, // function(query, callback) { ... }
-		score                : null, // function(search) { ... }
-		onInitialize         : null, // function() { ... }
-		onChange             : null, // function(value) { ... }
-		onItemAdd            : null, // function(value, $item) { ... }
-		onItemRemove         : null, // function(value) { ... }
-		onClear              : null, // function() { ... }
-		onOptionAdd          : null, // function(value, data) { ... }
-		onOptionRemove       : null, // function(value) { ... }
-		onOptionClear        : null, // function() { ... }
-		onOptionGroupAdd     : null, // function(id, data) { ... }
-		onOptionGroupRemove  : null, // function(id) { ... }
-		onOptionGroupClear   : null, // function() { ... }
-		onDropdownOpen       : null, // function($dropdown) { ... }
-		onDropdownClose      : null, // function($dropdown) { ... }
-		onType               : null, // function(str) { ... }
-		onDelete             : null, // function(values) { ... }
-		*/
-	
-		render: {
-			/*
-			item: null,
-			optgroup: null,
-			optgroup_header: null,
-			option: null,
-			option_create: null
-			*/
-		}
-	};
-	
-	
-	$.fn.selectize = function(settings_user) {
-		var defaults             = $.fn.selectize.defaults;
-		var settings             = $.extend({}, defaults, settings_user);
-		var attr_data            = settings.dataAttr;
-		var field_label          = settings.labelField;
-		var field_value          = settings.valueField;
-		var field_optgroup       = settings.optgroupField;
-		var field_optgroup_label = settings.optgroupLabelField;
-		var field_optgroup_value = settings.optgroupValueField;
-	
-		/**
-		 * Initializes selectize from a <input type="text"> element.
-		 *
-		 * @param {object} $input
-		 * @param {object} settings_element
-		 */
-		var init_textbox = function($input, settings_element) {
-			var i, n, values, option;
-	
-			var data_raw = $input.attr(attr_data);
-	
-			if (!data_raw) {
-				var value = $.trim($input.val() || '');
-				if (!settings.allowEmptyOption && !value.length) return;
-				values = value.split(settings.delimiter);
-				for (i = 0, n = values.length; i < n; i++) {
-					option = {};
-					option[field_label] = values[i];
-					option[field_value] = values[i];
-					settings_element.options.push(option);
-				}
-				settings_element.items = values;
-			} else {
-				settings_element.options = JSON.parse(data_raw);
-				for (i = 0, n = settings_element.options.length; i < n; i++) {
-					settings_element.items.push(settings_element.options[i][field_value]);
-				}
-			}
-		};
-	
-		/**
-		 * Initializes selectize from a <select> element.
-		 *
-		 * @param {object} $input
-		 * @param {object} settings_element
-		 */
-		var init_select = function($input, settings_element) {
-			var i, n, tagName, $children, order = 0;
-			var options = settings_element.options;
-			var optionsMap = {};
-	
-			var readData = function($el) {
-				var data = attr_data && $el.attr(attr_data);
-				if (typeof data === 'string' && data.length) {
-					return JSON.parse(data);
-				}
-				return null;
-			};
-	
-			var addOption = function($option, group) {
-				$option = $($option);
-	
-				var value = hash_key($option.attr('value'));
-				if (!value && !settings.allowEmptyOption) return;
-	
-				// if the option already exists, it's probably been
-				// duplicated in another optgroup. in this case, push
-				// the current group to the "optgroup" property on the
-				// existing option so that it's rendered in both places.
-				if (optionsMap.hasOwnProperty(value)) {
-					if (group) {
-						var arr = optionsMap[value][field_optgroup];
-						if (!arr) {
-							optionsMap[value][field_optgroup] = group;
-						} else if (!$.isArray(arr)) {
-							optionsMap[value][field_optgroup] = [arr, group];
-						} else {
-							arr.push(group);
-						}
-					}
-					return;
-				}
-	
-				var option             = readData($option) || {};
-				option[field_label]    = option[field_label] || $option.text();
-				option[field_value]    = option[field_value] || value;
-				option[field_optgroup] = option[field_optgroup] || group;
-	
-				optionsMap[value] = option;
-				options.push(option);
-	
-				if ($option.is(':selected')) {
-					settings_element.items.push(value);
-				}
-			};
-	
-			var addGroup = function($optgroup) {
-				var i, n, id, optgroup, $options;
-	
-				$optgroup = $($optgroup);
-				id = $optgroup.attr('label');
-	
-				if (id) {
-					optgroup = readData($optgroup) || {};
-					optgroup[field_optgroup_label] = id;
-					optgroup[field_optgroup_value] = id;
-					settings_element.optgroups.push(optgroup);
-				}
-	
-				$options = $('option', $optgroup);
-				for (i = 0, n = $options.length; i < n; i++) {
-					addOption($options[i], id);
-				}
-			};
-	
-			settings_element.maxItems = $input.attr('multiple') ? null : 1;
-	
-			$children = $input.children();
-			for (i = 0, n = $children.length; i < n; i++) {
-				tagName = $children[i].tagName.toLowerCase();
-				if (tagName === 'optgroup') {
-					addGroup($children[i]);
-				} else if (tagName === 'option') {
-					addOption($children[i]);
-				}
-			}
-		};
-	
-		return this.each(function() {
-			if (this.selectize) return;
-	
-			var instance;
-			var $input = $(this);
-			var tag_name = this.tagName.toLowerCase();
-			var placeholder = $input.attr('placeholder') || $input.attr('data-placeholder');
-			if (!placeholder && !settings.allowEmptyOption) {
-				placeholder = $input.children('option[value=""]').text();
-			}
-	
-			var settings_element = {
-				'placeholder' : placeholder,
-				'options'     : [],
-				'optgroups'   : [],
-				'items'       : []
-			};
-	
-			if (tag_name === 'select') {
-				init_select($input, settings_element);
-			} else {
-				init_textbox($input, settings_element);
-			}
-	
-			instance = new Selectize($input, $.extend(true, {}, defaults, settings_element, settings_user));
-		});
-	};
-	
-	$.fn.selectize.defaults = Selectize.defaults;
-	$.fn.selectize.support = {
-		validity: SUPPORTS_VALIDITY_API
-	};
-	
-	
-	Selectize.define('drag_drop', function(options) {
-		if (!$.fn.sortable) throw new Error('The "drag_drop" plugin requires jQuery UI "sortable".');
-		if (this.settings.mode !== 'multi') return;
-		var self = this;
-	
-		self.lock = (function() {
-			var original = self.lock;
-			return function() {
-				var sortable = self.$control.data('sortable');
-				if (sortable) sortable.disable();
-				return original.apply(self, arguments);
-			};
-		})();
-	
-		self.unlock = (function() {
-			var original = self.unlock;
-			return function() {
-				var sortable = self.$control.data('sortable');
-				if (sortable) sortable.enable();
-				return original.apply(self, arguments);
-			};
-		})();
-	
-		self.setup = (function() {
-			var original = self.setup;
-			return function() {
-				original.apply(this, arguments);
-	
-				var $control = self.$control.sortable({
-					items: '[data-value]',
-					forcePlaceholderSize: true,
-					disabled: self.isLocked,
-					start: function(e, ui) {
-						ui.placeholder.css('width', ui.helper.css('width'));
-						$control.css({overflow: 'visible'});
-					},
-					stop: function() {
-						$control.css({overflow: 'hidden'});
-						var active = self.$activeItems ? self.$activeItems.slice() : null;
-						var values = [];
-						$control.children('[data-value]').each(function() {
-							values.push($(this).attr('data-value'));
-						});
-						self.setValue(values);
-						self.setActiveItem(active);
-					}
-				});
-			};
-		})();
-	
-	});
-	
-	Selectize.define('dropdown_header', function(options) {
-		var self = this;
-	
-		options = $.extend({
-			title         : 'Untitled',
-			headerClass   : 'selectize-dropdown-header',
-			titleRowClass : 'selectize-dropdown-header-title',
-			labelClass    : 'selectize-dropdown-header-label',
-			closeClass    : 'selectize-dropdown-header-close',
-	
-			html: function(data) {
-				return (
-					'<div class="' + data.headerClass + '">' +
-						'<div class="' + data.titleRowClass + '">' +
-							'<span class="' + data.labelClass + '">' + data.title + '</span>' +
-							'<a href="javascript:void(0)" class="' + data.closeClass + '">&times;</a>' +
-						'</div>' +
-					'</div>'
-				);
-			}
-		}, options);
-	
-		self.setup = (function() {
-			var original = self.setup;
-			return function() {
-				original.apply(self, arguments);
-				self.$dropdown_header = $(options.html(options));
-				self.$dropdown.prepend(self.$dropdown_header);
-			};
-		})();
-	
-	});
-	
-	Selectize.define('optgroup_columns', function(options) {
-		var self = this;
-	
-		options = $.extend({
-			equalizeWidth  : true,
-			equalizeHeight : true
-		}, options);
-	
-		this.getAdjacentOption = function($option, direction) {
-			var $options = $option.closest('[data-group]').find('[data-selectable]');
-			var index    = $options.index($option) + direction;
-	
-			return index >= 0 && index < $options.length ? $options.eq(index) : $();
-		};
-	
-		this.onKeyDown = (function() {
-			var original = self.onKeyDown;
-			return function(e) {
-				var index, $option, $options, $optgroup;
-	
-				if (this.isOpen && (e.keyCode === KEY_LEFT || e.keyCode === KEY_RIGHT)) {
-					self.ignoreHover = true;
-					$optgroup = this.$activeOption.closest('[data-group]');
-					index = $optgroup.find('[data-selectable]').index(this.$activeOption);
-	
-					if(e.keyCode === KEY_LEFT) {
-						$optgroup = $optgroup.prev('[data-group]');
-					} else {
-						$optgroup = $optgroup.next('[data-group]');
-					}
-	
-					$options = $optgroup.find('[data-selectable]');
-					$option  = $options.eq(Math.min($options.length - 1, index));
-					if ($option.length) {
-						this.setActiveOption($option);
-					}
-					return;
-				}
-	
-				return original.apply(this, arguments);
-			};
-		})();
-	
-		var getScrollbarWidth = function() {
-			var div;
-			var width = getScrollbarWidth.width;
-			var doc = document;
-	
-			if (typeof width === 'undefined') {
-				div = doc.createElement('div');
-				div.innerHTML = '<div style="width:50px;height:50px;position:absolute;left:-50px;top:-50px;overflow:auto;"><div style="width:1px;height:100px;"></div></div>';
-				div = div.firstChild;
-				doc.body.appendChild(div);
-				width = getScrollbarWidth.width = div.offsetWidth - div.clientWidth;
-				doc.body.removeChild(div);
-			}
-			return width;
-		};
-	
-		var equalizeSizes = function() {
-			var i, n, height_max, width, width_last, width_parent, $optgroups;
-	
-			$optgroups = $('[data-group]', self.$dropdown_content);
-			n = $optgroups.length;
-			if (!n || !self.$dropdown_content.width()) return;
-	
-			if (options.equalizeHeight) {
-				height_max = 0;
-				for (i = 0; i < n; i++) {
-					height_max = Math.max(height_max, $optgroups.eq(i).height());
-				}
-				$optgroups.css({height: height_max});
-			}
-	
-			if (options.equalizeWidth) {
-				width_parent = self.$dropdown_content.innerWidth() - getScrollbarWidth();
-				width = Math.round(width_parent / n);
-				$optgroups.css({width: width});
-				if (n > 1) {
-					width_last = width_parent - width * (n - 1);
-					$optgroups.eq(n - 1).css({width: width_last});
-				}
-			}
-		};
-	
-		if (options.equalizeHeight || options.equalizeWidth) {
-			hook.after(this, 'positionDropdown', equalizeSizes);
-			hook.after(this, 'refreshOptions', equalizeSizes);
-		}
-	
-	
-	});
-	
-	Selectize.define('remove_button', function(options) {
-		if (this.settings.mode === 'single') return;
-	
-		options = $.extend({
-			label     : '&times;',
-			title     : 'Remove',
-			className : 'remove',
-			append    : true
-		}, options);
-	
-		var self = this;
-		var html = '<a href="javascript:void(0)" class="' + options.className + '" tabindex="-1" title="' + escape_html(options.title) + '">' + options.label + '</a>';
-	
-		/**
-		 * Appends an element as a child (with raw HTML).
-		 *
-		 * @param {string} html_container
-		 * @param {string} html_element
-		 * @return {string}
-		 */
-		var append = function(html_container, html_element) {
-			var pos = html_container.search(/(<\/[^>]+>\s*)$/);
-			return html_container.substring(0, pos) + html_element + html_container.substring(pos);
-		};
-	
-		this.setup = (function() {
-			var original = self.setup;
-			return function() {
-				// override the item rendering method to add the button to each
-				if (options.append) {
-					var render_item = self.settings.render.item;
-					self.settings.render.item = function(data) {
-						return append(render_item.apply(this, arguments), html);
-					};
-				}
-	
-				original.apply(this, arguments);
-	
-				// add event listener
-				this.$control.on('click', '.' + options.className, function(e) {
-					e.preventDefault();
-					if (self.isLocked) return;
-	
-					var $item = $(e.currentTarget).parent();
-					self.setActiveItem($item);
-					if (self.deleteSelection()) {
-						self.setCaret(self.items.length);
-					}
-				});
-	
-			};
-		})();
-	
-	});
-	
-	Selectize.define('restore_on_backspace', function(options) {
-		var self = this;
-	
-		options.text = options.text || function(option) {
-			return option[this.settings.labelField];
-		};
-	
-		this.onKeyDown = (function() {
-			var original = self.onKeyDown;
-			return function(e) {
-				var index, option;
-				if (e.keyCode === KEY_BACKSPACE && this.$control_input.val() === '' && !this.$activeItems.length) {
-					index = this.caretPos - 1;
-					if (index >= 0 && index < this.items.length) {
-						option = this.options[this.items[index]];
-						if (this.deleteSelection(e)) {
-							this.setTextboxValue(options.text.apply(this, [option]));
-							this.refreshOptions(true);
-						}
-						e.preventDefault();
-						return;
-					}
-				}
-				return original.apply(this, arguments);
-			};
-		})();
-	});
-	
-
-	return Selectize;
-}));
 ;(function() {
   define('ember-cli-shims/deprecations', [], function() {
     var values = {"ember-application":{"default":["@ember/application"]},"ember-array":{"default":["@ember/array"]},"ember-array/mutable":{"default":["@ember/array/mutable"]},"ember-array/utils":{"A":["@ember/array","A"],"isEmberArray":["@ember/array","isArray"],"wrap":["@ember/array","makeArray"]},"ember-component":{"default":["@ember/component"]},"ember-components/checkbox":{"default":["@ember/component/checkbox"]},"ember-components/text-area":{"default":["@ember/component/text-area"]},"ember-components/text-field":{"default":["@ember/component/text-field"]},"ember-controller":{"default":["@ember/controller"]},"ember-controller/inject":{"default":["@ember/controller","inject"]},"ember-controller/proxy":{"default":["@ember/array/proxy"]},"ember-debug":{"log":["@ember/debug","debug"],"inspect":["@ember/debug","inspect"],"run":["@ember/debug","runInDebug"],"warn":["@ember/debug","warn"]},"ember-debug/container-debug-adapter":{"default":["@ember/debug/container-debug-adapter"]},"ember-debug/data-adapter":{"default":["@ember/debug/data-adapter"]},"ember-deprecations":{"deprecate":["@ember/application/deprecations","deprecate"],"deprecateFunc":["@ember/application/deprecations","deprecateFunc"]},"ember-enumerable":{"default":["@ember/enumerable"]},"ember-evented":{"default":["@ember/object/evented"]},"ember-evented/on":{"default":["@ember/object/evented","on"]},"ember-globals-resolver":{"default":["@ember/application/globals-resolver"]},"ember-helper":{"default":["@ember/component/helper"],"helper":["@ember/component/helper","helper"]},"ember-instrumentation":{"instrument":["@ember/instrumentation","instrument"],"reset":["@ember/instrumentation","reset"],"subscribe":["@ember/instrumentation","subscribe"],"unsubscribe":["@ember/instrumentation","unsubscribe"]},"ember-locations/hash":{"default":["@ember/routing/hash-location"]},"ember-locations/history":{"default":["@ember/routing/history-location"]},"ember-locations/none":{"default":["@ember/routing/none-location"]},"ember-map":{"default":["@ember/map"],"withDefault":["@ember/map/with-default"]},"ember-metal/events":{"addListener":["@ember/object/events","addListener"],"removeListener":["@ember/object/events","removeListener"],"send":["@ember/object/events","sendEvent"]},"ember-metal/get":{"default":["@ember/object","get"],"getProperties":["@ember/object","getProperties"]},"ember-metal/mixin":{"default":["@ember/object/mixin"]},"ember-metal/observer":{"default":["@ember/object","observer"],"addObserver":["@ember/object/observers","addObserver"],"removeObserver":["@ember/object/observers","removeObserver"]},"ember-metal/on-load":{"default":["@ember/application","onLoad"],"run":["@ember/application","runLoadHooks"]},"ember-metal/set":{"default":["@ember/object","set"],"setProperties":["@ember/object","setProperties"],"trySet":["@ember/object","trySet"]},"ember-metal/utils":{"aliasMethod":["@ember/object","aliasMethod"],"assert":["@ember/debug","assert"],"cacheFor":["@ember/object/internals","cacheFor"],"copy":["@ember/object/internals","copy"],"guidFor":["@ember/object/internals","guidFor"]},"ember-object":{"default":["@ember/object"]},"ember-owner/get":{"default":["@ember/application","getOwner"]},"ember-owner/set":{"default":["@ember/application","setOwner"]},"ember-platform":{"assign":["@ember/polyfills","assign"],"create":["@ember/polyfills","create"],"hasAccessors":["@ember/polyfills","hasPropertyAccessors"],"keys":["@ember/polyfills","keys"]},"ember-route":{"default":["@ember/routing/route"]},"ember-router":{"default":["@ember/routing/router"]},"ember-runloop":{"default":["@ember/runloop","run"],"begin":["@ember/runloop","begin"],"bind":["@ember/runloop","bind"],"cancel":["@ember/runloop","cancel"],"debounce":["@ember/runloop","debounce"],"end":["@ember/runloop","end"],"join":["@ember/runloop","join"],"later":["@ember/runloop","later"],"next":["@ember/runloop","next"],"once":["@ember/runloop","once"],"schedule":["@ember/runloop","schedule"],"scheduleOnce":["@ember/runloop","scheduleOnce"],"throttle":["@ember/runloop","throttle"]},"ember-service":{"default":["@ember/service"]},"ember-service/inject":{"default":["@ember/service","inject"]},"ember-string":{"camelize":["@ember/string","camelize"],"capitalize":["@ember/string","capitalize"],"classify":["@ember/string","classify"],"dasherize":["@ember/string","dasherize"],"decamelize":["@ember/string","decamelize"],"fmt":["@ember/string","fmt"],"htmlSafe":["@ember/string","htmlSafe"],"loc":["@ember/string","loc"],"underscore":["@ember/string","underscore"],"w":["@ember/string","w"]},"ember-utils":{"isBlank":["@ember/utils","isBlank"],"isEmpty":["@ember/utils","isEmpty"],"isNone":["@ember/utils","isNone"],"isPresent":["@ember/utils","isPresent"],"tryInvoke":["@ember/utils","tryInvoke"],"typeOf":["@ember/utils","typeOf"]},"ember-computed":{"default":["@ember/object","computed"],"empty":["@ember/object/computed","empty"],"notEmpty":["@ember/object/computed","notEmpty"],"none":["@ember/object/computed","none"],"not":["@ember/object/computed","not"],"bool":["@ember/object/computed","bool"],"match":["@ember/object/computed","match"],"equal":["@ember/object/computed","equal"],"gt":["@ember/object/computed","gt"],"gte":["@ember/object/computed","gte"],"lt":["@ember/object/computed","lt"],"lte":["@ember/object/computed","lte"],"alias":["@ember/object/computed","alias"],"oneWay":["@ember/object/computed","oneWay"],"reads":["@ember/object/computed","reads"],"readOnly":["@ember/object/computed","readOnly"],"deprecatingAlias":["@ember/object/computed","deprecatingAlias"],"and":["@ember/object/computed","and"],"or":["@ember/object/computed","or"],"collect":["@ember/object/computed","collect"],"sum":["@ember/object/computed","sum"],"min":["@ember/object/computed","min"],"max":["@ember/object/computed","max"],"map":["@ember/object/computed","map"],"sort":["@ember/object/computed","sort"],"setDiff":["@ember/object/computed","setDiff"],"mapBy":["@ember/object/computed","mapBy"],"mapProperty":["@ember/object/computed","mapProperty"],"filter":["@ember/object/computed","filter"],"filterBy":["@ember/object/computed","filterBy"],"filterProperty":["@ember/object/computed","filterProperty"],"uniq":["@ember/object/computed","uniq"],"union":["@ember/object/computed","union"],"intersect":["@ember/object/computed","intersect"]},"ember-test/adapter":{"default":["@ember/test/adapter"]}};
@@ -87169,908 +83490,6 @@ createDeprecatedModule('resolver');
   var versionRegExp = exports.versionRegExp = /\d[.]\d[.]\d/;
   var shaRegExp = exports.shaRegExp = /[a-z\d]{8}/;
 });
-;define('ember-cli-selectize/components/ember-selectize', ['exports', 'ember', 'ember-new-computed'], function (exports, _ember, _emberNewComputed) {
-  var Component = _ember['default'].Component;
-  var computed = _ember['default'].computed;
-  var observer = _ember['default'].observer;
-  var run = _ember['default'].run;
-  var get = _ember['default'].get;
-  var isArray = _ember['default'].isArray;
-  var isEmpty = _ember['default'].isEmpty;
-  var isNone = _ember['default'].isNone;
-  var typeOf = _ember['default'].typeOf;
-  var camelize = _ember['default'].String.camelize;
-  var assert = _ember['default'].assert;
-  var getOwner = _ember['default'].getOwner;
-
-  var assign = _ember['default'].assign || _ember['default'].merge;
-
-  /**
-   * Ember.Selectize is an Ember View that encapsulates a Selectize component.
-   * The goal is to use this as a near dropin replacement for Ember.Select.
-   */
-  exports['default'] = Component.extend({
-    attributeBindings: ['name', 'multiple', 'autocomplete', 'required', 'tabindex'],
-    classNames: ['ember-selectize'],
-
-    autocomplete: 'off',
-    multiple: false,
-    tabindex: 0,
-    maxItems: computed('multiple', function () {
-      return this.get('multiple') ? null : 1;
-    }),
-
-    // Allows to use prompt (like in Ember.Select) or placeholder property
-    placeholder: computed.alias('prompt'),
-    sortField: null,
-    sortDirection: 'asc',
-    tagName: 'select',
-
-    /**
-    * overrideable object paths for value and label paths
-    */
-    optionValuePath: 'content',
-    optionLabelPath: 'content',
-    optionGroupPath: 'content.group',
-
-    selection: null,
-    value: (0, _emberNewComputed['default'])('selection', {
-      get: function get() {
-        var valuePath = this.get('_valuePath');
-        var selection = this.get('selection');
-        return valuePath && selection ? _ember['default'].get(selection, valuePath) : selection;
-      },
-      set: function set(key, value) {
-        return value;
-      }
-    }),
-
-    /*
-     * Contains optgroups.
-     */
-    optgroups: computed('content.[]', 'groupedContent.[]', function () {
-      var _this = this;
-
-      var groupedContent = this.get('groupedContent');
-      if (groupedContent) {
-        return groupedContent.mapBy('label');
-      } else {
-        //compute option groups from content
-        var content = this.get('content');
-        if (!isArray(content)) {
-          return;
-        }
-
-        return content.reduce(function (previousValue, item) {
-          return previousValue.addObject(get(item, _this.get('_groupPath')));
-        }, _ember['default'].A());
-      }
-    }),
-    /**
-     * Computes content from grouped content.
-     * If `content` is set, this computed property is overriden and never executed.
-     */
-    content: computed('groupedContent.[]', function () {
-      var _this2 = this;
-
-      var groupedContent = this.get('groupedContent');
-
-      if (!groupedContent) {
-        return;
-      }
-
-      //concatenate all content properties in each group
-      return groupedContent.reduce(function (previousValue, group) {
-        var content = get(group, 'content') || _ember['default'].A();
-        var groupLabel = get(group, 'label');
-
-        //create proxies for each object. Selectize requires the group value to be
-        //set in the object. Use ObjectProxy to keep original object intact.
-        var proxiedContent = content.map(function (item) {
-          var proxy = { content: item };
-          proxy[_this2.get('_groupPath')] = groupLabel;
-          return _ember['default'].ObjectProxy.create(proxy);
-        });
-
-        return previousValue.pushObjects(proxiedContent);
-      }, _ember['default'].A());
-    }),
-
-    _optgroupsDidChange: observer('optgroups.[]', function () {
-      var _this3 = this;
-
-      if (!this._selectize) {
-        return;
-      }
-      //TODO right now we reset option groups.
-      //Ideally we would set up an array observer and use selectize's [add|remove]OptionGroup
-      this._selectize.clearOptionGroups();
-      var optgroups = this.get('optgroups');
-      if (!optgroups) {
-        return;
-      }
-
-      optgroups.forEach(function (group) {
-        _this3._selectize.addOptionGroup(group, { label: group, value: group });
-      });
-    }),
-
-    /**
-    * The array of the default plugins to load into selectize
-    */
-    plugins: ['remove_button'],
-
-    /**
-    * Computed properties that hold the processed paths ('content.' replacement),
-    * as it is done on Ember.Select
-    */
-    _valuePath: computed('optionValuePath', function () {
-      return this.get('optionValuePath').replace(/^content\.?/, '');
-    }),
-
-    _labelPath: computed('optionLabelPath', function () {
-      return this.get('optionLabelPath').replace(/^content\.?/, '');
-    }),
-    _groupPath: computed('optionGroupPath', function () {
-      return this.get('optionGroupPath').replace(/^content\.?/, '');
-    }),
-
-    getValueFor: function getValueFor(item) {
-      var valuePath = this.get('_valuePath');
-      return isEmpty(valuePath) || isEmpty(item) ? item : get(item, valuePath);
-    },
-
-    getLabelFor: function getLabelFor(item) {
-      var labelPath = this.get('_labelPath');
-      return isEmpty(labelPath) || isEmpty(item) ? item : get(item, labelPath);
-    },
-
-    /**
-    * Loading feature default values.
-    * If you want to override the css class that is applied, change the `loadingClass` property.
-    */
-    loading: false,
-    loadingClass: 'loading',
-
-    /**
-    * The render function names selectize expects.
-    * We will use these to automatically infer the properties with the template and view names.
-    */
-    functionNames: ['option', 'item', 'option_create', 'optgroup_header', 'optgroup'],
-    templateSuffix: 'Template',
-    componentSuffix: 'Component',
-    functionSuffix: 'Function',
-    renderOptions: computed(function () {
-      var _this4 = this;
-
-      var functionNames = this.get('functionNames');
-      //this hash will contain the render functions
-      var renderFunctions = {};
-
-      functionNames.forEach(function (item) {
-        // infer the function name by camelizing selectize's function and appending the function suffix (overridable)
-        var functionSuffix = _this4.get('functionSuffix');
-        var functionPropertyName = camelize(item) + functionSuffix;
-        var renderFunction = _this4.get(functionPropertyName);
-        // functions take precedence
-        if (renderFunction) {
-          renderFunctions[item] = function (data, escape) {
-            return renderFunction.call(_this4.get('targetObject') || _this4, data.data || data, escape);
-          };
-        } else {
-          // infer the view name by camelizing selectize's function and appending a view suffix (overridable)
-          var componentSuffix = _this4.get('componentSuffix');
-          var componentPropertyName = camelize(item) + componentSuffix;
-          var componentToRender = _this4.get(componentPropertyName);
-
-          if (componentToRender) {
-            // we have a view to render. set the function.
-            renderFunctions[item] = function (data) {
-              return _this4._componentToDOM(componentToRender, data.data || data);
-            };
-          }
-        }
-      });
-
-      return renderFunctions;
-    }),
-
-    selectizeOptions: computed(function () {
-      var _this5 = this;
-
-      var allowCreate = this.get('create-item');
-      var multiple = this.get('multiple');
-
-      //Split the passed in plugin config into an array.
-      if (typeof this.plugins === 'string') {
-        this.plugins = this.plugins.trim().split(/[\s,]+/);
-      }
-
-      var plugins = this.plugins.slice(0);
-
-      if (!multiple) {
-        var index = plugins.indexOf('remove_button');
-        if (index !== -1) {
-          plugins.splice(index, 1);
-        }
-      }
-
-      var options = {
-        plugins: plugins,
-        labelField: 'label',
-        valueField: 'value',
-        searchField: 'label',
-        optgroupField: 'optgroup',
-        create: allowCreate ? run.bind(this, '_create') : false,
-        onItemAdd: run.bind(this, '_onItemAdd'),
-        onItemRemove: run.bind(this, '_onItemRemove'),
-        onType: run.bind(this, '_onType'),
-        render: this.get('renderOptions'),
-        placeholder: this.get('placeholder'),
-        score: this.get('score'),
-        onBlur: this._registerAction('on-blur'),
-        onFocus: this._registerAction('on-focus'),
-        onInitialize: this._registerAction('on-init'),
-        onClear: this._registerAction('on-clear')
-      };
-
-      var generalOptions = ['delimiter', 'diacritics', 'createOnBlur', 'createFilter', 'highlight', 'persist', 'openOnFocus', 'maxOptions', 'maxItems', 'hideSelected', 'closeAfterSelect', 'allowEmptyOption', 'scrollDuration', 'loadThrottle', 'preload', 'dropdownParent', 'addPrecedence', 'selectOnTab', 'searchField'];
-
-      generalOptions.forEach(function (option) {
-        options[option] = _this5.getWithDefault(option, options[option]);
-      });
-
-      options = this._mergeSortField(options);
-
-      return options;
-    }),
-
-    didInsertElement: function didInsertElement() {
-      // ensure selectize is loaded
-      assert('selectize has to be loaded', typeof this.$().selectize === 'function');
-
-      //Create Selectize's instance
-      this.$().selectize(this.get('selectizeOptions'));
-
-      //Save the created selectize instance
-      this._selectize = this.$()[0].selectize;
-
-      //Some changes to content, selection and disabled could have happened before the Component was inserted into the DOM.
-      //We trigger all the observers manually to account for those changes.
-      this._disabledDidChange();
-      this._optgroupsDidChange();
-      if (this.get('groupedContent')) {
-        this._groupedContentDidChange();
-      }
-      this._contentDidChange();
-
-      var selection = this.get('selection');
-      var value = this.get('value');
-      if (!isNone(selection)) {
-        this._selectionDidChange();
-      }
-      if (!isNone(value)) {
-        this._valueDidChange();
-      }
-
-      this._loadingDidChange();
-    },
-
-    willDestroyElement: function willDestroyElement() {
-      //Unbind observers
-      this._contentWillChange(this.get('content'));
-      this._selectionWillChange(this.get('selection'));
-      this._groupedContentWillChange(this.get('groupedContent'));
-
-      //Invoke Selectize's destroy
-      this._selectize.destroy();
-
-      //We are no longer in DOM
-      this._selectize = null;
-    },
-
-    /**
-    * Event callback that is triggered when user creates a tag
-    */
-    _create: function _create(input, callback) {
-      // Delete user entered text
-      this._selectize.setTextboxValue('');
-      // Send create action
-
-      // allow the observers and computed properties to run first
-      run.schedule('actions', this, function () {
-        this.sendAction('create-item', input);
-      });
-      // We cancel the creation here, so it's up to you to include the created element
-      // in the content and selection property
-      callback(null);
-    },
-
-    /**
-    * Event callback for DOM events
-    */
-    _registerAction: function _registerAction(action) {
-      return run.bind(this, function () {
-        var args = Array.prototype.slice.call(arguments);
-        args.unshift(action);
-        this.sendAction.apply(this, args);
-      });
-    },
-
-    /**
-    * Event callback that is triggered when user types in the input element
-    */
-    _onType: function _onType(str) {
-      this.set('filter', str);
-      run.schedule('actions', this, function () {
-        this.sendAction('update-filter', str);
-      });
-    },
-
-    /**
-    * Event callback triggered when an item is added (when something is selected)
-    * Here we need to update our selection property (if single selection) or array (if multiple selection)
-    * We also send an action
-    */
-    _onItemAdd: function _onItemAdd(value) {
-      var _this6 = this;
-
-      var content = this.get('content');
-      var selection = this.get('selection');
-      var multiple = this.get('multiple');
-      if (content) {
-        var obj = content.find(function (item) {
-          return this.getValueFor(item) + '' === value;
-        }, this);
-        if (multiple && isArray(selection) && obj) {
-          var selected = selection.find(function (item) {
-            return isEmpty(_this6.get('_valuePath')) ? item === obj : _this6.getValueFor(obj) === _this6.getValueFor(item);
-          });
-          if (!selected) {
-            this._addSelection(obj);
-          }
-        } else if (obj) {
-          if (!selection || this.getValueFor(obj) !== this.getValueFor(selection)) {
-            this._updateSelection(obj);
-          }
-        }
-      }
-    },
-
-    /**
-    * Event callback triggered when an item is removed (when something is deselected)
-    * Here we need to update our selection property (if single selection, here set to null) or remove item from array (if multiple selection)
-    */
-    _onItemRemove: function _onItemRemove(value) {
-      //in order to know if this event was triggered by observers or if it came from user interaction
-      if (this._removing) {
-        return;
-      }
-
-      var content = this.get('content');
-      var selection = this.get('selection');
-      var multiple = this.get('multiple');
-      if (content) {
-        var obj = content.find(function (item) {
-          return this.getValueFor(item) + '' === value;
-        }, this);
-        if (multiple && isArray(selection) && obj) {
-          this._removeSelection(obj);
-        } else if (!multiple) {
-          this._updateSelection(null);
-        }
-      }
-    },
-
-    /**
-     * Update the selection value and send main actions
-     * In addition to emitting the selection object, a selection value is sent via `select-value` based on `optionValuePath`
-     */
-    _updateSelection: function _updateSelection(selection) {
-      this.set('selection', selection);
-
-      // allow the observers and computed properties to run first
-      run.schedule('actions', this, function () {
-        var value = this.get('value');
-        this.sendAction('select-item', selection, value);
-        this.sendAction('select-value', value);
-      });
-    },
-
-    _addSelection: function _addSelection(obj) {
-      var val = this.getValueFor(obj);
-
-      this.get('selection').addObject(obj);
-
-      run.schedule('actions', this, function () {
-        this.sendAction('add-item', obj);
-        this.sendAction('add-value', val);
-      });
-    },
-
-    _removeSelection: function _removeSelection(obj) {
-      var val = this.getValueFor(obj);
-
-      this.get('selection').removeObject(obj);
-
-      run.schedule('actions', this, function () {
-        this.sendAction('remove-item', obj);
-        this.sendAction('remove-value', val);
-      });
-    },
-
-    /**
-    * Ember observer triggered before the selection property is changed
-    * We need to unbind any array observers if we're in multiple selection
-    */
-    _selectionWillChange: function _selectionWillChange(selection) {
-      var multiple = this.get('multiple');
-      if (selection && isArray(selection) && multiple) {
-        selection.removeArrayObserver(this, {
-          willChange: 'selectionArrayWillChange',
-          didChange: 'selectionArrayDidChange'
-        });
-        var len = selection ? get(selection, 'length') : 0;
-        this.selectionArrayWillChange(selection, 0, len);
-      }
-    },
-    /**
-    * Ember observer triggered when the selection property is changed
-    * We need to bind an array observer when selection is multiple
-    */
-    _selectionDidChange: observer('selection', function () {
-      var _this7 = this;
-
-      var selection = this.get('selection');
-      if (this._oldSelection !== selection) {
-        this._selectionWillChange(this._oldSelection);
-        this._oldSelection = selection;
-      }
-
-      if (!this._selectize) {
-        return;
-      }
-
-      var multiple = this.get('multiple');
-
-      if (selection) {
-        if (multiple) {
-          assert('When ember-selectize is in multiple mode, the provided selection must be an array.', isArray(selection));
-          //bind array observers to listen for selection changes
-          selection.addArrayObserver(this, {
-            willChange: 'selectionArrayWillChange',
-            didChange: 'selectionArrayDidChange'
-          });
-          //Trigger a selection change that will update selectize with the new selection
-          var len = selection ? get(selection, 'length') : 0;
-          this.selectionArrayDidChange(selection, 0, null, len);
-        } else {
-          if (selection.then) {
-            selection.then(function (resolved) {
-              if (resolved) {
-                // Ensure that we don't overwrite new value
-                if (get(_this7, 'selection') === selection) {
-                  _this7._selectize.addItem(_this7.getValueFor(resolved));
-                }
-              } else {
-                //selection was changed to a falsy value. Clear selectize.
-                _this7._selectize.clear();
-                _this7._selectize.showInput();
-              }
-            });
-          } else {
-            this._selectize.addItem(this.getValueFor(selection));
-          }
-        }
-      } else {
-        //selection was changed to a falsy value. Clear selectize.
-        this._selectize.clear();
-        this._selectize.showInput();
-      }
-    }),
-
-    /**
-     * It is possible to control the selected item through its value.
-     */
-    _valueDidChange: observer('value', function () {
-      var _this8 = this;
-
-      if (this.get('multiple')) {
-        return;
-      }
-      var content = this.get('content');
-      var value = this.get('value');
-      var selectedValue = this.getValueFor(this.get('selection'));
-      var selection;
-
-      if (value !== selectedValue) {
-        selection = content ? content.find(function (obj) {
-          return value === _this8.getValueFor(obj);
-        }) : null;
-
-        this.set('selection', selection);
-      }
-    }),
-
-    /*
-    * Triggered before the selection array changes
-    * Here we process the removed elements
-    */
-    selectionArrayWillChange: function selectionArrayWillChange(array, idx, removedCount) {
-      this._removing = true;
-      for (var i = idx; i < idx + removedCount; i++) {
-        this.selectionObjectWasRemoved(array.objectAt(i));
-      }
-      this._removing = false;
-    },
-
-    /*
-    * Triggered after the selection array changes
-    * Here we process the inserted elements
-    */
-    selectionArrayDidChange: function selectionArrayDidChange(array, idx, removedCount, addedCount) {
-      for (var i = idx; i < idx + addedCount; i++) {
-        this.selectionObjectWasAdded(array.objectAt(i), i);
-      }
-    },
-
-    /*
-    * Function that is responsible for Selectize's item inserting logic
-    */
-    selectionObjectWasAdded: function selectionObjectWasAdded(obj) {
-      if (this._selectize) {
-        this._selectize.addItem(this.getValueFor(obj));
-      }
-    },
-
-    /*
-    * Function that is responsible for Selectize's item removing logic
-    */
-    selectionObjectWasRemoved: function selectionObjectWasRemoved(obj) {
-      if (this._selectize) {
-        this._selectize.removeItem(this.getValueFor(obj));
-      }
-    },
-
-    /**
-    * Ember observer triggered before the content property is changed
-    * We need to unbind any array observers
-    */
-    _contentWillChange: function _contentWillChange(content) {
-      if (!this._selectize) {
-        return;
-      }
-      if (isArray(content)) {
-        content.removeArrayObserver(this, {
-          willChange: 'contentArrayWillChange',
-          didChange: 'contentArrayDidChange'
-        });
-      }
-      //Trigger remove logic
-      var len = content ? get(content, 'length') : 0;
-      this._removing = true;
-      this.contentArrayWillChange(content, 0, len);
-      this._removing = false;
-    },
-
-    /**
-    * Ember observer triggered when the content property is changed
-    * We need to bind an array observer to become notified of its changes
-    */
-    _contentDidChange: observer('content', function () {
-      var _this9 = this;
-
-      var content = this.get('content');
-      if (this._oldContent !== content) {
-        this._contentWillChange(this._oldContent);
-        this._oldContent = content;
-      }
-
-      if (!this._selectize) {
-        return;
-      }
-
-      if (isArray(content)) {
-        content.addArrayObserver(this, {
-          willChange: 'contentArrayWillChange',
-          didChange: 'contentArrayDidChange'
-        });
-      } else if (content && content.then) {
-        content.then(function (resolved) {
-          // Ensure that we don't overwrite new value
-          if (get(_this9, 'content') === content) {
-            _this9.set('content', resolved);
-          }
-        });
-      }
-      var len = content ? get(content, 'length') : 0;
-      this.contentArrayDidChange(content, 0, null, len);
-    }),
-
-    /*
-    * Triggered before the content array changes
-    * Here we process the removed elements
-    */
-    contentArrayWillChange: function contentArrayWillChange(array, idx, removedCount) {
-      for (var i = idx; i < idx + removedCount; i++) {
-        this.objectWasRemoved(array.objectAt(i));
-      }
-
-      if (this._selectize) {
-        this._selectize.refreshOptions(this._selectize.isFocused && !this._selectize.isInputHidden);
-      }
-    },
-
-    /*
-    * Triggered after the content array changes
-    * Here we process the inserted elements
-    */
-    contentArrayDidChange: function contentArrayDidChange(array, idx, removedCount, addedCount) {
-      for (var i = idx; i < idx + addedCount; i++) {
-        this.objectWasAdded(array.objectAt(i));
-        this.addLabelObserver(array.objectAt(i));
-      }
-
-      if (this._selectize) {
-        this._selectize.refreshOptions(this._selectize.isFocused && !this._selectize.isInputHidden);
-      }
-
-      this._selectionDidChange();
-    },
-
-    _groupedContentWillChange: function _groupedContentWillChange(groupedContent) {
-      var _this10 = this;
-
-      if (!this._selectize) {
-        return;
-      }
-      if (isEmpty(groupedContent)) {
-        return;
-      }
-
-      groupedContent.forEach(function (group) {
-        group.get('content').removeArrayObserver(_this10, {
-          willChange: '_groupedContentArrayWillChange',
-          didChange: '_groupedContentArrayDidChange'
-        });
-      });
-    },
-
-    /**
-    * Ember observer triggered when the groupedContent property is changed
-    * We need to bind an array observer to become notified of each group's array changes,
-    * then notify that the parent array has changed. This is because computed properties
-    * have trouble with nested array changes.
-    */
-    _groupedContentDidChange: observer('groupedContent', function () {
-      var _this11 = this;
-
-      var groupedContent = this.get('groupedContent');
-      if (this._oldGroupedContent !== groupedContent) {
-        this._groupedContentWillChange(this._oldGroupedContent);
-        this._oldGroupedContent = groupedContent;
-      }
-
-      if (!this._selectize) {
-        return;
-      }
-      if (isEmpty(groupedContent)) {
-        return;
-      }
-
-      //var willChangeWrapper = run.bind(this, function() { this.groupedContentArrayWillChange.apply(this, arguments); });
-      //var didChangeWrapper = run.bind(this, function() { this.groupedContentArrayDidChange.apply(this, arguments); });
-
-      groupedContent.forEach(function (group) {
-        group.get('content').addArrayObserver(_this11, {
-          willChange: '_groupedContentArrayWillChange',
-          didChange: '_groupedContentArrayDidChange'
-        });
-      });
-      var len = groupedContent ? get(groupedContent, 'length') : 0;
-      this._groupedContentArrayDidChange(groupedContent, 0, null, len);
-    }),
-
-    /*
-    * Triggered before the grouped content array changes
-    * Here we process the removed elements
-    */
-    _groupedContentArrayWillChange: function _groupedContentArrayWillChange() {},
-
-    /*
-    * Triggered after the grouped content array changes
-    * Here we process the inserted elements
-    */
-    _groupedContentArrayDidChange: function _groupedContentArrayDidChange() {
-      this.notifyPropertyChange('groupedContent.[]');
-    },
-
-    /*
-    * Function that is responsible for Selectize's option inserting logic
-    * If the option is an object or Ember instance, we set an observer on the label value of it.
-    * This way, we can later update the label of it.
-    * Useful for dealing with objects that 'lazy load' some properties/relationships.
-    */
-    objectWasAdded: function objectWasAdded(obj) {
-      var data = {};
-      var sortField = this.get('sortField');
-
-      if (typeOf(obj) === 'object' || typeOf(obj) === 'instance') {
-        data = {
-          label: this.getLabelFor(obj),
-          value: this.getValueFor(obj),
-          data: obj
-        };
-
-        if (sortField) {
-          if (isArray(sortField)) {
-            sortField.forEach(function (field) {
-              data[field.field] = get(obj, field.field);
-            });
-          } else {
-            data[sortField] = get(obj, sortField);
-          }
-        }
-
-        if (get(obj, this.get('_groupPath'))) {
-          data.optgroup = get(obj, this.get('_groupPath'));
-        }
-      } else {
-        data = {
-          label: obj,
-          value: obj,
-          data: obj
-        };
-
-        if (sortField && !isArray(sortField)) {
-          data[sortField] = obj;
-        }
-      }
-
-      if (this._selectize && data.label) {
-        this._selectize.addOption(data);
-      }
-    },
-
-    addLabelObserver: function addLabelObserver(obj) {
-      //Only attach observer if the label is a property of an object
-      if (typeOf(obj) === 'object' || typeOf(obj) === 'instance') {
-        _ember['default'].addObserver(obj, this.get('_labelPath'), this, '_labelDidChange');
-      }
-    },
-
-    /*
-    * Function that is responsible for Selectize's option removing logic
-    */
-    objectWasRemoved: function objectWasRemoved(obj) {
-      if (typeOf(obj) === 'object' || typeOf(obj) === 'instance') {
-        _ember['default'].removeObserver(obj, this.get('_labelPath'), this, '_labelDidChange');
-      }
-      if (this._selectize) {
-        this._selectize.removeOption(this.getValueFor(obj));
-      }
-    },
-
-    /*
-    * Ember Observer that triggers when an option's label changes.
-    * Here we need to update its corresponding option with the new data
-    */
-    _labelDidChange: function _labelDidChange(sender) {
-      if (!this._selectize) {
-        return;
-      }
-      var data = {
-        label: this.getLabelFor(sender),
-        value: this.getValueFor(sender),
-        data: sender
-      };
-
-      if (this._selectize.getOption(data.value).length !== 0) {
-        this._selectize.updateOption(data.value, data);
-      } else {
-        this.objectWasAdded(sender);
-      }
-    },
-
-    /*
-    * Observer on the disabled property that enables or disables selectize.
-    */
-    _disabledDidChange: observer('disabled', function () {
-      if (!this._selectize) {
-        return;
-      }
-      var disable = this.get('disabled');
-      if (disable) {
-        this._selectize.disable();
-      } else {
-        this._selectize.enable();
-      }
-    }),
-
-    /*
-    * Observer on the placeholder property that updates selectize's placeholder.
-    */
-    _placeholderDidChange: observer('placeholder', function () {
-      if (!this._selectize) {
-        return;
-      }
-      var placeholder = this.get('placeholder');
-      this._selectize.settings.placeholder = placeholder;
-      this._selectize.updatePlaceholder();
-    }),
-
-    /*
-    * Observer on the loading property.
-    * Here we add/remove a css class, similarly to how selectize does.
-    */
-    _loadingDidChange: observer('loading', function () {
-      var loading = this.get('loading');
-      var loadingClass = this.get('loadingClass');
-      if (loading) {
-        this._selectize.$wrapper.addClass(loadingClass);
-      } else {
-        this._selectize.$wrapper.removeClass(loadingClass);
-      }
-    }),
-
-    _lookupComponent: function _lookupComponent(name) {
-      var owner = getOwner(this);
-      var componentLookupKey = 'component:' + name;
-      var layoutLookupKey = 'template:components/' + name;
-      var layout = owner._lookupFactory(layoutLookupKey);
-      var component = owner._lookupFactory(componentLookupKey);
-
-      if (layout && !component) {
-        owner.register(componentLookupKey, Component);
-        component = owner._lookupFactory(componentLookupKey);
-      }
-
-      return { component: component, layout: layout };
-    },
-
-    _componentToDOM: function _componentToDOM(componentName, data) {
-      var _lookupComponent2 = this._lookupComponent(componentName);
-
-      var component = _lookupComponent2.component;
-      var layout = _lookupComponent2.layout;
-
-      assert('ember-selectize could not find a component named "' + componentName + '" in your Ember application.', component);
-
-      var attrs = { data: data };
-
-      if (layout) {
-        attrs.layout = layout;
-      }
-
-      var componentInstance = component.create(attrs);
-
-      var container = document.createElement('div');
-      componentInstance.appendTo(container);
-
-      return container;
-    },
-
-    _mergeSortField: function _mergeSortField(options) {
-      var sortField = this.get('sortField');
-      if (sortField) {
-        var sortArray = this._getSortArray(sortField);
-        assign(options, { sortField: sortArray });
-      }
-      return options;
-    },
-
-    _getSortArray: function _getSortArray(sortField) {
-      if (isArray(sortField)) {
-        return sortField;
-      } else {
-        return [{
-          field: sortField,
-          direction: this.get('sortDirection')
-        }];
-      }
-    }
-  });
-});
 ;define('ember-collapsible-panel/components/cp-panel-body/component', ['exports', 'ember-collapsible-panel/components/cp-panel-body/template'], function (exports, _template) {
   'use strict';
 
@@ -91622,7 +87041,7 @@ createDeprecatedModule('resolver');
   if (Ember.EXTEND_PROTOTYPES === true || Ember.EXTEND_PROTOTYPES.String) {
     /**
       See {{#crossLink "Ember.String/pluralize"}}{{/crossLink}}
-       @method pluralize
+        @method pluralize
       @for String
     */
     Object.defineProperty(String.prototype, 'pluralize', {
@@ -91640,7 +87059,7 @@ createDeprecatedModule('resolver');
 
     /**
       See {{#crossLink "Ember.String/singularize"}}{{/crossLink}}
-       @method singularize
+        @method singularize
       @for String
     */
     Object.defineProperty(String.prototype, 'singularize', {
@@ -91861,9 +87280,9 @@ createDeprecatedModule('resolver');
   Inflector.prototype = {
     /**
       @public
-       As inflections can be costly, and commonly the same subset of words are repeatedly
+        As inflections can be costly, and commonly the same subset of words are repeatedly
       inflected an optional cache is provided.
-       @method enableCache
+        @method enableCache
     */
     enableCache: function enableCache() {
       this.purgeCache();
@@ -91881,7 +87300,7 @@ createDeprecatedModule('resolver');
 
     /**
       @public
-       @method purgedCache
+        @method purgedCache
     */
     purgeCache: function purgeCache() {
       this._cacheUsed = false;
@@ -91892,7 +87311,7 @@ createDeprecatedModule('resolver');
     /**
       @public
       disable caching
-       @method disableCache;
+        @method disableCache;
     */
     disableCache: function disableCache() {
       this._sCache = null;
@@ -91978,7 +87397,7 @@ createDeprecatedModule('resolver');
 
     /**
       @protected
-       @method inflect
+        @method inflect
       @param {String} word
       @param {Object} typeRules
       @param {Object} irregular
@@ -92131,64 +87550,6 @@ createDeprecatedModule('resolver');
       app.instanceInitializer(resolveInitializer(moduleNames[i]));
     }
   }
-});
-;define('ember-new-computed/index', ['exports', 'ember', 'ember-new-computed/utils/can-use-new-syntax'], function (exports, _ember, _emberNewComputedUtilsCanUseNewSyntax) {
-  exports['default'] = newComputed;
-  var computed = _ember['default'].computed;
-
-  function newComputed() {
-    var polyfillArguments = [];
-    var config = arguments[arguments.length - 1];
-
-    if (typeof config === 'function' || _emberNewComputedUtilsCanUseNewSyntax['default']) {
-      return computed.apply(undefined, arguments);
-    }
-
-    for (var i = 0, l = arguments.length - 1; i < l; i++) {
-      polyfillArguments.push(arguments[i]);
-    }
-
-    var func;
-    if (config.set) {
-      func = function (key, value) {
-        if (arguments.length > 1) {
-          return config.set.call(this, key, value);
-        } else {
-          return config.get.call(this, key);
-        }
-      };
-    } else {
-      func = function (key) {
-        return config.get.call(this, key);
-      };
-    }
-
-    polyfillArguments.push(func);
-
-    return computed.apply(undefined, polyfillArguments);
-  }
-
-  var getKeys = Object.keys || _ember['default'].keys;
-  var computedKeys = getKeys(computed);
-
-  for (var i = 0, l = computedKeys.length; i < l; i++) {
-    newComputed[computedKeys[i]] = computed[computedKeys[i]];
-  }
-});
-;define('ember-new-computed/utils/can-use-new-syntax', ['exports', 'ember'], function (exports, _ember) {
-  var supportsSetterGetter;
-
-  try {
-    _ember['default'].computed({
-      set: function set() {},
-      get: function get() {}
-    });
-    supportsSetterGetter = true;
-  } catch (e) {
-    supportsSetterGetter = false;
-  }
-
-  exports['default'] = supportsSetterGetter;
 });
 ;define('ember-popper/components/ember-popper-base', ['exports', '@ember-decorators/argument/-debug/validated-component', 'ember-popper/templates/components/ember-popper', '@ember-decorators/argument/types', '@ember-decorators/object', '@ember-decorators/argument', 'ember-raf-scheduler', '@ember-decorators/component', '@ember-decorators/argument/type'], function (exports, _validatedComponent, _emberPopper, _types, _object, _argument, _emberRafScheduler, _component, _type) {
   'use strict';
@@ -93090,7 +88451,7 @@ define("ember-resolver/features", [], function () {
         The container of the application being debugged.
         This property will be injected
         on creation.
-         @property container
+          @property container
         @default null
         */
 
@@ -93098,14 +88459,14 @@ define("ember-resolver/features", [], function () {
         The resolver instance of the application
         being debugged. This property will be injected
         on creation.
-         @property resolver
+          @property resolver
         @default null
         */
 
     /**
         Returns true if it is possible to catalog a list of available
         classes in the resolver for a given type.
-         @method canCatalogEntriesByType
+          @method canCatalogEntriesByType
         @param {string} type The type. e.g. "model", "controller", "route"
         @return {boolean} whether a list is available for this type.
         */
@@ -93119,7 +88480,7 @@ define("ember-resolver/features", [], function () {
 
     /**
         Returns the available classes a given type.
-         @method catalogEntriesByType
+          @method catalogEntriesByType
         @param {string} type The type. e.g. "model", "controller", "route"
         @return {Array} An array of classes.
         */
@@ -93402,10 +88763,10 @@ define("ember-resolver/features", [], function () {
 
 
     /**
-      A listing of functions to test for moduleName's based on the provided
+       A listing of functions to test for moduleName's based on the provided
      `parsedName`. This allows easy customization of additional module based
      lookup patterns.
-      @property moduleNameLookupPatterns
+       @property moduleNameLookupPatterns
      @returns {Ember.Array}
      */
     moduleNameLookupPatterns: Ember.computed(function () {
@@ -97165,7 +92526,7 @@ var MapWithDefault = Ember.MapWithDefault;
 var Errors = Ember.ArrayProxy.extend(Ember.Evented, {
   /**
     Register with target handler
-     @method registerHandlers
+      @method registerHandlers
     @param {Object} target
     @param {Function} becameInvalid
     @param {Function} becameValid
@@ -97183,7 +92544,7 @@ var Errors = Ember.ArrayProxy.extend(Ember.Evented, {
 
   /**
     Register with target handler
-     @method _registerHandlers
+      @method _registerHandlers
     @private
   */
   _registerHandlers: function _registerHandlers(target, becameInvalid, becameValid) {
@@ -97207,7 +92568,7 @@ var Errors = Ember.ArrayProxy.extend(Ember.Evented, {
 
   /**
     Returns errors for a given attribute
-     ```javascript
+      ```javascript
     let user = store.createRecord('user', {
       username: 'tomster',
       email: 'invalidEmail'
@@ -97217,7 +92578,7 @@ var Errors = Ember.ArrayProxy.extend(Ember.Evented, {
       // [{attribute: "email", message: "Doesn't look like a valid email."}]
     });
     ```
-     @method errorsFor
+      @method errorsFor
     @param {String} attribute
     @return {Array}
   */
@@ -97229,14 +92590,14 @@ var Errors = Ember.ArrayProxy.extend(Ember.Evented, {
   /**
     An array containing all of the error messages for this
     record. This is useful for displaying all errors to the user.
-     ```handlebars
+      ```handlebars
     {{#each model.errors.messages as |message|}}
       <div class="error">
         {{message}}
       </div>
     {{/each}}
     ```
-     @property messages
+      @property messages
     @type {Array}
   */
   messages: Ember.computed.mapBy('content', 'message'),
@@ -97265,7 +92626,7 @@ var Errors = Ember.ArrayProxy.extend(Ember.Evented, {
 
   /**
     Total number of errors.
-     @property length
+      @property length
     @type {Number}
     @readOnly
   */
@@ -97280,13 +92641,13 @@ var Errors = Ember.ArrayProxy.extend(Ember.Evented, {
   /**
     Adds error messages to a given attribute and sends
     `becameInvalid` event to the record.
-     Example:
-     ```javascript
+      Example:
+      ```javascript
     if (!user.get('username') {
       user.get('errors').add('username', 'This field is required');
     }
     ```
-     @method add
+      @method add
     @param {String} attribute
     @param {(Array|String)} messages
     @deprecated
@@ -97308,7 +92669,7 @@ var Errors = Ember.ArrayProxy.extend(Ember.Evented, {
 
   /**
     Adds error messages to a given attribute without sending event.
-     @method _add
+      @method _add
     @private
   */
   _add: function _add(attribute, messages) {
@@ -97349,18 +92710,18 @@ var Errors = Ember.ArrayProxy.extend(Ember.Evented, {
   /**
     Removes all error messages from the given attribute and sends
     `becameValid` event to the record if there no more errors left.
-     Example:
-     ```app/models/user.js
+      Example:
+      ```app/models/user.js
     import DS from 'ember-data';
-     export default DS.Model.extend({
+      export default DS.Model.extend({
       email: DS.attr('string'),
       twoFactorAuth: DS.attr('boolean'),
       phone: DS.attr('string')
     });
     ```
-     ```app/routes/user/edit.js
+      ```app/routes/user/edit.js
     import Ember from 'ember';
-     export default Ember.Route.extend({
+      export default Ember.Route.extend({
       actions: {
         save: function(user) {
            if (!user.get('twoFactorAuth')) {
@@ -97371,7 +92732,7 @@ var Errors = Ember.ArrayProxy.extend(Ember.Evented, {
       }
     });
     ```
-     @method remove
+      @method remove
     @param {String} attribute
     @deprecated
   */
@@ -97394,7 +92755,7 @@ var Errors = Ember.ArrayProxy.extend(Ember.Evented, {
 
   /**
     Removes all error messages from the given attribute without sending event.
-     @method _remove
+      @method _remove
     @private
   */
   _remove: function _remove(attribute) {
@@ -97413,10 +92774,10 @@ var Errors = Ember.ArrayProxy.extend(Ember.Evented, {
   /**
     Removes all error messages and sends `becameValid` event
     to the record.
-     Example:
-     ```app/routes/user/edit.js
+      Example:
+      ```app/routes/user/edit.js
     import Ember from 'ember';
-     export default Ember.Route.extend({
+      export default Ember.Route.extend({
       actions: {
         retrySave: function(user) {
            user.get('errors').clear();
@@ -97425,7 +92786,7 @@ var Errors = Ember.ArrayProxy.extend(Ember.Evented, {
       }
     });
     ```
-     @method clear
+      @method clear
     @deprecated
   */
   clear: function clear() {
@@ -97445,7 +92806,7 @@ var Errors = Ember.ArrayProxy.extend(Ember.Evented, {
   /**
     Removes all error messages.
     to the record.
-     @method _clear
+      @method _clear
     @private
   */
   _clear: function _clear() {
@@ -97471,9 +92832,9 @@ var Errors = Ember.ArrayProxy.extend(Ember.Evented, {
 
   /**
     Checks if there is error messages for the given attribute.
-     ```app/routes/user/edit.js
+      ```app/routes/user/edit.js
     import Ember from 'ember';
-     export default Ember.Route.extend({
+      export default Ember.Route.extend({
       actions: {
         save: function(user) {
            if (user.get('errors').has('email')) {
@@ -97484,7 +92845,7 @@ var Errors = Ember.ArrayProxy.extend(Ember.Evented, {
       }
     });
     ```
-     @method has
+      @method has
     @param {String} attribute
     @return {Boolean} true if there some errors on given attribute
   */
@@ -98418,7 +93779,7 @@ var Model = Ember.Object.extend(Ember.Evented, {
     the server or the `created` state if the record is created on the
     client. A record can also enter the empty state if the adapter is
     unable to locate the record.
-     @property isEmpty
+      @property isEmpty
     @type {Boolean}
     @readOnly
   */
@@ -98428,7 +93789,7 @@ var Model = Ember.Object.extend(Ember.Evented, {
     record enters this state when the store asks the adapter for its
     data. It remains in this state until the adapter provides the
     requested data.
-     @property isLoading
+      @property isLoading
     @type {Boolean}
     @readOnly
   */
@@ -98438,15 +93799,15 @@ var Model = Ember.Object.extend(Ember.Evented, {
     record enters this state when its data is populated. Most of a
     record's lifecycle is spent inside substates of the `loaded`
     state.
-     Example
-     ```javascript
+      Example
+      ```javascript
     let record = store.createRecord('model');
     record.get('isLoaded'); // true
-     store.findRecord('model', 1).then(function(model) {
+      store.findRecord('model', 1).then(function(model) {
       model.get('isLoaded'); // true
     });
     ```
-     @property isLoaded
+      @property isLoaded
     @type {Boolean}
     @readOnly
   */
@@ -98456,17 +93817,17 @@ var Model = Ember.Object.extend(Ember.Evented, {
     record has local changes that have not yet been saved by the
     adapter. This includes records that have been created (but not yet
     saved) or deleted.
-     Example
-     ```javascript
+      Example
+      ```javascript
     let record = store.createRecord('model');
     record.get('hasDirtyAttributes'); // true
-     store.findRecord('model', 1).then(function(model) {
+      store.findRecord('model', 1).then(function(model) {
       model.get('hasDirtyAttributes'); // false
       model.set('foo', 'some value');
       model.get('hasDirtyAttributes'); // true
     });
     ```
-     @since 1.13.0
+      @since 1.13.0
     @property hasDirtyAttributes
     @type {Boolean}
     @readOnly
@@ -98479,8 +93840,8 @@ var Model = Ember.Object.extend(Ember.Evented, {
     record enters the saving state when `save` is called, but the
     adapter has not yet acknowledged that the changes have been
     persisted to the backend.
-     Example
-     ```javascript
+      Example
+      ```javascript
     let record = store.createRecord('model');
     record.get('isSaving'); // false
     let promise = record.save();
@@ -98489,7 +93850,7 @@ var Model = Ember.Object.extend(Ember.Evented, {
       record.get('isSaving'); // false
     });
     ```
-     @property isSaving
+      @property isSaving
     @type {Boolean}
     @readOnly
   */
@@ -98501,27 +93862,27 @@ var Model = Ember.Object.extend(Ember.Evented, {
     was not yet persisted. When `isSaving` is true, the change is
     in-flight. When both `hasDirtyAttributes` and `isSaving` are false, the
     change has persisted.
-     Example
-     ```javascript
+      Example
+      ```javascript
     let record = store.createRecord('model');
     record.get('isDeleted');    // false
     record.deleteRecord();
-     // Locally deleted
+      // Locally deleted
     record.get('isDeleted');           // true
     record.get('hasDirtyAttributes');  // true
     record.get('isSaving');            // false
-     // Persisting the deletion
+      // Persisting the deletion
     let promise = record.save();
     record.get('isDeleted');    // true
     record.get('isSaving');     // true
-     // Deletion Persisted
+      // Deletion Persisted
     promise.then(function() {
       record.get('isDeleted');          // true
       record.get('isSaving');           // false
       record.get('hasDirtyAttributes'); // false
     });
     ```
-     @property isDeleted
+      @property isDeleted
     @type {Boolean}
     @readOnly
   */
@@ -98531,24 +93892,24 @@ var Model = Ember.Object.extend(Ember.Evented, {
     record will be in the `new` state when it has been created on the
     client and the adapter has not yet report that it was successfully
     saved.
-     Example
-     ```javascript
+      Example
+      ```javascript
     let record = store.createRecord('model');
     record.get('isNew'); // true
-     record.save().then(function(model) {
+      record.save().then(function(model) {
       model.get('isNew'); // false
     });
     ```
-     @property isNew
+      @property isNew
     @type {Boolean}
     @readOnly
   */
   isNew: retrieveFromCurrentState,
   /**
     If this property is `true` the record is in the `valid` state.
-     A record will be in the `valid` state when the adapter did not report any
+      A record will be in the `valid` state when the adapter did not report any
     server-side validation failures.
-     @property isValid
+      @property isValid
     @type {Boolean}
     @readOnly
   */
@@ -98557,15 +93918,15 @@ var Model = Ember.Object.extend(Ember.Evented, {
     If the record is in the dirty state this property will report what
     kind of change has caused it to move into the dirty
     state. Possible values are:
-     - `created` The record has been created by the client and not yet saved to the adapter.
+      - `created` The record has been created by the client and not yet saved to the adapter.
     - `updated` The record has been updated by the client and not yet saved to the adapter.
     - `deleted` The record has been deleted by the client and not yet saved to the adapter.
-     Example
-     ```javascript
+      Example
+      ```javascript
     let record = store.createRecord('model');
     record.get('dirtyType'); // 'created'
     ```
-     @property dirtyType
+      @property dirtyType
     @type {String}
     @readOnly
   */
@@ -98575,15 +93936,15 @@ var Model = Ember.Object.extend(Ember.Evented, {
     If `true` the adapter reported that it was unable to save local
     changes to the backend for any reason other than a server-side
     validation error.
-     Example
-     ```javascript
+      Example
+      ```javascript
     record.get('isError'); // false
     record.set('foo', 'valid value');
     record.save().then(null, function() {
       record.get('isError'); // true
     });
     ```
-     @property isError
+      @property isError
     @type {Boolean}
     @readOnly
   */
@@ -98591,13 +93952,13 @@ var Model = Ember.Object.extend(Ember.Evented, {
 
   /**
     If `true` the store is attempting to reload the record from the adapter.
-     Example
-     ```javascript
+      Example
+      ```javascript
     record.get('isReloading'); // false
     record.reload();
     record.get('isReloading'); // true
     ```
-     @property isReloading
+      @property isReloading
     @type {Boolean}
     @readOnly
   */
@@ -98609,14 +93970,14 @@ var Model = Ember.Object.extend(Ember.Evented, {
     strings before being used internally. Note when declaring the
     attributes for a model it is an error to declare an id
     attribute.
-     ```javascript
+      ```javascript
     let record = store.createRecord('model');
     record.get('id'); // null
-     store.findRecord('model', 1).then(function(model) {
+      store.findRecord('model', 1).then(function(model) {
       model.get('id'); // '1'
     });
     ```
-     @property id
+      @property id
     @type {String}
   */
   id: null,
@@ -98633,9 +93994,9 @@ var Model = Ember.Object.extend(Ember.Evented, {
     any errors returned by the adapter. When present the errors hash
     contains keys corresponding to the invalid property names
     and values which are arrays of Javascript objects with two keys:
-     - `message` A string containing the error message from the backend
+      - `message` A string containing the error message from the backend
     - `attribute` The name of the property associated with this error message
-     ```javascript
+      ```javascript
     record.get('errors.length'); // 0
     record.set('foo', 'invalid value');
     record.save().catch(function() {
@@ -98643,9 +94004,9 @@ var Model = Ember.Object.extend(Ember.Evented, {
       // [{message: 'foo should be a number.', attribute: 'foo'}]
     });
     ```
-     The `errors` property us useful for displaying error messages to
+      The `errors` property us useful for displaying error messages to
     the user.
-     ```handlebars
+      ```handlebars
     <label>Username: {{input value=username}} </label>
     {{#each model.errors.username as |error|}}
       <div class="error">
@@ -98659,16 +94020,17 @@ var Model = Ember.Object.extend(Ember.Evented, {
       </div>
     {{/each}}
     ```
-      You can also access the special `messages` property on the error
+  
+    You can also access the special `messages` property on the error
     object to get an array of all the error strings.
-     ```handlebars
+      ```handlebars
     {{#each model.errors.messages as |message|}}
       <div class="error">
         {{message}}
       </div>
     {{/each}}
     ```
-     @property errors
+      @property errors
     @type {DS.Errors}
   */
   errors: computed(function () {
@@ -98685,7 +94047,7 @@ var Model = Ember.Object.extend(Ember.Evented, {
   /**
     This property holds the `DS.AdapterError` object with which
     last adapter operation was rejected.
-     @property adapterError
+      @property adapterError
     @type {DS.AdapterError}
   */
   adapterError: null,
@@ -98693,11 +94055,11 @@ var Model = Ember.Object.extend(Ember.Evented, {
   /**
     Create a JSON representation of the record, using the serialization
     strategy of the store's adapter.
-    `serialize` takes an optional hash as a parameter, currently
+     `serialize` takes an optional hash as a parameter, currently
     supported options are:
-    - `includeId`: `true` if the record's ID should be included in the
+     - `includeId`: `true` if the record's ID should be included in the
       JSON representation.
-     @method serialize
+      @method serialize
     @param {Object} options
     @return {Object} an object whose values are primitive JSON values only
   */
@@ -98709,11 +94071,11 @@ var Model = Ember.Object.extend(Ember.Evented, {
   /**
     Use [DS.JSONSerializer](DS.JSONSerializer.html) to
     get the JSON representation of a record.
-     `toJSON` takes an optional hash as a parameter, currently
+      `toJSON` takes an optional hash as a parameter, currently
     supported options are:
-     - `includeId`: `true` if the record's ID should be included in the
+      - `includeId`: `true` if the record's ID should be included in the
       JSON representation.
-     @method toJSON
+      @method toJSON
     @param {Object} options
     @return {Object} A JSON representation of the object.
   */
@@ -98729,49 +94091,49 @@ var Model = Ember.Object.extend(Ember.Evented, {
   /**
     Fired when the record is ready to be interacted with,
     that is either loaded from the server or created locally.
-     @event ready
+      @event ready
   */
   ready: null,
 
   /**
     Fired when the record is loaded from the server.
-     @event didLoad
+      @event didLoad
   */
   didLoad: null,
 
   /**
     Fired when the record is updated.
-     @event didUpdate
+      @event didUpdate
   */
   didUpdate: null,
 
   /**
     Fired when a new record is commited to the server.
-     @event didCreate
+      @event didCreate
   */
   didCreate: null,
 
   /**
     Fired when the record is deleted.
-     @event didDelete
+      @event didDelete
   */
   didDelete: null,
 
   /**
     Fired when the record becomes invalid.
-     @event becameInvalid
+      @event becameInvalid
   */
   becameInvalid: null,
 
   /**
     Fired when the record enters the error state.
-     @event becameError
+      @event becameError
   */
   becameError: null,
 
   /**
     Fired when the record is rolled back.
-     @event rolledBack
+      @event rolledBack
   */
   rolledBack: null,
 
@@ -98802,10 +94164,10 @@ var Model = Ember.Object.extend(Ember.Evented, {
     `save` afterwards if you want to persist it. You might use this
     method if you want to allow the user to still `rollbackAttributes()`
     after a delete was made.
-     Example
-     ```app/routes/model/delete.js
+      Example
+      ```app/routes/model/delete.js
     import Ember from 'ember';
-     export default Ember.Route.extend({
+      export default Ember.Route.extend({
       actions: {
         softDelete: function() {
           this.controller.get('model').deleteRecord();
@@ -98819,7 +94181,7 @@ var Model = Ember.Object.extend(Ember.Evented, {
       }
     });
     ```
-     @method deleteRecord
+      @method deleteRecord
   */
   deleteRecord: function deleteRecord() {
     this._internalModel.deleteRecord();
@@ -98828,10 +94190,10 @@ var Model = Ember.Object.extend(Ember.Evented, {
 
   /**
     Same as `deleteRecord`, but saves the record immediately.
-     Example
-     ```app/routes/model/delete.js
+      Example
+      ```app/routes/model/delete.js
     import Ember from 'ember';
-     export default Ember.Route.extend({
+      export default Ember.Route.extend({
       actions: {
         delete: function() {
           let controller = this.controller;
@@ -98842,14 +94204,14 @@ var Model = Ember.Object.extend(Ember.Evented, {
       }
     });
     ```
-     If you pass an object on the `adapterOptions` property of the options
+      If you pass an object on the `adapterOptions` property of the options
     argument it will be passed to your adapter via the snapshot
-     ```js
+      ```js
     record.destroyRecord({ adapterOptions: { subscribe: false } });
     ```
-     ```app/adapters/post.js
+      ```app/adapters/post.js
     import MyCustomAdapter from './custom-adapter';
-     export default MyCustomAdapter.extend({
+      export default MyCustomAdapter.extend({
       deleteRecord: function(store, type, snapshot) {
         if (snapshot.adapterOptions.subscribe) {
           // ...
@@ -98858,7 +94220,7 @@ var Model = Ember.Object.extend(Ember.Evented, {
       }
     });
     ```
-     @method destroyRecord
+      @method destroyRecord
     @param {Object} options
     @return {Promise} a promise that will be resolved when the adapter returns
     successfully or rejected if the adapter returns with an error.
@@ -98871,7 +94233,7 @@ var Model = Ember.Object.extend(Ember.Evented, {
 
   /**
     Unloads the record from the store. This will cause the record to be destroyed and freed up for garbage collection.
-     @method unloadRecord
+      @method unloadRecord
   */
   unloadRecord: function unloadRecord() {
     if (this.isDestroyed) {
@@ -98899,33 +94261,33 @@ var Model = Ember.Object.extend(Ember.Evented, {
   /**
     Returns an object, whose keys are changed properties, and value is
     an [oldProp, newProp] array.
-     The array represents the diff of the canonical state with the local state
+      The array represents the diff of the canonical state with the local state
     of the model. Note: if the model is created locally, the canonical state is
     empty since the adapter hasn't acknowledged the attributes yet:
-     Example
-     ```app/models/mascot.js
+      Example
+      ```app/models/mascot.js
     import DS from 'ember-data';
-     export default DS.Model.extend({
+      export default DS.Model.extend({
       name: DS.attr('string'),
       isAdmin: DS.attr('boolean', {
         defaultValue: false
       })
     });
     ```
-     ```javascript
+      ```javascript
     let mascot = store.createRecord('mascot');
-     mascot.changedAttributes(); // {}
-     mascot.set('name', 'Tomster');
-    mascot.changedAttributes(); // { name: [undefined, 'Tomster'] }
-     mascot.set('isAdmin', true);
-    mascot.changedAttributes(); // { isAdmin: [undefined, true], name: [undefined, 'Tomster'] }
-     mascot.save().then(function() {
       mascot.changedAttributes(); // {}
-       mascot.set('isAdmin', false);
+      mascot.set('name', 'Tomster');
+    mascot.changedAttributes(); // { name: [undefined, 'Tomster'] }
+      mascot.set('isAdmin', true);
+    mascot.changedAttributes(); // { isAdmin: [undefined, true], name: [undefined, 'Tomster'] }
+      mascot.save().then(function() {
+      mascot.changedAttributes(); // {}
+        mascot.set('isAdmin', false);
       mascot.changedAttributes(); // { isAdmin: [true, false] }
     });
     ```
-     @method changedAttributes
+      @method changedAttributes
     @return {Object} an object, whose keys are changed properties,
       and value is an [oldProp, newProp] array.
   */
@@ -98942,7 +94304,7 @@ var Model = Ember.Object.extend(Ember.Evented, {
   adapterWillCommit: function() {
     this.send('willCommit');
   },
-   /**
+    /**
     @method adapterDidDirty
     @private
   adapterDidDirty: function() {
@@ -98954,15 +94316,15 @@ var Model = Ember.Object.extend(Ember.Evented, {
   /**
     If the model `hasDirtyAttributes` this function will discard any unsaved
     changes. If the model `isNew` it will be removed from the store.
-     Example
-     ```javascript
+      Example
+      ```javascript
     record.get('name'); // 'Untitled Document'
     record.set('name', 'Doc 1');
     record.get('name'); // 'Doc 1'
     record.rollbackAttributes();
     record.get('name'); // 'Untitled Document'
     ```
-     @since 1.13.0
+      @since 1.13.0
     @method rollbackAttributes
   */
   rollbackAttributes: function rollbackAttributes() {
@@ -98985,8 +94347,8 @@ var Model = Ember.Object.extend(Ember.Evented, {
   /**
     Save the record and persist any changes to the record to an
     external source via the adapter.
-     Example
-     ```javascript
+      Example
+      ```javascript
     record.set('name', 'Tomster');
     record.save().then(function() {
       // Success callback
@@ -98994,14 +94356,14 @@ var Model = Ember.Object.extend(Ember.Evented, {
       // Error callback
     });
     ```
-    If you pass an object using the `adapterOptions` property of the options
+     If you pass an object using the `adapterOptions` property of the options
    argument it will be passed to your adapter via the snapshot.
-     ```js
+      ```js
     record.save({ adapterOptions: { subscribe: false } });
     ```
-     ```app/adapters/post.js
+      ```app/adapters/post.js
     import MyCustomAdapter from './custom-adapter';
-     export default MyCustomAdapter.extend({
+      export default MyCustomAdapter.extend({
       updateRecord: function(store, type, snapshot) {
         if (snapshot.adapterOptions.subscribe) {
           // ...
@@ -99010,7 +94372,7 @@ var Model = Ember.Object.extend(Ember.Evented, {
       }
     });
     ```
-     @method save
+      @method save
     @param {Object} options
     @return {Promise} a promise that will be resolved when the adapter returns
     successfully or rejected if the adapter returns with an error.
@@ -99028,11 +94390,11 @@ var Model = Ember.Object.extend(Ember.Evented, {
 
   /**
     Reload the record from the adapter.
-     This will only work if the record has already finished loading.
-     Example
-     ```app/routes/model/view.js
+      This will only work if the record has already finished loading.
+      Example
+      ```app/routes/model/view.js
     import Ember from 'ember';
-     export default Ember.Route.extend({
+      export default Ember.Route.extend({
       actions: {
         reload: function() {
           this.controller.get('model').reload().then(function(model) {
@@ -99042,7 +94404,7 @@ var Model = Ember.Object.extend(Ember.Evented, {
       }
     });
     ```
-     @method reload
+      @method reload
     @return {Promise} a promise that will be resolved with the record when the
     adapter returns successfully or rejected if the adapter returns
     with an error.
@@ -99061,7 +94423,7 @@ var Model = Ember.Object.extend(Ember.Evented, {
   /**
     Override the default event firing from Ember.Evented to
     also call methods with the given name.
-     @method trigger
+      @method trigger
     @private
     @param {String} name
   */
@@ -99087,13 +94449,13 @@ var Model = Ember.Object.extend(Ember.Evented, {
 
   /**
     Get the reference for the specified belongsTo relationship.
-     Example
-     ```app/models/blog.js
+      Example
+      ```app/models/blog.js
     export default DS.Model.extend({
       user: DS.belongsTo({ async: true })
     });
     ```
-     ```javascript
+      ```javascript
     let blog = store.push({
       data: {
         type: 'blog',
@@ -99106,21 +94468,21 @@ var Model = Ember.Object.extend(Ember.Evented, {
       }
     });
     let userRef = blog.belongsTo('user');
-     // check if the user relationship is loaded
+      // check if the user relationship is loaded
     let isLoaded = userRef.value() !== null;
-     // get the record of the reference (null if not yet available)
+      // get the record of the reference (null if not yet available)
     let user = userRef.value();
-     // get the identifier of the reference
+      // get the identifier of the reference
     if (userRef.remoteType() === "id") {
       let id = userRef.id();
     } else if (userRef.remoteType() === "link") {
       let link = userRef.link();
     }
-     // load user (via store.findRecord or store.findBelongsTo)
+      // load user (via store.findRecord or store.findBelongsTo)
     userRef.load().then(...)
-     // or trigger a reload
+      // or trigger a reload
     userRef.reload().then(...)
-     // provide data for reference
+      // provide data for reference
     userRef.push({
       type: 'user',
       id: 1,
@@ -99131,7 +94493,7 @@ var Model = Ember.Object.extend(Ember.Evented, {
       userRef.value() === user;
     });
     ```
-     @method belongsTo
+      @method belongsTo
     @param {String} name of the relationship
     @since 2.5.0
     @return {BelongsToReference} reference for this relationship
@@ -99143,13 +94505,13 @@ var Model = Ember.Object.extend(Ember.Evented, {
 
   /**
     Get the reference for the specified hasMany relationship.
-     Example
-     ```javascript
+      Example
+      ```javascript
     // models/blog.js
     export default DS.Model.extend({
       comments: DS.hasMany({ async: true })
     });
-     let blog = store.push({
+      let blog = store.push({
       data: {
         type: 'blog',
         id: 1,
@@ -99164,26 +94526,26 @@ var Model = Ember.Object.extend(Ember.Evented, {
       }
     });
     let commentsRef = blog.hasMany('comments');
-     // check if the comments are loaded already
+      // check if the comments are loaded already
     let isLoaded = commentsRef.value() !== null;
-     // get the records of the reference (null if not yet available)
+      // get the records of the reference (null if not yet available)
     let comments = commentsRef.value();
-     // get the identifier of the reference
+      // get the identifier of the reference
     if (commentsRef.remoteType() === "ids") {
       let ids = commentsRef.ids();
     } else if (commentsRef.remoteType() === "link") {
       let link = commentsRef.link();
     }
-     // load comments (via store.findMany or store.findHasMany)
+      // load comments (via store.findMany or store.findHasMany)
     commentsRef.load().then(...)
-     // or trigger a reload
+      // or trigger a reload
     commentsRef.reload().then(...)
-     // provide data for reference
+      // provide data for reference
     commentsRef.push([{ type: 'comment', id: 1 }, { type: 'comment', id: 2 }]).then(function(comments) {
       commentsRef.value() === comments;
     });
     ```
-     @method hasMany
+      @method hasMany
     @param {String} name of the relationship
     @since 2.5.0
     @return {HasManyReference} reference for this relationship
@@ -99200,13 +94562,13 @@ var Model = Ember.Object.extend(Ember.Evented, {
   /**
    Provides info about the model for debugging purposes
    by grouping the properties into more semantic groups.
-    Meant to be used by debugging tools such as the Chrome Ember Extension.
-    - Groups all attributes in "Attributes" group.
+     Meant to be used by debugging tools such as the Chrome Ember Extension.
+     - Groups all attributes in "Attributes" group.
    - Groups all belongsTo relationships in "Belongs To" group.
    - Groups all hasMany relationships in "Has Many" group.
    - Groups all flags in "Flags" group.
    - Flags relationship CPs as expensive properties.
-    @method _debugInfo
+     @method _debugInfo
    @for DS.Model
    @private
    */
@@ -99263,38 +94625,39 @@ var Model = Ember.Object.extend(Ember.Evented, {
    Given a callback, iterates over each of the relationships in the model,
    invoking the callback with the name of each relationship and its relationship
    descriptor.
-     The callback method you provide should have the following signature (all
+  
+   The callback method you provide should have the following signature (all
    parameters are optional):
-    ```javascript
+     ```javascript
    function(name, descriptor);
    ```
-    - `name` the name of the current property in the iteration
+     - `name` the name of the current property in the iteration
    - `descriptor` the meta object that describes this relationship
-    The relationship descriptor argument is an object with the following properties.
-    - **key** <span class="type">String</span> the name of this relationship on the Model
+     The relationship descriptor argument is an object with the following properties.
+     - **key** <span class="type">String</span> the name of this relationship on the Model
    - **kind** <span class="type">String</span> "hasMany" or "belongsTo"
    - **options** <span class="type">Object</span> the original options hash passed when the relationship was declared
    - **parentType** <span class="type">DS.Model</span> the type of the Model that owns this relationship
    - **type** <span class="type">String</span> the type name of the related Model
-    Note that in addition to a callback, you can also pass an optional target
+     Note that in addition to a callback, you can also pass an optional target
    object that will be set as `this` on the context.
-    Example
-    ```app/serializers/application.js
+     Example
+     ```app/serializers/application.js
    import DS from 'ember-data';
-    export default DS.JSONSerializer.extend({
+     export default DS.JSONSerializer.extend({
     serialize: function(record, options) {
       let json = {};
-       record.eachRelationship(function(name, descriptor) {
+        record.eachRelationship(function(name, descriptor) {
         if (descriptor.kind === 'hasMany') {
           let serializedHasManyName = name.toUpperCase() + '_IDS';
           json[serializedHasManyName] = record.get(name).mapBy('id');
         }
       });
-       return json;
+        return json;
     }
   });
    ```
-    @method eachRelationship
+     @method eachRelationship
    @param {Function} callback the callback to invoke
    @param {any} binding the value to which the callback's `this` should be bound
    */
@@ -99352,22 +94715,22 @@ Model.reopenClass({
     of `createRecord()`. The store is still able to create instances
     by calling the `_create()` method. To create an instance of a
     `DS.Model` use [store.createRecord](DS.Store.html#method_createRecord).
-     @method create
+      @method create
     @private
     @static
   */
   /**
    Represents the model's class name as a string. This can be used to look up the model's class name through
    `DS.Store`'s modelFor method.
-    `modelName` is generated for you by Ember Data. It will be a lowercased, dasherized string.
+     `modelName` is generated for you by Ember Data. It will be a lowercased, dasherized string.
    For example:
-    ```javascript
+     ```javascript
    store.modelFor('post').modelName; // 'post'
    store.modelFor('blog-post').modelName; // 'blog-post'
    ```
-    The most common place you'll want to access `modelName` is in your serializer's `payloadKeyFromModelName` method. For example, to change payload
+     The most common place you'll want to access `modelName` is in your serializer's `payloadKeyFromModelName` method. For example, to change payload
    keys to underscore (instead of dasherized), you might use the following code:
-    ```javascript
+     ```javascript
    export default const PostSerializer = DS.RESTSerializer.extend({
      payloadKeyFromModelName: function(modelName) {
        return Ember.String.underscore(modelName);
@@ -99384,12 +94747,12 @@ Model.reopenClass({
   /*
    These class methods below provide relationship
    introspection abilities about relationships.
-    A note about the computed properties contained here:
-    **These properties are effectively sealed once called for the first time.**
+     A note about the computed properties contained here:
+     **These properties are effectively sealed once called for the first time.**
    To avoid repeatedly doing expensive iteration over a model's fields, these
    values are computed once and then cached for the remainder of the runtime of
    your application.
-    If your application needs to modify a class after its initial definition
+     If your application needs to modify a class after its initial definition
    (for example, using `reopen()` to add additional attributes), make sure you
    do it before using your model with the store, which uses these properties
    extensively.
@@ -99397,15 +94760,15 @@ Model.reopenClass({
 
   /**
    For a given relationship name, returns the model type of the relationship.
-    For example, if you define a model like this:
-    ```app/models/post.js
+     For example, if you define a model like this:
+     ```app/models/post.js
    import DS from 'ember-data';
-    export default DS.Model.extend({
+     export default DS.Model.extend({
       comments: DS.hasMany('comment')
     });
    ```
-    Calling `store.modelFor('post').typeForRelationship('comments', store)` will return `Comment`.
-    @method typeForRelationship
+     Calling `store.modelFor('post').typeForRelationship('comments', store)` will return `Comment`.
+     @method typeForRelationship
    @static
    @param {String} name the name of the relationship
    @param {store} store an instance of DS.Store
@@ -99423,24 +94786,24 @@ Model.reopenClass({
 
   /**
    Find the relationship which is the inverse of the one asked for.
-    For example, if you define models like this:
-    ```app/models/post.js
+     For example, if you define models like this:
+     ```app/models/post.js
    import DS from 'ember-data';
-    export default DS.Model.extend({
+     export default DS.Model.extend({
       comments: DS.hasMany('message')
     });
    ```
-    ```app/models/message.js
+     ```app/models/message.js
    import DS from 'ember-data';
-    export default DS.Model.extend({
+     export default DS.Model.extend({
       owner: DS.belongsTo('post')
     });
    ```
-    ``` js
+     ``` js
    store.modelFor('post').inverseFor('comments', store) // { type: App.Message, name: 'owner', kind: 'belongsTo' }
    store.modelFor('message').inverseFor('owner', store) // { type: App.Post, name: 'comments', kind: 'hasMany' }
    ```
-    @method inverseFor
+     @method inverseFor
    @static
    @param {String} name the name of the relationship
    @param {DS.Store} store
@@ -99541,30 +94904,30 @@ Model.reopenClass({
    relationship. The value of each entry is an array containing a descriptor
    for each relationship with that type, describing the name of the relationship
    as well as the type.
-    For example, given the following model definition:
-    ```app/models/blog.js
+     For example, given the following model definition:
+     ```app/models/blog.js
    import DS from 'ember-data';
-    export default DS.Model.extend({
+     export default DS.Model.extend({
       users: DS.hasMany('user'),
       owner: DS.belongsTo('user'),
       posts: DS.hasMany('post')
     });
    ```
-    This computed property would return a map describing these
+     This computed property would return a map describing these
    relationships, like this:
-    ```javascript
+     ```javascript
    import Ember from 'ember';
    import Blog from 'app/models/blog';
    import User from 'app/models/user';
    import Post from 'app/models/post';
-    let relationships = Ember.get(Blog, 'relationships');
+     let relationships = Ember.get(Blog, 'relationships');
    relationships.get(User);
    //=> [ { name: 'users', kind: 'hasMany' },
    //     { name: 'owner', kind: 'belongsTo' } ]
    relationships.get(Post);
    //=> [ { name: 'posts', kind: 'hasMany' } ]
    ```
-    @property relationships
+     @property relationships
    @static
    @type Ember.Map
    @readOnly
@@ -99576,25 +94939,25 @@ Model.reopenClass({
    A hash containing lists of the model's relationships, grouped
    by the relationship kind. For example, given a model with this
    definition:
-    ```app/models/blog.js
+     ```app/models/blog.js
    import DS from 'ember-data';
-    export default DS.Model.extend({
+     export default DS.Model.extend({
       users: DS.hasMany('user'),
       owner: DS.belongsTo('user'),
-       posts: DS.hasMany('post')
+        posts: DS.hasMany('post')
     });
    ```
-    This property would contain the following:
-    ```javascript
+     This property would contain the following:
+     ```javascript
    import Ember from 'ember';
    import Blog from 'app/models/blog';
-    let relationshipNames = Ember.get(Blog, 'relationshipNames');
+     let relationshipNames = Ember.get(Blog, 'relationshipNames');
    relationshipNames.hasMany;
    //=> ['users', 'posts']
    relationshipNames.belongsTo;
    //=> ['owner']
    ```
-    @property relationshipNames
+     @property relationshipNames
    @static
    @type Object
    @readOnly
@@ -99618,23 +94981,23 @@ Model.reopenClass({
    An array of types directly related to a model. Each type will be
    included once, regardless of the number of relationships it has with
    the model.
-    For example, given a model with this definition:
-    ```app/models/blog.js
+     For example, given a model with this definition:
+     ```app/models/blog.js
    import DS from 'ember-data';
-    export default DS.Model.extend({
+     export default DS.Model.extend({
       users: DS.hasMany('user'),
       owner: DS.belongsTo('user'),
-       posts: DS.hasMany('post')
+        posts: DS.hasMany('post')
     });
    ```
-    This property would contain the following:
-    ```javascript
+     This property would contain the following:
+     ```javascript
    import Ember from 'ember';
    import Blog from 'app/models/blog';
-    let relatedTypes = Ember.get(Blog, 'relatedTypes');
+     let relatedTypes = Ember.get(Blog, 'relatedTypes');
    //=> [ User, Post ]
    ```
-    @property relatedTypes
+     @property relatedTypes
    @static
    @type Ember.Array
    @readOnly
@@ -99644,27 +95007,27 @@ Model.reopenClass({
   /**
    A map whose keys are the relationships of a model and whose values are
    relationship descriptors.
-    For example, given a model with this
+     For example, given a model with this
    definition:
-    ```app/models/blog.js
+     ```app/models/blog.js
    import DS from 'ember-data';
-    export default DS.Model.extend({
+     export default DS.Model.extend({
       users: DS.hasMany('user'),
       owner: DS.belongsTo('user'),
-       posts: DS.hasMany('post')
+        posts: DS.hasMany('post')
     });
    ```
-    This property would contain the following:
-    ```javascript
+     This property would contain the following:
+     ```javascript
    import Ember from 'ember';
    import Blog from 'app/models/blog';
-    let relationshipsByName = Ember.get(Blog, 'relationshipsByName');
+     let relationshipsByName = Ember.get(Blog, 'relationshipsByName');
    relationshipsByName.get('users');
    //=> { key: 'users', kind: 'hasMany', type: 'user', options: Object, isRelationship: true }
    relationshipsByName.get('owner');
    //=> { key: 'owner', kind: 'belongsTo', type: 'user', options: Object, isRelationship: true }
    ```
-    @property relationshipsByName
+     @property relationshipsByName
    @static
    @type Ember.Map
    @readOnly
@@ -99675,30 +95038,30 @@ Model.reopenClass({
    A map whose keys are the fields of the model and whose values are strings
    describing the kind of the field. A model's fields are the union of all of its
    attributes and relationships.
-    For example:
-    ```app/models/blog.js
+     For example:
+     ```app/models/blog.js
    import DS from 'ember-data';
-    export default DS.Model.extend({
+     export default DS.Model.extend({
       users: DS.hasMany('user'),
       owner: DS.belongsTo('user'),
-       posts: DS.hasMany('post'),
-       title: DS.attr('string')
+        posts: DS.hasMany('post'),
+        title: DS.attr('string')
     });
    ```
-    ```js
+     ```js
    import Ember from 'ember';
    import Blog from 'app/models/blog';
-    let fields = Ember.get(Blog, 'fields');
+     let fields = Ember.get(Blog, 'fields');
    fields.forEach(function(kind, field) {
       console.log(field, kind);
     });
-    // prints:
+     // prints:
    // users, hasMany
    // owner, belongsTo
    // posts, hasMany
    // title, attribute
    ```
-    @property fields
+     @property fields
    @static
    @type Ember.Map
    @readOnly
@@ -99721,7 +95084,7 @@ Model.reopenClass({
    Given a callback, iterates over each of the relationships in the model,
    invoking the callback with the name of each relationship and its relationship
    descriptor.
-    @method eachRelationship
+     @method eachRelationship
    @static
    @param {Function} callback the callback to invoke
    @param {any} binding the value to which the callback's `this` should be bound
@@ -99738,7 +95101,7 @@ Model.reopenClass({
    invoking the callback with the related type's class. Each type will be
    returned just once, regardless of how many different relationships it has
    with a model.
-    @method eachRelatedType
+     @method eachRelatedType
    @static
    @param {Function} callback the callback to invoke
    @param {any} binding the value to which the callback's `this` should be bound
@@ -99777,28 +95140,28 @@ Model.reopenClass({
    A map whose keys are the attributes of the model (properties
    described by DS.attr) and whose values are the meta object for the
    property.
-    Example
-    ```app/models/person.js
+     Example
+     ```app/models/person.js
    import DS from 'ember-data';
-    export default DS.Model.extend({
+     export default DS.Model.extend({
       firstName: DS.attr('string'),
       lastName: DS.attr('string'),
       birthday: DS.attr('date')
     });
    ```
-    ```javascript
+     ```javascript
    import Ember from 'ember';
    import Person from 'app/models/person';
-    let attributes = Ember.get(Person, 'attributes')
-    attributes.forEach(function(meta, name) {
+     let attributes = Ember.get(Person, 'attributes')
+     attributes.forEach(function(meta, name) {
       console.log(name, meta);
     });
-    // prints:
+     // prints:
    // firstName {type: "string", isAttribute: true, options: Object, parentType: function, name: "firstName"}
    // lastName {type: "string", isAttribute: true, options: Object, parentType: function, name: "lastName"}
    // birthday {type: "date", isAttribute: true, options: Object, parentType: function, name: "birthday"}
    ```
-    @property attributes
+     @property attributes
    @static
    @type {Ember.Map}
    @readOnly
@@ -99825,27 +95188,27 @@ Model.reopenClass({
    described by DS.attr) and whose values are type of transformation
    applied to each attribute. This map does not include any
    attributes that do not have an transformation type.
-    Example
-    ```app/models/person.js
+     Example
+     ```app/models/person.js
    import DS from 'ember-data';
-    export default DS.Model.extend({
+     export default DS.Model.extend({
       firstName: DS.attr(),
       lastName: DS.attr('string'),
       birthday: DS.attr('date')
     });
    ```
-    ```javascript
+     ```javascript
    import Ember from 'ember';
    import Person from 'app/models/person';
-    let transformedAttributes = Ember.get(Person, 'transformedAttributes')
-    transformedAttributes.forEach(function(field, type) {
+     let transformedAttributes = Ember.get(Person, 'transformedAttributes')
+     transformedAttributes.forEach(function(field, type) {
       console.log(field, type);
     });
-    // prints:
+     // prints:
    // lastName string
    // birthday date
    ```
-    @property transformedAttributes
+     @property transformedAttributes
    @static
    @type {Ember.Map}
    @readOnly
@@ -99865,32 +95228,32 @@ Model.reopenClass({
   /**
    Iterates through the attributes of the model, calling the passed function on each
    attribute.
-    The callback method you provide should have the following signature (all
+     The callback method you provide should have the following signature (all
    parameters are optional):
-    ```javascript
+     ```javascript
    function(name, meta);
    ```
-    - `name` the name of the current property in the iteration
+     - `name` the name of the current property in the iteration
    - `meta` the meta object for the attribute property in the iteration
-    Note that in addition to a callback, you can also pass an optional target
+     Note that in addition to a callback, you can also pass an optional target
    object that will be set as `this` on the context.
-    Example
-    ```javascript
+     Example
+     ```javascript
    import DS from 'ember-data';
-    let Person = DS.Model.extend({
+     let Person = DS.Model.extend({
       firstName: DS.attr('string'),
       lastName: DS.attr('string'),
       birthday: DS.attr('date')
     });
-    Person.eachAttribute(function(name, meta) {
+     Person.eachAttribute(function(name, meta) {
       console.log(name, meta);
     });
-    // prints:
+     // prints:
    // firstName {type: "string", isAttribute: true, options: Object, parentType: function, name: "firstName"}
    // lastName {type: "string", isAttribute: true, options: Object, parentType: function, name: "lastName"}
    // birthday {type: "date", isAttribute: true, options: Object, parentType: function, name: "birthday"}
    ```
-    @method eachAttribute
+     @method eachAttribute
    @param {Function} callback The callback to execute
    @param {Object} [binding] the value to which the callback's `this` should be bound
    @static
@@ -99906,32 +95269,32 @@ Model.reopenClass({
    Iterates through the transformedAttributes of the model, calling
    the passed function on each attribute. Note the callback will not be
    called for any attributes that do not have an transformation type.
-    The callback method you provide should have the following signature (all
+     The callback method you provide should have the following signature (all
    parameters are optional):
-    ```javascript
+     ```javascript
    function(name, type);
    ```
-    - `name` the name of the current property in the iteration
+     - `name` the name of the current property in the iteration
    - `type` a string containing the name of the type of transformed
    applied to the attribute
-    Note that in addition to a callback, you can also pass an optional target
+     Note that in addition to a callback, you can also pass an optional target
    object that will be set as `this` on the context.
-    Example
-    ```javascript
+     Example
+     ```javascript
    import DS from 'ember-data';
-    let Person = DS.Model.extend({
+     let Person = DS.Model.extend({
       firstName: DS.attr(),
       lastName: DS.attr('string'),
       birthday: DS.attr('date')
     });
-    Person.eachTransformedAttribute(function(name, type) {
+     Person.eachTransformedAttribute(function(name, type) {
       console.log(name, type);
     });
-    // prints:
+     // prints:
    // lastName string
    // birthday date
    ```
-    @method eachTransformedAttribute
+     @method eachTransformedAttribute
    @param {Function} callback The callback to execute
    @param {Object} [binding] the value to which the callback's `this` should be bound
    @static
@@ -99964,15 +95327,15 @@ if (isEnabled('ds-rollback-attribute')) {
   Model.reopen({
     /**
       Discards any unsaved changes to the given attribute. This feature is not enabled by default. You must enable `ds-rollback-attribute` and be running a canary build.
-       Example
-       ```javascript
+        Example
+        ```javascript
       record.get('name'); // 'Untitled Document'
       record.set('name', 'Doc 1');
       record.get('name'); // 'Doc 1'
       record.rollbackAttribute('name');
       record.get('name'); // 'Untitled Document'
       ```
-       @method rollbackAttribute
+        @method rollbackAttribute
     */
     rollbackAttribute: function rollbackAttribute(attributeName) {
       if (attributeName in this._internalModel._attributes) {
@@ -99996,20 +95359,20 @@ emberData_Debug.runInDebug(function () {
     /**
      This Ember.js hook allows an object to be notified when a property
      is defined.
-      In this case, we use it to be notified when an Ember Data user defines a
+       In this case, we use it to be notified when an Ember Data user defines a
      belongs-to relationship. In that case, we need to set up observers for
      each one, allowing us to track relationship changes and automatically
      reflect changes in the inverse has-many array.
-      This hook passes the class being set up, as well as the key and value
+       This hook passes the class being set up, as well as the key and value
      being defined. So, for example, when the user does this:
-      ```javascript
+       ```javascript
      DS.Model.extend({
       parent: DS.belongsTo('user')
     });
      ```
-      This hook would be called with "parent" as the key and the computed
+       This hook would be called with "parent" as the key and the computed
      property returned by `DS.belongsTo` as the value.
-      @method didDefineProperty
+       @method didDefineProperty
      @param {Object} proto
      @param {String} key
      @param {Ember.ComputedProperty} value
@@ -100781,7 +96144,7 @@ var Relationship = function () {
     Call this method once a record deletion has been persisted
     to purge it from BOTH current and canonical state of all
     relationships.
-     @method removeCompletelyFromInverse
+      @method removeCompletelyFromInverse
     @private
    */
 
@@ -100814,7 +96177,7 @@ var Relationship = function () {
 
   /*
     Removes the given internalModel from BOTH canonical AND current state.
-     This method is useful when either a deletion or a rollback on a new record
+      This method is useful when either a deletion or a rollback on a new record
     needs to entirely purge itself from an inverse relationship.
    */
 
@@ -100892,7 +96255,7 @@ var Relationship = function () {
    difference between unknown (`undefined`) or empty (`null`). The reason for
    this is that we wouldn't want to serialize unknown relationships as `null`
    as that might overwrite remote state.
-    All relationships for a newly created (`store.createRecord()`) are
+     All relationships for a newly created (`store.createRecord()`) are
    considered known (`hasData === true`).
    */
 
@@ -100904,10 +96267,10 @@ var Relationship = function () {
   /*
    `hasLoaded` is a flag to indicate if we have gotten data from the adapter or
    not when the relationship has a link.
-    This is used to be able to tell when to fetch the link and when to return
+     This is used to be able to tell when to fetch the link and when to return
    the local data in scenarios where the local state is considered known
    (`hasData === true`).
-    Updating the link will automatically set `hasLoaded` to `false`.
+     Updating the link will automatically set `hasLoaded` to `false`.
    */
 
 
@@ -100919,7 +96282,7 @@ var Relationship = function () {
    `push` for a relationship allows the store to push a JSON API Relationship
    Object onto the relationship. The relationship will then extract and set the
    meta, data and links of that relationship.
-    `push` use `updateMeta`, `updateData` and `updateLink` to update the state
+     `push` use `updateMeta`, `updateData` and `updateLink` to update the state
    of the relationship.
    */
 
@@ -100949,10 +96312,10 @@ var Relationship = function () {
     /*
      Data being pushed into the relationship might contain only data or links,
      or a combination of both.
-      If we got data we want to set both hasData and hasLoaded to true since
+       If we got data we want to set both hasData and hasLoaded to true since
      this would indicate that we should prefer the local state instead of
      trying to fetch the link or call findRecord().
-      If we have no data but a link is present we want to set hasLoaded to false
+       If we have no data but a link is present we want to set hasLoaded to false
      without modifying the hasData flag. This will ensure we fetch the updated
      link next time the relationship is accessed.
      */
@@ -101116,7 +96479,7 @@ var ManyArray = Ember.Object.extend(Ember.MutableArray, Ember.Evented, {
 
     /**
     The loading state of this array
-     @property {Boolean} isLoaded
+      @property {Boolean} isLoaded
     */
     this.isLoaded = false;
     this.length = 0;
@@ -101124,17 +96487,17 @@ var ManyArray = Ember.Object.extend(Ember.MutableArray, Ember.Evented, {
     /**
     Used for async `hasMany` arrays
     to keep track of when they will resolve.
-     @property {Ember.RSVP.Promise} promise
+      @property {Ember.RSVP.Promise} promise
     @private
     */
     this.promise = null;
 
     /**
     Metadata associated with the request for async hasMany relationships.
-     Example
-     Given that the server returns the following JSON payload when fetching a
+      Example
+      Given that the server returns the following JSON payload when fetching a
     hasMany relationship:
-     ```js
+      ```js
     {
       "comments": [{
         "id": 1,
@@ -101142,35 +96505,35 @@ var ManyArray = Ember.Object.extend(Ember.MutableArray, Ember.Evented, {
       }, {
     // ...
       }],
-       "meta": {
+        "meta": {
         "page": 1,
         "total": 5
       }
     }
     ```
-     You can then access the metadata via the `meta` property:
-     ```js
+      You can then access the metadata via the `meta` property:
+      ```js
     post.get('comments').then(function(comments) {
       var meta = comments.get('meta');
-     // meta.page => 1
+      // meta.page => 1
     // meta.total => 5
     });
     ```
-     @property {Object} meta
+      @property {Object} meta
     @public
     */
     this.meta = this.meta || null;
 
     /**
     `true` if the relationship is polymorphic, `false` otherwise.
-     @property {Boolean} isPolymorphic
+      @property {Boolean} isPolymorphic
     @private
     */
     this.isPolymorphic = this.isPolymorphic || false;
 
     /**
     The relationship which manages this array.
-     @property {ManyRelationship} relationship
+      @property {ManyRelationship} relationship
     @private
     */
     this.relationship = this.relationship || null;
@@ -101269,10 +96632,10 @@ var ManyArray = Ember.Object.extend(Ember.MutableArray, Ember.Evented, {
     holds a relationship that was originally fetched using a links url
     Ember Data will revisit the original links url to repopulate the
     relationship.
-     If the manyArray holds the result of a `store.query()` reload will
+      If the manyArray holds the result of a `store.query()` reload will
     re-run the original query.
-     Example
-     ```javascript
+      Example
+      ```javascript
     var user = store.peekRecord('user', 1)
     user.login().then(function() {
       user.get('permissions').then(function(permissions) {
@@ -101280,7 +96643,7 @@ var ManyArray = Ember.Object.extend(Ember.MutableArray, Ember.Evented, {
       });
     });
     ```
-     @method reload
+      @method reload
     @public
   */
   reload: function reload() {
@@ -101290,8 +96653,8 @@ var ManyArray = Ember.Object.extend(Ember.MutableArray, Ember.Evented, {
 
   /**
     Saves all of the records in the `ManyArray`.
-     Example
-     ```javascript
+      Example
+      ```javascript
     store.findRecord('inbox', 1).then(function(inbox) {
       inbox.get('messages').then(function(messages) {
         messages.forEach(function(message) {
@@ -101301,7 +96664,7 @@ var ManyArray = Ember.Object.extend(Ember.MutableArray, Ember.Evented, {
       });
     });
     ```
-     @method save
+      @method save
     @return {DS.PromiseArray} promise
   */
   save: function save() {
@@ -101317,7 +96680,7 @@ var ManyArray = Ember.Object.extend(Ember.MutableArray, Ember.Evented, {
 
   /**
     Create a child record within the owner
-     @method createRecord
+      @method createRecord
     @private
     @param {Object} hash
     @return {DS.Model} record
@@ -102026,11 +97389,11 @@ var Snapshot = function () {
     /**
      The underlying record for this snapshot. Can be used to access methods and
      properties defined on the record.
-      Example
-      ```javascript
+       Example
+       ```javascript
      let json = snapshot.record.toJSON();
      ```
-      @property record
+       @property record
      @type {DS.Model}
      */
     this.record = record;
@@ -102040,12 +97403,12 @@ var Snapshot = function () {
 
     /**
      The id of the snapshot's underlying record
-      Example
-      ```javascript
+       Example
+       ```javascript
      // store.push('post', { id: 1, author: 'Tomster', title: 'Ember.js rocks' });
      postSnapshot.id; // => '1'
      ```
-      @property id
+       @property id
      @type {String}
      */
     this.id = internalModel.id;
@@ -102060,7 +97423,7 @@ var Snapshot = function () {
 
     /**
      The name of the type of the underlying record for this snapshot, as a string.
-      @property modelName
+       @property modelName
      @type {String}
      */
     this.modelName = internalModel.modelName;
@@ -102070,21 +97433,21 @@ var Snapshot = function () {
 
   /**
    The type of the underlying record for this snapshot, as a DS.Model.
-    @property type
+     @property type
    @type {DS.Model}
    */
 
 
   /**
    Returns the value of an attribute.
-    Example
-    ```javascript
+     Example
+     ```javascript
    // store.push('post', { id: 1, author: 'Tomster', title: 'Ember.js rocks' });
    postSnapshot.attr('author'); // => 'Tomster'
    postSnapshot.attr('title'); // => 'Ember.js rocks'
    ```
-    Note: Values are loaded eagerly and cached when the snapshot is created.
-    @method attr
+     Note: Values are loaded eagerly and cached when the snapshot is created.
+     @method attr
    @param {String} keyName
    @return {Object} The attribute value or undefined
    */
@@ -102097,12 +97460,12 @@ var Snapshot = function () {
 
   /**
    Returns all attributes and their corresponding values.
-    Example
-    ```javascript
+     Example
+     ```javascript
    // store.push('post', { id: 1, author: 'Tomster', title: 'Ember.js rocks' });
    postSnapshot.attributes(); // => { author: 'Tomster', title: 'Ember.js rocks' }
    ```
-    @method attributes
+     @method attributes
    @return {Object} All attributes of the current snapshot
    */
 
@@ -102113,13 +97476,13 @@ var Snapshot = function () {
 
   /**
    Returns all changed attributes and their old and new values.
-    Example
-    ```javascript
+     Example
+     ```javascript
    // store.push('post', { id: 1, author: 'Tomster', title: 'Ember.js rocks' });
    postModel.set('title', 'Ember.js rocks!');
    postSnapshot.changedAttributes(); // => { title: ['Ember.js rocks', 'Ember.js rocks!'] }
    ```
-    @method changedAttributes
+     @method changedAttributes
    @return {Object} All changed attributes of the current snapshot
    */
 
@@ -102138,25 +97501,25 @@ var Snapshot = function () {
 
   /**
    Returns the current value of a belongsTo relationship.
-    `belongsTo` takes an optional hash of options as a second parameter,
+     `belongsTo` takes an optional hash of options as a second parameter,
    currently supported options are:
-    - `id`: set to `true` if you only want the ID of the related record to be
+     - `id`: set to `true` if you only want the ID of the related record to be
    returned.
-    Example
-    ```javascript
+     Example
+     ```javascript
    // store.push('post', { id: 1, title: 'Hello World' });
    // store.createRecord('comment', { body: 'Lorem ipsum', post: post });
    commentSnapshot.belongsTo('post'); // => DS.Snapshot
    commentSnapshot.belongsTo('post', { id: true }); // => '1'
-    // store.push('comment', { id: 1, body: 'Lorem ipsum' });
+     // store.push('comment', { id: 1, body: 'Lorem ipsum' });
    commentSnapshot.belongsTo('post'); // => undefined
    ```
-    Calling `belongsTo` will return a new Snapshot as long as there's any known
+     Calling `belongsTo` will return a new Snapshot as long as there's any known
    data for the relationship available, such as an ID. If the relationship is
    known but unset, `belongsTo` will return `null`. If the contents of the
    relationship is unknown `belongsTo` will return `undefined`.
-    Note: Relationships are loaded lazily and cached upon first access.
-    @method belongsTo
+     Note: Relationships are loaded lazily and cached upon first access.
+     @method belongsTo
    @param {String} keyName
    @param {Object} [options]
    @return {(DS.Snapshot|String|null|undefined)} A snapshot or ID of a known
@@ -102211,20 +97574,20 @@ var Snapshot = function () {
 
   /**
    Returns the current value of a hasMany relationship.
-    `hasMany` takes an optional hash of options as a second parameter,
+     `hasMany` takes an optional hash of options as a second parameter,
    currently supported options are:
-    - `ids`: set to `true` if you only want the IDs of the related records to be
+     - `ids`: set to `true` if you only want the IDs of the related records to be
    returned.
-    Example
-    ```javascript
+     Example
+     ```javascript
    // store.push('post', { id: 1, title: 'Hello World', comments: [2, 3] });
    postSnapshot.hasMany('comments'); // => [DS.Snapshot, DS.Snapshot]
    postSnapshot.hasMany('comments', { ids: true }); // => ['2', '3']
-    // store.push('post', { id: 1, title: 'Hello World' });
+     // store.push('post', { id: 1, title: 'Hello World' });
    postSnapshot.hasMany('comments'); // => undefined
    ```
-    Note: Relationships are loaded lazily and cached upon first access.
-    @method hasMany
+     Note: Relationships are loaded lazily and cached upon first access.
+     @method hasMany
    @param {String} keyName
    @param {Object} [options]
    @return {(Array|undefined)} An array of snapshots or IDs of a known
@@ -102281,13 +97644,13 @@ var Snapshot = function () {
   /**
     Iterates through all the attributes of the model, calling the passed
     function on each attribute.
-     Example
-     ```javascript
+      Example
+      ```javascript
     snapshot.eachAttribute(function(name, meta) {
       // ...
     });
     ```
-     @method eachAttribute
+      @method eachAttribute
     @param {Function} callback the callback to execute
     @param {Object} [binding] the value to which the callback's `this` should be bound
   */
@@ -102300,13 +97663,13 @@ var Snapshot = function () {
   /**
     Iterates through all the relationships of the model, calling the passed
     function on each relationship.
-     Example
-     ```javascript
+      Example
+      ```javascript
     snapshot.eachRelationship(function(name, relationship) {
       // ...
     });
     ```
-     @method eachRelationship
+      @method eachRelationship
     @param {Function} callback the callback to execute
     @param {Object} [binding] the value to which the callback's `this` should be bound
   */
@@ -102318,21 +97681,21 @@ var Snapshot = function () {
 
   /**
     Serializes the snapshot using the serializer for the model.
-     Example
-     ```app/adapters/application.js
+      Example
+      ```app/adapters/application.js
     import DS from 'ember-data';
-     export default DS.Adapter.extend({
+      export default DS.Adapter.extend({
       createRecord(store, type, snapshot) {
         var data = snapshot.serialize({ includeId: true });
         var url = `/${type.modelName}`;
-         return fetch(url, {
+          return fetch(url, {
           method: 'POST',
           body: data,
         }).then((response) => response.json())
       }
     });
     ```
-     @method serialize
+      @method serialize
     @param {Object} options
     @return {Object} an object whose values are primitive JSON values only
    */
@@ -102411,9 +97774,9 @@ Reference.prototype = {
    @namespace DS
 */
 var RecordReference = function RecordReference(store, internalModel) {
-  this._super$constructor(store, internalModel);
-  this.type = internalModel.modelName;
-  this._id = internalModel.id;
+   this._super$constructor(store, internalModel);
+   this.type = internalModel.modelName;
+   this._id = internalModel.id;
 };
 
 RecordReference.prototype = Object.create(Reference.prototype);
@@ -102438,7 +97801,7 @@ RecordReference.prototype._super$constructor = Reference;
    @return {String} The id of the record.
 */
 RecordReference.prototype.id = function () {
-  return this._id;
+   return this._id;
 };
 
 /**
@@ -102458,7 +97821,7 @@ RecordReference.prototype.id = function () {
    @return {String} 'identity'
 */
 RecordReference.prototype.remoteType = function () {
-  return 'identity';
+   return 'identity';
 };
 
 /**
@@ -102492,11 +97855,11 @@ RecordReference.prototype.remoteType = function () {
   @return Promise<record> a promise for the value (record or relationship)
 */
 RecordReference.prototype.push = function (objectOrPromise) {
-  var _this = this;
+   var _this = this;
 
-  return Ember.RSVP.resolve(objectOrPromise).then(function (data) {
-    return _this.store.push(data);
-  });
+   return Ember.RSVP.resolve(objectOrPromise).then(function (data) {
+      return _this.store.push(data);
+   });
 };
 
 /**
@@ -102516,9 +97879,9 @@ RecordReference.prototype.push = function (objectOrPromise) {
    @return {DS.Model} the record for this RecordReference
 */
 RecordReference.prototype.value = function () {
-  if (this.internalModel.hasRecord) {
-    return this.internalModel.getRecord();
-  }
+   if (this.internalModel.hasRecord) {
+      return this.internalModel.getRecord();
+   }
 };
 
 /**
@@ -102538,7 +97901,7 @@ RecordReference.prototype.value = function () {
    @return {Promise<record>} the record for this RecordReference
 */
 RecordReference.prototype.load = function () {
-  return this.store.findRecord(this.type, this._id);
+   return this.store.findRecord(this.type, this._id);
 };
 
 /**
@@ -102558,12 +97921,12 @@ RecordReference.prototype.load = function () {
    @return {Promise<record>} the record for this RecordReference
 */
 RecordReference.prototype.reload = function () {
-  var record = this.value();
-  if (record) {
-    return record.reload();
-  }
+   var record = this.value();
+   if (record) {
+      return record.reload();
+   }
 
-  return this.load();
+   return this.load();
 };
 
 /**
@@ -103694,7 +99057,7 @@ var InternalModel = function () {
   /**
     Computes the set of internal models reachable from `this` across exactly one
     relationship.
-     @return {Array} An array containing the internal models that `this` belongs
+      @return {Array} An array containing the internal models that `this` belongs
     to or has many.
   */
 
@@ -103709,10 +99072,10 @@ var InternalModel = function () {
 
   /**
     Computes the set of internal models reachable from this internal model.
-     Reachability is determined over the relationship graph (ie a graph where
+      Reachability is determined over the relationship graph (ie a graph where
     nodes are internal models and edges are belongs to or has many
     relationships).
-     @return {Array} An array including `this` and all internal models reachable
+      @return {Array} An array including `this` and all internal models reachable
     from `this`.
   */
 
@@ -103743,10 +99106,10 @@ var InternalModel = function () {
     Unload the record for this internal model. This will cause the record to be
     destroyed and freed up for garbage collection. It will also do a check
     for cleaning up internal models.
-     This check is performed by first computing the set of related internal
+      This check is performed by first computing the set of related internal
     models. If all records in this set are unloaded, then the entire set is
     destroyed. Otherwise, nothing in the set is destroyed.
-     This means that this internal model will be freed up for garbage collection
+      This means that this internal model will be freed up for garbage collection
     once all models that refer to it via some relationship are also unloaded.
   */
 
@@ -103939,9 +99302,9 @@ var InternalModel = function () {
   /*
     Checks if the attributes which are considered as changed are still
     different to the state which is acknowledged by the server.
-     This method is needed when data for the internal model is pushed and the
+      This method is needed when data for the internal model is pushed and the
     pushed data might acknowledge dirty attributes as confirmed.
-     @method updateChangedAttributes
+      @method updateChangedAttributes
     @private
    */
 
@@ -103966,7 +99329,7 @@ var InternalModel = function () {
   /*
     Returns an object, whose keys are changed properties, and value is an
     [oldProp, newProp] array.
-     @method changedAttributes
+      @method changedAttributes
     @private
   */
 
@@ -104191,10 +99554,10 @@ var InternalModel = function () {
   /*
    This method should only be called by records in the `isNew()` state OR once the record
    has been deleted and that deletion has been persisted.
-    It will remove this record from any associated relationships.
-    If `isNew` is true (default false), it will also completely reset all
+     It will remove this record from any associated relationships.
+     If `isNew` is true (default false), it will also completely reset all
     relationships to an empty state as well.
-     @method removeFromInverseRelationships
+      @method removeFromInverseRelationships
     @param {Boolean} isNew whether to unload from the `isNew` perspective
     @private
    */
@@ -104253,9 +99616,9 @@ var InternalModel = function () {
     the store of their existence. The most common use case is for supporting client side
     nested URLs, such as `/posts/1/comments/2` so the user can do
     `store.findRecord('comment', 2, { preload: { post: 1 } })` without having to fetch the post.
-     Preloaded data can be attributes and relationships passed in either as IDs or as actual
+      Preloaded data can be attributes and relationships passed in either as IDs or as actual
     models.
-     @method preloadData
+      @method preloadData
     @private
     @param {Object} preload
   */
@@ -104320,7 +99683,7 @@ var InternalModel = function () {
 
   /*
     Used to notify the store to update FilteredRecordArray membership.
-     @method updateRecordArrays
+      @method updateRecordArrays
     @private
   */
 
@@ -104365,7 +99728,7 @@ var InternalModel = function () {
     If the adapter did not return a hash in response to a commit,
     merge the changed attributes and relationships into the existing
     saved data.
-     @method adapterDidCommit
+      @method adapterDidCommit
   */
 
 
@@ -104463,34 +99826,35 @@ var InternalModel = function () {
 
   /*
     Ember Data has 3 buckets for storing the value of an attribute on an internalModel.
-     `_data` holds all of the attributes that have been acknowledged by
+      `_data` holds all of the attributes that have been acknowledged by
     a backend via the adapter. When rollbackAttributes is called on a model all
     attributes will revert to the record's state in `_data`.
-     `_attributes` holds any change the user has made to an attribute
+      `_attributes` holds any change the user has made to an attribute
     that has not been acknowledged by the adapter. Any values in
     `_attributes` are have priority over values in `_data`.
-     `_inFlightAttributes`. When a record is being synced with the
+      `_inFlightAttributes`. When a record is being synced with the
     backend the values in `_attributes` are copied to
     `_inFlightAttributes`. This way if the backend acknowledges the
     save but does not return the new state Ember Data can copy the
     values from `_inFlightAttributes` to `_data`. Without having to
     worry about changes made to `_attributes` while the save was
     happenign.
-      Changed keys builds a list of all of the values that may have been
+  
+    Changed keys builds a list of all of the values that may have been
     changed by the backend after a successful save.
-     It does this by iterating over each key, value pair in the payload
+      It does this by iterating over each key, value pair in the payload
     returned from the server after a save. If the `key` is found in
     `_attributes` then the user has a local changed to the attribute
     that has not been synced with the server and the key is not
     included in the list of changed keys.
   
-    If the value, for a key differs from the value in what Ember Data
+      If the value, for a key differs from the value in what Ember Data
     believes to be the truth about the backend state (A merger of the
     `_data` and `_inFlightAttributes` objects where
     `_inFlightAttributes` has priority) then that means the backend
     has updated the value and the key is added to the list of changed
     keys.
-     @method _changedKeys
+      @method _changedKeys
     @private
   */
 
@@ -104656,21 +100020,21 @@ var InternalModel = function () {
      implicit relationships are relationship which have not been declared but the inverse side exists on
      another record somewhere
      For example if there was
-      ```app/models/comment.js
+       ```app/models/comment.js
      import DS from 'ember-data';
-      export default DS.Model.extend({
+       export default DS.Model.extend({
      name: DS.attr()
      })
      ```
-      but there is also
-      ```app/models/post.js
+       but there is also
+       ```app/models/post.js
      import DS from 'ember-data';
-      export default DS.Model.extend({
+       export default DS.Model.extend({
      name: DS.attr(),
      comments: DS.hasMany('comment')
      })
      ```
-      would have a implicit post relationship in order to be do things like remove ourselves from the post
+       would have a implicit post relationship in order to be do things like remove ourselves from the post
      when we are deleted
     */
 
@@ -104701,7 +100065,7 @@ if (isEnabled('ds-rollback-attribute')) {
   /*
      Returns the latest truth for an attribute - the canonical value, or the
      in-flight value.
-      @method lastAcknowledgedValue
+       @method lastAcknowledgedValue
      @private
   */
   InternalModel.prototype.lastAcknowledgedValue = function lastAcknowledgedValue(key) {
@@ -104799,7 +100163,7 @@ var InternalModelMap = function () {
 
   /**
    Destroy all models in the internalModelTest and wipe metadata.
-    @method clear
+     @method clear
    */
   InternalModelMap.prototype.clear = function clear() {
     if (this._models) {
@@ -104852,7 +100216,7 @@ var InternalModelMap = function () {
 
     /**
      deprecated (and unsupported) way of accessing modelClass
-      @deprecated
+       @deprecated
      */
 
   }, {
@@ -104886,7 +100250,7 @@ var IdentityMap = function () {
    Retrieves the `InternalModelMap` for a given modelName,
    creating one if one did not already exist. This is
    similar to `getWithDefault` or `get` on a `MapWithDefault`
-    @method retrieve
+     @method retrieve
    @param modelName a previously normalized modelName
    @returns {InternalModelMap} the InternalModelMap for the given modelName
    */
@@ -104905,7 +100269,7 @@ var IdentityMap = function () {
   /**
    Clears the contents of all known `RecordMaps`, but does
    not remove the InternalModelMap instances.
-    @method clear
+     @method clear
    */
 
 
@@ -105109,9 +100473,9 @@ var RelationshipPayloads = function () {
 
   /**
     Get the payload for the relationship of an individual record.
-     This might return the raw payload as pushed into the store, or one computed
+      This might return the raw payload as pushed into the store, or one computed
     from the payload of the inverse relationship.
-     @method
+      @method
   */
 
 
@@ -105128,8 +100492,8 @@ var RelationshipPayloads = function () {
 
   /**
     Push a relationship payload for an individual record.
-     This will make the payload available later for both this relationship and its inverse.
-     @method
+      This will make the payload available later for both this relationship and its inverse.
+      @method
   */
 
 
@@ -105139,8 +100503,8 @@ var RelationshipPayloads = function () {
 
   /**
     Unload the relationship payload for an individual record.
-     This does not unload the inverse relationship payload.
-     @method
+      This does not unload the inverse relationship payload.
+      @method
   */
 
 
@@ -105158,7 +100522,7 @@ var RelationshipPayloads = function () {
   /**
     @return {boolean} true iff `modelName` and `relationshipName` refer to the
     left hand side of this relationship, as opposed to the right hand side.
-     @method
+      @method
   */
 
 
@@ -105169,7 +100533,7 @@ var RelationshipPayloads = function () {
   /**
     @return {boolean} true iff `modelName` and `relationshipName` refer to the
     right hand side of this relationship, as opposed to the left hand side.
-     @method
+      @method
   */
 
 
@@ -105266,10 +100630,10 @@ var RelationshipPayloads = function () {
 
   /**
     Populate the inverse relationship for `relationshipData`.
-     If `relationshipData` is an array (eg because the relationship is hasMany)
+      If `relationshipData` is an array (eg because the relationship is hasMany)
     this means populate each inverse, otherwise populate only the single
     inverse.
-     @private
+      @private
     @method
   */
 
@@ -105296,9 +100660,9 @@ var RelationshipPayloads = function () {
     Actually add `inversePayload` to `inverseIdToPayloads`.  This is part of
     `_populateInverse` after we've normalized the case of `relationshipData`
     being either an array or a pojo.
-     We still have to handle the case that the *inverse* relationship payload may
+      We still have to handle the case that the *inverse* relationship payload may
     be an array or pojo.
-     @private
+      @private
     @method
   */
 
@@ -105339,7 +100703,7 @@ var RelationshipPayloads = function () {
     this relationship payload has just been updated (eg because the same
     relationship had multiple payloads pushed before the relationship was
     initialized).
-     @method
+      @method
   */
   RelationshipPayloads.prototype._removeInverse = function _removeInverse(id, previousPayload, inverseIdToPayloads) {
     var data = previousPayload && previousPayload.data;
@@ -105367,7 +100731,7 @@ var RelationshipPayloads = function () {
     Remove `id` from its inverse record with id `inverseId`.  If the inverse
     relationship is a belongsTo, this means just setting it to null, if the
     inverse relationship is a hasMany, then remove that id from its array of ids.
-     @method
+      @method
   */
 
 
@@ -105474,10 +100838,10 @@ var RelationshipPayloadsManager = function () {
 
   /**
     Find the payload for the given relationship of the given model.
-     Returns the payload for the given relationship, whether raw or computed from
+      Returns the payload for the given relationship, whether raw or computed from
     the payload of the inverse relationship.
-     @example
-       relationshipPayloadsManager.get('hobby', 2, 'user') === {
+      @example
+        relationshipPayloadsManager.get('hobby', 2, 'user') === {
         {
           data: {
             id: 1,
@@ -105485,7 +100849,7 @@ var RelationshipPayloadsManager = function () {
           }
         }
       }
-     @method
+      @method
   */
 
 
@@ -105498,8 +100862,8 @@ var RelationshipPayloadsManager = function () {
 
   /**
     Push a model's relationships payload into this cache.
-     @example
-       let userPayload = {
+      @example
+        let userPayload = {
         data: {
           id: 1,
           type: 'user',
@@ -105514,7 +100878,7 @@ var RelationshipPayloadsManager = function () {
         },
       };
       relationshipPayloadsManager.push('user', 1, userPayload.data.relationships);
-     @method
+      @method
   */
 
 
@@ -105537,7 +100901,7 @@ var RelationshipPayloadsManager = function () {
 
   /**
     Unload a model's relationships payload.
-     @method
+      @method
   */
 
 
@@ -105557,19 +100921,20 @@ var RelationshipPayloadsManager = function () {
   /**
     Find the RelationshipPayloads object for the given relationship.  The same
     RelationshipPayloads object is returned for either side of a relationship.
-     @example
-       const User = DS.Model.extend({
+      @example
+        const User = DS.Model.extend({
         hobbies: DS.hasMany('hobby')
       });
-       const Hobby = DS.Model.extend({
+        const Hobby = DS.Model.extend({
         user: DS.belongsTo('user')
       });
-       relationshipPayloads.get('user', 'hobbies') === relationshipPayloads.get('hobby', 'user');
-     The signature has a somewhat large arity to avoid extra work, such as
+        relationshipPayloads.get('user', 'hobbies') === relationshipPayloads.get('hobby', 'user');
+      The signature has a somewhat large arity to avoid extra work, such as
       a)  string maipulation & allocation with `modelName` and
          `relationshipName`
       b)  repeatedly getting `relationshipsByName` via `Ember.get`
-      @private
+  
+    @private
     @method
   */
 
@@ -105589,7 +100954,7 @@ var RelationshipPayloadsManager = function () {
 
   /**
     Create the `RelationshipsPayload` for the relationship `modelName`, `relationshipName`, and its inverse.
-     @private
+      @private
     @method
   */
 
@@ -105857,16 +101222,16 @@ var SnapshotRecordArray = function () {
 
     /**
       Number of records in the array
-       Example
-       ```app/adapters/post.js
+        Example
+        ```app/adapters/post.js
       import DS from 'ember-data'
-       export default DS.JSONAPIAdapter.extend({
+        export default DS.JSONAPIAdapter.extend({
         shouldReloadAll(store, snapshotRecordArray) {
           return !snapshotRecordArray.length;
         },
       });
       ```
-       @property length
+        @property length
       @type {Number}
     */
     this.length = recordArray.get('length');
@@ -105875,10 +101240,10 @@ var SnapshotRecordArray = function () {
 
     /**
       Meta objects for the record array.
-       Example
-       ```app/adapters/post.js
+        Example
+        ```app/adapters/post.js
       import DS from 'ember-data'
-       export default DS.JSONAPIAdapter.extend({
+        export default DS.JSONAPIAdapter.extend({
         shouldReloadAll(store, snapshotRecordArray) {
           var lastRequestTime = snapshotRecordArray.meta.lastRequestTime;
           var twentyMinutes = 20 * 60 * 1000;
@@ -105886,17 +101251,17 @@ var SnapshotRecordArray = function () {
         },
       });
       ```
-       @property meta
+        @property meta
       @type {Object}
     */
     this.meta = meta;
 
     /**
       A hash of adapter options passed into the store method for this request.
-       Example
-       ```app/adapters/post.js
+        Example
+        ```app/adapters/post.js
       import MyCustomAdapter from './custom-adapter';
-       export default MyCustomAdapter.extend({
+        export default MyCustomAdapter.extend({
         findAll(store, type, sinceToken, snapshotRecordArray) {
           if (snapshotRecordArray.adapterOptions.subscribe) {
             // ...
@@ -105905,23 +101270,23 @@ var SnapshotRecordArray = function () {
         }
       });
       ```
-       @property adapterOptions
+        @property adapterOptions
       @type {Object}
     */
     this.adapterOptions = options.adapterOptions;
 
     /**
       The relationships to include for this request.
-       Example
-       ```app/adapters/application.js
+        Example
+        ```app/adapters/application.js
       import DS from 'ember-data';
-       export default DS.Adapter.extend({
+        export default DS.Adapter.extend({
         findAll(store, type, snapshotRecordArray) {
           var url = `/${type.modelName}?include=${encodeURIComponent(snapshotRecordArray.include)}`;
-           return fetch(url).then((response) => response.json())
+            return fetch(url).then((response) => response.json())
         }
       });
-       @property include
+        @property include
       @type {String|Array}
     */
     this.include = options.include;
@@ -105936,13 +101301,13 @@ var SnapshotRecordArray = function () {
 
   /**
     Get snapshots of the underlying record array
-     Example
-     ```app/adapters/post.js
+      Example
+      ```app/adapters/post.js
     import DS from 'ember-data'
-     export default DS.JSONAPIAdapter.extend({
+      export default DS.JSONAPIAdapter.extend({
       shouldReloadAll(store, snapshotArray) {
         var snapshots = snapshotArray.snapshots();
-         return snapshots.any(function(ticketSnapshot) {
+          return snapshots.any(function(ticketSnapshot) {
           var timeDiff = moment().diff(ticketSnapshot.attr('lastAccessedAt'), 'minutes');
           if (timeDiff > 20) {
             return true;
@@ -105953,7 +101318,7 @@ var SnapshotRecordArray = function () {
       }
     });
     ```
-     @method snapshots
+      @method snapshots
     @return {Array} Array of snapshots
   */
   SnapshotRecordArray.prototype.snapshots = function snapshots() {
@@ -106003,7 +101368,7 @@ var RecordArray = Ember.ArrayProxy.extend(Ember.Evented, {
       record is requested from the record array, the record
       for the client id at the same index is materialized, if
       necessary, by the store.
-       @property content
+        @property content
       @private
       @type Ember.Array
       */
@@ -106011,12 +101376,12 @@ var RecordArray = Ember.ArrayProxy.extend(Ember.Evented, {
 
     /**
     The flag to signal a `RecordArray` is finished loading data.
-     Example
-     ```javascript
+      Example
+      ```javascript
     var people = store.peekAll('person');
     people.get('isLoaded'); // true
     ```
-     @property isLoaded
+      @property isLoaded
     @type Boolean
     */
     this.isLoaded = this.isLoaded || false;
@@ -106050,7 +101415,7 @@ var RecordArray = Ember.ArrayProxy.extend(Ember.Evented, {
 
   /**
    The modelClass represented by this record array.
-    @property type
+     @property type
    @type DS.Model
    */
   type: computed$2('modelName', function () {
@@ -106062,7 +101427,7 @@ var RecordArray = Ember.ArrayProxy.extend(Ember.Evented, {
 
   /**
     Retrieves an object from the content by index.
-     @method objectAtContent
+      @method objectAtContent
     @private
     @param {Number} index
     @return {DS.Model} record
@@ -106076,16 +101441,16 @@ var RecordArray = Ember.ArrayProxy.extend(Ember.Evented, {
   /**
     Used to get the latest version of all of the records in this array
     from the adapter.
-     Example
-     ```javascript
+      Example
+      ```javascript
     var people = store.peekAll('person');
     people.get('isUpdating'); // false
-     people.update().then(function() {
+      people.update().then(function() {
       people.get('isUpdating'); // false
     });
-     people.get('isUpdating'); // true
+      people.get('isUpdating'); // true
     ```
-     @method update
+      @method update
   */
   update: function update() {
     var _this = this;
@@ -106121,7 +101486,7 @@ var RecordArray = Ember.ArrayProxy.extend(Ember.Evented, {
 
   /**
     Adds an internal model to the `RecordArray` without duplicates
-     @method _pushInternalModels
+      @method _pushInternalModels
     @private
     @param {InternalModel} internalModel
   */
@@ -106135,7 +101500,7 @@ var RecordArray = Ember.ArrayProxy.extend(Ember.Evented, {
 
   /**
     Removes an internalModel to the `RecordArray`.
-     @method removeInternalModel
+      @method removeInternalModel
     @private
     @param {InternalModel} internalModel
   */
@@ -106146,15 +101511,15 @@ var RecordArray = Ember.ArrayProxy.extend(Ember.Evented, {
 
   /**
     Saves all of the records in the `RecordArray`.
-     Example
-     ```javascript
+      Example
+      ```javascript
     var messages = store.peekAll('message');
     messages.forEach(function(message) {
       message.set('hasBeenSeen', true);
     });
     messages.save();
     ```
-     @method save
+      @method save
     @return {DS.PromiseArray} promise
   */
   save: function save() {
@@ -106252,21 +101617,21 @@ var FilteredRecordArray = RecordArray.extend({
   /**
     The filterFunction is a function used to test records from the store to
     determine if they should be part of the record array.
-     Example
-     ```javascript
+      Example
+      ```javascript
     var allPeople = store.peekAll('person');
     allPeople.mapBy('name'); // ["Tom Dale", "Yehuda Katz", "Trek Glowacki"]
-     var people = store.filter('person', function(person) {
+      var people = store.filter('person', function(person) {
       if (person.get('name').match(/Katz$/)) { return true; }
     });
     people.mapBy('name'); // ["Yehuda Katz"]
-     var notKatzFilter = function(person) {
+      var notKatzFilter = function(person) {
       return !person.get('name').match(/Katz$/);
     };
     people.set('filterFunction', notKatzFilter);
     people.mapBy('name'); // ["Tom Dale", "Trek Glowacki"]
     ```
-     @method filterFunction
+      @method filterFunction
     @param {DS.Model} record
     @return {Boolean} `true` if the record should be in the array
   */
@@ -106542,7 +101907,7 @@ var RecordArrayManager = function () {
 
   /**
     Update an individual filter.
-     @private
+      @private
     @method updateFilterRecordArray
     @param {DS.FilteredRecordArray} array
     @param {String} modelName
@@ -106627,9 +101992,9 @@ var RecordArrayManager = function () {
   /**
     This method is invoked if the `filterFunction` property is
     changed on a `DS.FilteredRecordArray`.
-     It essentially re-runs the filter from scratch. This same
+      It essentially re-runs the filter from scratch. This same
     method is invoked when the filter is created in th first place.
-     @method updateFilter
+      @method updateFilter
     @param {Array} array
     @param {String} modelName
     @param {Function} filter
@@ -106648,7 +102013,7 @@ var RecordArrayManager = function () {
   /**
     Get the `DS.RecordArray` for a modelName, which contains all loaded records of
     given modelName.
-     @method liveRecordArrayFor
+      @method liveRecordArrayFor
     @param {String} modelName
     @return {DS.RecordArray}
   */
@@ -106663,7 +102028,7 @@ var RecordArrayManager = function () {
   /**
     Get the `DS.RecordArray` for a modelName, which contains all loaded records of
     given modelName.
-     @method filteredRecordArraysFor
+      @method filteredRecordArraysFor
     @param {String} modelName
     @return {DS.RecordArray}
   */
@@ -106676,7 +102041,7 @@ var RecordArrayManager = function () {
   };
   /**
     Create a `DS.RecordArray` for a modelName.
-     @method createRecordArray
+      @method createRecordArray
     @param {String} modelName
     @return {DS.RecordArray}
   */
@@ -106696,7 +102061,7 @@ var RecordArrayManager = function () {
 
   /**
     Create a `DS.FilteredRecordArray` for a modelName and register it for updates.
-     @method createFilteredRecordArray
+      @method createFilteredRecordArray
     @param {String} modelName
     @param {Function} filter
     @param {Object} query (optional
@@ -106723,7 +102088,7 @@ var RecordArrayManager = function () {
 
   /**
     Create a `DS.AdapterPopulatedRecordArray` for a modelName with given query.
-     @method createAdapterPopulatedRecordArray
+      @method createAdapterPopulatedRecordArray
     @param {String} modelName
     @param {Object} query
     @return {DS.AdapterPopulatedRecordArray}
@@ -106751,7 +102116,7 @@ var RecordArrayManager = function () {
     a filter function. This will cause the array to update
     automatically when records of that modelName change attribute
     values or states.
-     @method registerFilteredRecordArray
+      @method registerFilteredRecordArray
     @param {DS.RecordArray} array
     @param {String} modelName
     @param {Function} filter
@@ -106768,7 +102133,7 @@ var RecordArrayManager = function () {
   /**
     Unregister a RecordArray.
     So manager will not update this array.
-     @method unregisterRecordArray
+      @method unregisterRecordArray
     @param {DS.RecordArray} array
   */
 
@@ -107103,7 +102468,7 @@ Store = Service.extend({
     /*
       Ember Data uses several specialized micro-queues for organizing
       and coalescing similar async work.
-       These queues are currently controlled by a flush scheduled into
+        These queues are currently controlled by a flush scheduled into
       ember-data's custom backburner instance.
      */
     // used for coalescing record save requests
@@ -107130,14 +102495,14 @@ Store = Service.extend({
     The default adapter to use to communicate to a backend server or
     other persistence layer. This will be overridden by an application
     adapter if present.
-     If you want to specify `app/adapters/custom.js` as a string, do:
-     ```js
+      If you want to specify `app/adapters/custom.js` as a string, do:
+      ```js
     import DS from 'ember-data';
-     export default DS.Store.extend({
+      export default DS.Store.extend({
       adapter: 'custom',
     });
     ```
-     @property adapter
+      @property adapter
     @default '-json-api'
     @type {String}
   */
@@ -107146,10 +102511,10 @@ Store = Service.extend({
   /**
     Returns a JSON representation of the record using a custom
     type-specific serializer, if one exists.
-     The available options are:
-     * `includeId`: `true` if the record's ID should be included in
+      The available options are:
+      * `includeId`: `true` if the record's ID should be included in
       the JSON representation
-     @method serialize
+      @method serialize
     @private
     @deprecated
     @param {DS.Model} record the record to serialize
@@ -107170,12 +102535,12 @@ Store = Service.extend({
   /**
     This property returns the adapter, after resolving a possible
     string key.
-     If the supplied `adapter` was a class, or a String property
+      If the supplied `adapter` was a class, or a String property
     path resolved to a class, this property will instantiate the
     class.
-     This property is cacheable, so the same instance of a specified
+      This property is cacheable, so the same instance of a specified
     adapter class should be used for the lifetime of the store.
-     @property defaultAdapter
+      @property defaultAdapter
     @private
     @return DS.Adapter
   */
@@ -107194,21 +102559,21 @@ Store = Service.extend({
   /**
     Create a new record in the current store. The properties passed
     to this method are set on the newly created record.
-     To create a new instance of a `Post`:
-     ```js
+      To create a new instance of a `Post`:
+      ```js
     store.createRecord('post', {
       title: 'Rails is omakase'
     });
     ```
-     To create a new instance of a `Post` that has a relationship with a `User` record:
-     ```js
+      To create a new instance of a `Post` that has a relationship with a `User` record:
+      ```js
     let user = this.store.peekRecord('user', 1);
     store.createRecord('post', {
       title: 'Rails is omakase',
       user: user
     });
     ```
-     @method createRecord
+      @method createRecord
     @param {String} modelName
     @param {Object} inputProperties a hash of properties to set on the
       newly created record.
@@ -107250,7 +102615,7 @@ Store = Service.extend({
   /**
     If possible, this method asks the adapter to generate an ID for
     a newly created record.
-     @method _generateId
+      @method _generateId
     @private
     @param {String} modelName
     @param {Object} properties from the new record
@@ -107273,14 +102638,14 @@ Store = Service.extend({
 
   /**
     For symmetry, a record can be deleted via the store.
-     Example
-     ```javascript
+      Example
+      ```javascript
     let post = store.createRecord('post', {
       title: 'Rails is omakase'
     });
-     store.deleteRecord(post);
+      store.deleteRecord(post);
     ```
-     @method deleteRecord
+      @method deleteRecord
     @param {DS.Model} record
   */
   deleteRecord: function deleteRecord(record) {
@@ -107291,13 +102656,13 @@ Store = Service.extend({
   /**
     For symmetry, a record can be unloaded via the store.
     This will cause the record to be destroyed and freed up for garbage collection.
-     Example
-     ```javascript
+      Example
+      ```javascript
     store.findRecord('post', 1).then(function(post) {
       store.unloadRecord(post);
     });
     ```
-     @method unloadRecord
+      @method unloadRecord
     @param {DS.Model} record
   */
   unloadRecord: function unloadRecord(record) {
@@ -107336,45 +102701,45 @@ Store = Service.extend({
 
   /**
     This method returns a record for a given type and id combination.
-     The `findRecord` method will always resolve its promise with the same
+      The `findRecord` method will always resolve its promise with the same
     object for a given type and `id`.
-     The `findRecord` method will always return a **promise** that will be
+      The `findRecord` method will always return a **promise** that will be
     resolved with the record.
-     Example
-     ```app/routes/post.js
+      Example
+      ```app/routes/post.js
     import Ember from 'ember';
-     export default Ember.Route.extend({
+      export default Ember.Route.extend({
       model(params) {
         return this.store.findRecord('post', params.post_id);
       }
     });
     ```
-     If the record is not yet available, the store will ask the adapter's `find`
+      If the record is not yet available, the store will ask the adapter's `find`
     method to find the necessary data. If the record is already present in the
     store, it depends on the reload behavior _when_ the returned promise
     resolves.
-     ### Preloading
-     You can optionally `preload` specific attributes and relationships that you know of
+      ### Preloading
+      You can optionally `preload` specific attributes and relationships that you know of
     by passing them via the passed `options`.
-     For example, if your Ember route looks like `/posts/1/comments/2` and your API route
+      For example, if your Ember route looks like `/posts/1/comments/2` and your API route
     for the comment also looks like `/posts/1/comments/2` if you want to fetch the comment
     without fetching the post you can pass in the post to the `findRecord` call:
-     ```javascript
+      ```javascript
     store.findRecord('comment', 2, { preload: { post: 1 } });
     ```
-     If you have access to the post model you can also pass the model itself:
-     ```javascript
+      If you have access to the post model you can also pass the model itself:
+      ```javascript
     store.findRecord('post', 1).then(function (myPostModel) {
       store.findRecord('comment', 2, { post: myPostModel });
     });
     ```
-     ### Reloading
-     The reload behavior is configured either via the passed `options` hash or
+      ### Reloading
+      The reload behavior is configured either via the passed `options` hash or
     the result of the adapter's `shouldReloadRecord`.
-     If `{ reload: true }` is passed or `adapter.shouldReloadRecord` evaluates
+      If `{ reload: true }` is passed or `adapter.shouldReloadRecord` evaluates
     to `true`, then the returned promise resolves once the adapter returns
     data, regardless if the requested record is already in the store:
-     ```js
+      ```js
     store.push({
       data: {
         id: 1,
@@ -107382,7 +102747,7 @@ Store = Service.extend({
         revision: 1
       }
     });
-     // adapter#findRecord resolves with
+      // adapter#findRecord resolves with
     // [
     //   {
     //     id: 1,
@@ -107394,35 +102759,35 @@ Store = Service.extend({
       post.get('revision'); // 2
     });
     ```
-     If no reload is indicated via the abovementioned ways, then the promise
+      If no reload is indicated via the abovementioned ways, then the promise
     immediately resolves with the cached version in the store.
-     ### Background Reloading
-     Optionally, if `adapter.shouldBackgroundReloadRecord` evaluates to `true`,
+      ### Background Reloading
+      Optionally, if `adapter.shouldBackgroundReloadRecord` evaluates to `true`,
     then a background reload is started, which updates the records' data, once
     it is available:
-     ```js
+      ```js
     // app/adapters/post.js
     import ApplicationAdapter from "./application";
-     export default ApplicationAdapter.extend({
+      export default ApplicationAdapter.extend({
       shouldReloadRecord(store, snapshot) {
         return false;
       },
-       shouldBackgroundReloadRecord(store, snapshot) {
+        shouldBackgroundReloadRecord(store, snapshot) {
         return true;
       }
     });
-     // ...
-     store.push({
+      // ...
+      store.push({
       data: {
         id: 1,
         type: 'post',
         revision: 1
       }
     });
-     let blogPost = store.findRecord('post', 1).then(function(post) {
+      let blogPost = store.findRecord('post', 1).then(function(post) {
       post.get('revision'); // 1
     });
-     // later, once adapter#findRecord resolved with
+      // later, once adapter#findRecord resolved with
     // [
     //   {
     //     id: 1,
@@ -107430,24 +102795,24 @@ Store = Service.extend({
     //     revision: 2
     //   }
     // ]
-     blogPost.get('revision'); // 2
+      blogPost.get('revision'); // 2
     ```
-     If you would like to force or prevent background reloading, you can set a
+      If you would like to force or prevent background reloading, you can set a
     boolean value for `backgroundReload` in the options object for
     `findRecord`.
-     ```app/routes/post/edit.js
+      ```app/routes/post/edit.js
     import Ember from 'ember';
-     export default Ember.Route.extend({
+      export default Ember.Route.extend({
       model(params) {
         return this.store.findRecord('post', params.post_id, { backgroundReload: false });
       }
     });
     ```
-    If you pass an object on the `adapterOptions` property of the options
+     If you pass an object on the `adapterOptions` property of the options
    argument it will be passed to you adapter via the snapshot
-     ```app/routes/post/edit.js
+      ```app/routes/post/edit.js
     import Ember from 'ember';
-     export default Ember.Route.extend({
+      export default Ember.Route.extend({
       model(params) {
         return this.store.findRecord('post', params.post_id, {
           adapterOptions: { subscribe: false }
@@ -107455,9 +102820,9 @@ Store = Service.extend({
       }
     });
     ```
-     ```app/adapters/post.js
+      ```app/adapters/post.js
     import MyCustomAdapter from './custom-adapter';
-     export default MyCustomAdapter.extend({
+      export default MyCustomAdapter.extend({
       findRecord(store, type, id, snapshot) {
         if (snapshot.adapterOptions.subscribe) {
           // ...
@@ -107466,41 +102831,41 @@ Store = Service.extend({
       }
     });
     ```
-     See [peekRecord](#method_peekRecord) to get the cached version of a record.
-     ### Retrieving Related Model Records
-     If you use an adapter such as Ember's default
+      See [peekRecord](#method_peekRecord) to get the cached version of a record.
+      ### Retrieving Related Model Records
+      If you use an adapter such as Ember's default
     [`JSONAPIAdapter`](http://emberjs.com/api/data/classes/DS.JSONAPIAdapter.html)
     that supports the [JSON API specification](http://jsonapi.org/) and if your server
     endpoint supports the use of an
     ['include' query parameter](http://jsonapi.org/format/#fetching-includes),
     you can use `findRecord()` to automatically retrieve additional records related to
     the one you request by supplying an `include` parameter in the `options` object.
-     For example, given a `post` model that has a `hasMany` relationship with a `comment`
+      For example, given a `post` model that has a `hasMany` relationship with a `comment`
     model, when we retrieve a specific post we can have the server also return that post's
     comments in the same request:
-     ```app/routes/post.js
+      ```app/routes/post.js
     import Ember from 'ember';
-     export default Ember.Route.extend({
+      export default Ember.Route.extend({
       model(params) {
        return this.store.findRecord('post', params.post_id, { include: 'comments' });
       }
     });
-     ```
+      ```
     In this case, the post's comments would then be available in your template as
     `model.comments`.
-     Multiple relationships can be requested using an `include` parameter consisting of a
+      Multiple relationships can be requested using an `include` parameter consisting of a
     comma-separated list (without white-space) while nested relationships can be specified
     using a dot-separated sequence of relationship names. So to request both the post's
     comments and the authors of those comments the request would look like this:
-     ```app/routes/post.js
+      ```app/routes/post.js
     import Ember from 'ember';
-     export default Ember.Route.extend({
+      export default Ember.Route.extend({
       model(params) {
        return this.store.findRecord('post', params.post_id, { include: 'comments,comments.author' });
       }
     });
-     ```
-     @since 1.13.0
+      ```
+      @since 1.13.0
     @method findRecord
     @param {String} modelName
     @param {(String|Integer)} id
@@ -107579,7 +102944,7 @@ Store = Service.extend({
   /**
     This method makes a series of requests to the adapter's `find` method
     and returns a promise that resolves once they are all loaded.
-     @private
+      @private
     @method findByIds
     @param {String} modelName
     @param {Array} ids
@@ -107605,7 +102970,7 @@ Store = Service.extend({
     This method is called by `findRecord` if it discovers that a particular
     type/id pair hasn't been loaded yet to kick off a request to the
     adapter.
-     @method _fetchRecord
+      @method _fetchRecord
     @private
     @param {InternalModel} internalModel model
     @return {Promise} promise
@@ -107785,27 +103150,27 @@ Store = Service.extend({
 
   /**
     Get the reference for the specified record.
-     Example
-     ```javascript
+      Example
+      ```javascript
     let userRef = store.getReference('user', 1);
-     // check if the user is loaded
+      // check if the user is loaded
     let isLoaded = userRef.value() !== null;
-     // get the record of the reference (null if not yet available)
+      // get the record of the reference (null if not yet available)
     let user = userRef.value();
-     // get the identifier of the reference
+      // get the identifier of the reference
     if (userRef.remoteType() === 'id') {
     let id = userRef.id();
     }
-     // load user (via store.find)
+      // load user (via store.find)
     userRef.load().then(...)
-     // or trigger a reload
+      // or trigger a reload
     userRef.reload().then(...)
-     // provide data for reference
+      // provide data for reference
     userRef.push({ id: 1, username: '@user' }).then(function(user) {
       userRef.value() === user;
     });
     ```
-     @method getReference
+      @method getReference
     @param {String} modelName
     @param {String|Integer} id
     @since 2.5.0
@@ -107820,16 +103185,16 @@ Store = Service.extend({
 
   /**
     Get a record by a given type and ID without triggering a fetch.
-     This method will synchronously return the record if it is available in the store,
+      This method will synchronously return the record if it is available in the store,
     otherwise it will return `null`. A record is available if it has been fetched earlier, or
     pushed manually into the store.
-     See [findRecord](#method_findRecord) if you would like to request this record from the backend.
-     _Note: This is a synchronous method and does not return a promise._
-     ```js
+      See [findRecord](#method_findRecord) if you would like to request this record from the backend.
+      _Note: This is a synchronous method and does not return a promise._
+      ```js
     let post = store.peekRecord('post', 1);
-     post.get('id'); // 1
+      post.get('id'); // 1
     ```
-     @since 1.13.0
+      @since 1.13.0
     @method peekRecord
     @param {String} modelName
     @param {String|Integer} id
@@ -107850,10 +103215,10 @@ Store = Service.extend({
 
   /**
     This method is called by the record's `reload` method.
-     This method calls the adapter's `find` method, which returns a promise. When
+      This method calls the adapter's `find` method, which returns a promise. When
     **that** promise resolves, `reloadRecord` will resolve the promise returned
     by the record's `reload`.
-     @method reloadRecord
+      @method reloadRecord
     @private
     @param {DS.Model} internalModel
     @return {Promise} promise
@@ -107876,14 +103241,14 @@ Store = Service.extend({
    This method returns true if a record for a given modelName and id is already
    loaded in the store. Use this function to know beforehand if a findRecord()
    will result in a request or that it will be a cache hit.
-    Example
-    ```javascript
+     Example
+     ```javascript
    store.hasRecordForId('post', 1); // false
    store.findRecord('post', 1).then(function() {
      store.hasRecordForId('post', 1); // true
    });
    ```
-     @method hasRecordForId
+      @method hasRecordForId
     @param {String} modelName
     @param {(String|Integer)} id
     @return {Boolean}
@@ -107904,7 +103269,7 @@ Store = Service.extend({
   /**
     Returns id record for a given type and ID. If one isn't already loaded,
     it builds a new record and leaves it in the `empty` state.
-     @method recordForId
+      @method recordForId
     @private
     @param {String} modelName
     @param {(String|Integer)} id
@@ -107961,11 +103326,11 @@ Store = Service.extend({
     If a relationship was originally populated by the adapter as a link
     (as opposed to a list of IDs), this method is called when the
     relationship is fetched.
-     The link (which is usually a URL) is passed through unchanged, so the
+      The link (which is usually a URL) is passed through unchanged, so the
     adapter can make whatever request it wants.
-     The usual use-case is for the server to register a URL as a link, and
+      The usual use-case is for the server to register a URL as a link, and
     then use that URL in the future to make a request for the relationship.
-     @method findHasMany
+      @method findHasMany
     @private
     @param {InternalModel} internalModel
     @param {any} link
@@ -108003,36 +103368,36 @@ Store = Service.extend({
   /**
     This method delegates a query to the adapter. This is the one place where
     adapter-level semantics are exposed to the application.
-     Each time this method is called a new request is made through the adapter.
-     Exposing queries this way seems preferable to creating an abstract query
+      Each time this method is called a new request is made through the adapter.
+      Exposing queries this way seems preferable to creating an abstract query
     language for all server-side queries, and then require all adapters to
     implement them.
-     ---
-     If you do something like this:
-     ```javascript
+      ---
+      If you do something like this:
+      ```javascript
     store.query('person', { page: 1 });
     ```
-     The call made to the server, using a Rails backend, will look something like this:
-     ```
+      The call made to the server, using a Rails backend, will look something like this:
+      ```
     Started GET "/api/v1/person?page=1"
     Processing by Api::V1::PersonsController#index as HTML
     Parameters: { "page"=>"1" }
     ```
-     ---
-     If you do something like this:
-     ```javascript
+      ---
+      If you do something like this:
+      ```javascript
     store.query('person', { ids: [1, 2, 3] });
     ```
-     The call to the server, using a Rails backend, will look something like this:
-     ```
+      The call to the server, using a Rails backend, will look something like this:
+      ```
     Started GET "/api/v1/person?ids%5B%5D=1&ids%5B%5D=2&ids%5B%5D=3"
     Processing by Api::V1::PersonsController#index as HTML
     Parameters: { "ids" => ["1", "2", "3"] }
     ```
-     This method returns a promise, which is resolved with an
+      This method returns a promise, which is resolved with an
     [`AdapterPopulatedRecordArray`](http://emberjs.com/api/data/classes/DS.AdapterPopulatedRecordArray.html)
     once the server returns.
-     @since 1.13.0
+      @since 1.13.0
     @method query
     @param {String} modelName
     @param {any} query an opaque query to be used by the adapter
@@ -108069,12 +103434,12 @@ Store = Service.extend({
     This method makes a request for one record, where the `id` is not known
     beforehand (if the `id` is known, use [`findRecord`](#method_findRecord)
     instead).
-     This method can be used when it is certain that the server will return a
+      This method can be used when it is certain that the server will return a
     single object for the primary data.
-     Each time this method is called a new request is made through the adapter.
-     Let's assume our API provides an endpoint for the currently logged in user
+      Each time this method is called a new request is made through the adapter.
+      Let's assume our API provides an endpoint for the currently logged in user
     via:
-     ```
+      ```
     // GET /api/current_user
     {
       user: {
@@ -108083,28 +103448,28 @@ Store = Service.extend({
       }
     }
     ```
-     Since the specific `id` of the `user` is not known beforehand, we can use
+      Since the specific `id` of the `user` is not known beforehand, we can use
     `queryRecord` to get the user:
-     ```javascript
+      ```javascript
     store.queryRecord('user', {}).then(function(user) {
       let username = user.get('username');
       console.log(`Currently logged in as ${username}`);
     });
     ```
-     The request is made through the adapters' `queryRecord`:
-     ```app/adapters/user.js
+      The request is made through the adapters' `queryRecord`:
+      ```app/adapters/user.js
     import DS from 'ember-data';
-     export default DS.Adapter.extend({
+      export default DS.Adapter.extend({
       queryRecord(modelName, query) {
         return Ember.$.getJSON('/api/current_user');
       }
     });
     ```
-     Note: the primary use case for `store.queryRecord` is when a single record
+      Note: the primary use case for `store.queryRecord` is when a single record
     is queried and the `id` is not known beforehand. In all other cases
     `store.query` and using the first item of the array is likely the preferred
     way:
-     ```
+      ```
     // GET /users?username=unique
     {
       data: [{
@@ -108116,28 +103481,28 @@ Store = Service.extend({
       }]
     }
     ```
-     ```javascript
+      ```javascript
     store.query('user', { username: 'unique' }).then(function(users) {
       return users.get('firstObject');
     }).then(function(user) {
       let id = user.get('id');
     });
     ```
-     This method returns a promise, which resolves with the found record.
-     If the adapter returns no data for the primary data of the payload, then
+      This method returns a promise, which resolves with the found record.
+      If the adapter returns no data for the primary data of the payload, then
     `queryRecord` resolves with `null`:
-     ```
+      ```
     // GET /users?username=unique
     {
       data: null
     }
     ```
-     ```javascript
+      ```javascript
     store.queryRecord('user', { username: 'unique' }).then(function(user) {
       console.log(user); // null
     });
     ```
-     @since 1.13.0
+      @since 1.13.0
     @method queryRecord
     @param {String} modelName
     @param {any} query an opaque query to be used by the adapter
@@ -108172,29 +103537,29 @@ Store = Service.extend({
     given type, and returns a promise which will resolve with all records of
     this type present in the store, even if the adapter only returns a subset
     of them.
-     ```app/routes/authors.js
+      ```app/routes/authors.js
     import Ember from 'ember';
-     export default Ember.Route.extend({
+      export default Ember.Route.extend({
       model(params) {
         return this.store.findAll('author');
       }
     });
     ```
-     _When_ the returned promise resolves depends on the reload behavior,
+      _When_ the returned promise resolves depends on the reload behavior,
     configured via the passed `options` hash and the result of the adapter's
     `shouldReloadAll` method.
-     ### Reloading
-     If `{ reload: true }` is passed or `adapter.shouldReloadAll` evaluates to
+      ### Reloading
+      If `{ reload: true }` is passed or `adapter.shouldReloadAll` evaluates to
     `true`, then the returned promise resolves once the adapter returns data,
     regardless if there are already records in the store:
-     ```js
+      ```js
     store.push({
       data: {
         id: 'first',
         type: 'author'
       }
     });
-     // adapter#findAll resolves with
+      // adapter#findAll resolves with
     // [
     //   {
     //     id: 'second',
@@ -108205,60 +103570,60 @@ Store = Service.extend({
       authors.getEach('id'); // ['first', 'second']
     });
     ```
-     If no reload is indicated via the abovementioned ways, then the promise
+      If no reload is indicated via the abovementioned ways, then the promise
     immediately resolves with all the records currently loaded in the store.
-     ### Background Reloading
-     Optionally, if `adapter.shouldBackgroundReloadAll` evaluates to `true`,
+      ### Background Reloading
+      Optionally, if `adapter.shouldBackgroundReloadAll` evaluates to `true`,
     then a background reload is started. Once this resolves, the array with
     which the promise resolves, is updated automatically so it contains all the
     records in the store:
-     ```js
+      ```js
     // app/adapters/application.js
     export default DS.Adapter.extend({
       shouldReloadAll(store, snapshotsArray) {
         return false;
       },
-       shouldBackgroundReloadAll(store, snapshotsArray) {
+        shouldBackgroundReloadAll(store, snapshotsArray) {
         return true;
       }
     });
-     // ...
-     store.push({
+      // ...
+      store.push({
       data: {
         id: 'first',
         type: 'author'
       }
     });
-     let allAuthors;
+      let allAuthors;
     store.findAll('author').then(function(authors) {
       authors.getEach('id'); // ['first']
-       allAuthors = authors;
+        allAuthors = authors;
     });
-     // later, once adapter#findAll resolved with
+      // later, once adapter#findAll resolved with
     // [
     //   {
     //     id: 'second',
     //     type: 'author'
     //   }
     // ]
-     allAuthors.getEach('id'); // ['first', 'second']
+      allAuthors.getEach('id'); // ['first', 'second']
     ```
-     If you would like to force or prevent background reloading, you can set a
+      If you would like to force or prevent background reloading, you can set a
     boolean value for `backgroundReload` in the options object for
     `findAll`.
-     ```app/routes/post/edit.js
+      ```app/routes/post/edit.js
     import Ember from 'ember';
-     export default Ember.Route.extend({
+      export default Ember.Route.extend({
       model() {
         return this.store.findAll('post', { backgroundReload: false });
       }
     });
     ```
-     If you pass an object on the `adapterOptions` property of the options
+      If you pass an object on the `adapterOptions` property of the options
     argument it will be passed to you adapter via the `snapshotRecordArray`
-     ```app/routes/posts.js
+      ```app/routes/posts.js
     import Ember from 'ember';
-     export default Ember.Route.extend({
+      export default Ember.Route.extend({
       model(params) {
         return this.store.findAll('post', {
           adapterOptions: { subscribe: false }
@@ -108266,9 +103631,9 @@ Store = Service.extend({
       }
     });
     ```
-     ```app/adapters/post.js
+      ```app/adapters/post.js
     import MyCustomAdapter from './custom-adapter';
-     export default MyCustomAdapter.extend({
+      export default MyCustomAdapter.extend({
       findAll(store, type, sinceToken, snapshotRecordArray) {
         if (snapshotRecordArray.adapterOptions.subscribe) {
           // ...
@@ -108277,41 +103642,41 @@ Store = Service.extend({
       }
     });
     ```
-     See [peekAll](#method_peekAll) to get an array of current records in the
+      See [peekAll](#method_peekAll) to get an array of current records in the
     store, without waiting until a reload is finished.
-     ### Retrieving Related Model Records
-     If you use an adapter such as Ember's default
+      ### Retrieving Related Model Records
+      If you use an adapter such as Ember's default
     [`JSONAPIAdapter`](http://emberjs.com/api/data/classes/DS.JSONAPIAdapter.html)
     that supports the [JSON API specification](http://jsonapi.org/) and if your server
     endpoint supports the use of an
     ['include' query parameter](http://jsonapi.org/format/#fetching-includes),
     you can use `findAll()` to automatically retrieve additional records related to
     those requested by supplying an `include` parameter in the `options` object.
-     For example, given a `post` model that has a `hasMany` relationship with a `comment`
+      For example, given a `post` model that has a `hasMany` relationship with a `comment`
     model, when we retrieve all of the post records we can have the server also return
     all of the posts' comments in the same request:
-     ```app/routes/posts.js
+      ```app/routes/posts.js
     import Ember from 'ember';
-     export default Ember.Route.extend({
+      export default Ember.Route.extend({
       model() {
        return this.store.findAll('post', { include: 'comments' });
       }
     });
-     ```
+      ```
     Multiple relationships can be requested using an `include` parameter consisting of a
     comma-separated list (without white-space) while nested relationships can be specified
     using a dot-separated sequence of relationship names. So to request both the posts'
     comments and the authors of those comments the request would look like this:
-     ```app/routes/posts.js
+      ```app/routes/posts.js
     import Ember from 'ember';
-     export default Ember.Route.extend({
+      export default Ember.Route.extend({
       model() {
        return this.store.findAll('post', { include: 'comments,comments.author' });
       }
     });
-     ```
-     See [query](#method_query) to only get a subset of records from the server.
-     @since 1.13.0
+      ```
+      See [query](#method_query) to only get a subset of records from the server.
+      @since 1.13.0
     @method findAll
     @param {String} modelName
     @param {Object} options
@@ -108388,18 +103753,18 @@ Store = Service.extend({
   /**
     This method returns a filtered array that contains all of the
     known records for a given type in the store.
-     Note that because it's just a filter, the result will contain any
+      Note that because it's just a filter, the result will contain any
     locally created records of the type, however, it will not make a
     request to the backend to retrieve additional records. If you
     would like to request all the records from the backend please use
     [store.findAll](#method_findAll).
-     Also note that multiple calls to `peekAll` for a given type will always
+      Also note that multiple calls to `peekAll` for a given type will always
     return the same `RecordArray`.
-     Example
-     ```javascript
+      Example
+      ```javascript
     let localPosts = store.peekAll('post');
     ```
-     @since 1.13.0
+      @since 1.13.0
     @method peekAll
     @param {String} modelName
     @return {DS.RecordArray}
@@ -108419,12 +103784,12 @@ Store = Service.extend({
   /**
    This method unloads all records in the store.
    It schedules unloading to happen during the next run loop.
-    Optionally you can pass a type which unload all records for a given type.
-    ```javascript
+     Optionally you can pass a type which unload all records for a given type.
+     ```javascript
    store.unloadAll();
    store.unloadAll('post');
    ```
-    @method unloadAll
+     @method unloadAll
    @param {String} modelName
   */
   unloadAll: function unloadAll(modelName) {
@@ -108443,29 +103808,29 @@ Store = Service.extend({
     Takes a type and filter function, and returns a live RecordArray that
     remains up to date as new records are loaded into the store or created
     locally.
-     The filter function takes a materialized record, and returns true
+      The filter function takes a materialized record, and returns true
     if the record should be included in the filter and false if it should
     not.
-     Example
-     ```javascript
+      Example
+      ```javascript
     store.filter('post', function(post) {
       return post.get('unread');
     });
     ```
-     The filter function is called once on all records for the type when
+      The filter function is called once on all records for the type when
     it is created, and then once on each newly loaded or created record.
-     If any of a record's properties change, or if it changes state, the
+      If any of a record's properties change, or if it changes state, the
     filter function will be invoked again to determine whether it should
     still be in the array.
-     Optionally you can pass a query, which is the equivalent of calling
+      Optionally you can pass a query, which is the equivalent of calling
     [query](#method_query) with that same query, to fetch additional records
     from the server. The results returned by the server could then appear
     in the filter if they match the filter function.
-     The query itself is not used to filter records, it's only sent to your
+      The query itself is not used to filter records, it's only sent to your
     server for you to be able to do server-side filtering. The filter
     function will be applied on the returned results regardless.
-     Example
-     ```javascript
+      Example
+      ```javascript
     store.filter('post', { unread: true }, function(post) {
       return post.get('unread');
     }).then(function(unreadPosts) {
@@ -108475,7 +103840,7 @@ Store = Service.extend({
       unreadPosts.get('length'); // 4
     });
     ```
-     @method filter
+      @method filter
     @private
     @param {String} modelName
     @param {Object} query optional query
@@ -108522,7 +103887,7 @@ Store = Service.extend({
   /**
     This method has been deprecated and is an alias for store.hasRecordForId, which should
     be used instead.
-     @deprecated
+      @deprecated
     @method recordIsLoaded
     @param {String} modelName
     @param {string} id
@@ -108544,8 +103909,8 @@ Store = Service.extend({
   /**
     This method is called by `record.save`, and gets passed a
     resolver for the promise that `record.save` returns.
-     It schedules saving to happen at the end of the run loop.
-     @method scheduleSave
+      It schedules saving to happen at the end of the run loop.
+      @method scheduleSave
     @private
     @param {InternalModel} internalModel
     @param {Resolver} resolver
@@ -108566,7 +103931,7 @@ Store = Service.extend({
   /**
     This method is called at the end of the run loop, and
     flushes any records passed into `scheduleSave`
-     @method flushPendingSave
+      @method flushPendingSave
     @private
   */
   flushPendingSave: function flushPendingSave() {
@@ -108601,9 +103966,9 @@ Store = Service.extend({
     This method is called once the promise returned by an
     adapter's `createRecord`, `updateRecord` or `deleteRecord`
     is resolved.
-     If the data provides a server-generated ID, it will
+      If the data provides a server-generated ID, it will
     update the record and the store's indexes.
-     @method didSaveRecord
+      @method didSaveRecord
     @private
     @param {InternalModel} internalModel the in-flight internal model
     @param {Object} data optional data (see above)
@@ -108631,7 +103996,7 @@ Store = Service.extend({
     This method is called once the promise returned by an
     adapter's `createRecord`, `updateRecord` or `deleteRecord`
     is rejected with a `DS.InvalidError`.
-     @method recordWasInvalid
+      @method recordWasInvalid
     @private
     @param {InternalModel} internalModel
     @param {Object} errors
@@ -108645,7 +104010,7 @@ Store = Service.extend({
     This method is called once the promise returned by an
     adapter's `createRecord`, `updateRecord` or `deleteRecord`
     is rejected (with anything other than a `DS.InvalidError`).
-     @method recordWasError
+      @method recordWasError
     @private
     @param {InternalModel} internalModel
     @param {Error} error
@@ -108659,7 +104024,7 @@ Store = Service.extend({
     When an adapter's `createRecord`, `updateRecord` or `deleteRecord`
     resolves with data, this method extracts the ID from the supplied
     data.
-     @method updateId
+      @method updateId
     @private
     @param {InternalModel} internalModel
     @param {Object} data
@@ -108694,7 +104059,7 @@ Store = Service.extend({
 
   /**
     Returns a map of IDs to client IDs for a given modelName.
-     @method _internalModelsFor
+      @method _internalModelsFor
     @private
     @param {String} modelName
     @return {Object} recordMap
@@ -108710,7 +104075,7 @@ Store = Service.extend({
 
   /**
     This internal method is used by `push`.
-     @method _load
+      @method _load
     @private
     @param {Object} data
   */
@@ -108739,7 +104104,7 @@ Store = Service.extend({
     relationship metadata. Thus, we look up the mixin and create a mock
     DS.Model, so we can access the relationship CPs of the mixin (`comments`)
     in this case
-     @private
+      @private
   */
   _modelForMixin: function _modelForMixin(normalizedModelName) {
     // container.registry = 2.1
@@ -108772,11 +104137,11 @@ Store = Service.extend({
 
   /**
     Returns the model class for the particular `modelName`.
-     The class of a model might be useful if you want to get a list of all the
+      The class of a model might be useful if you want to get a list of all the
     relationship names of the model, see
     [`relationshipNames`](http://emberjs.com/api/data/classes/DS.Model.html#property_relationshipNames)
     for example.
-     @method modelFor
+      @method modelFor
     @param {String} modelName
     @return {DS.Model}
   */
@@ -108847,11 +104212,11 @@ Store = Service.extend({
 
   /**
     Push some data for a given type into the store.
-     This method expects normalized [JSON API](http://jsonapi.org/) document. This means you have to follow [JSON API specification](http://jsonapi.org/format/) with few minor adjustments:
+      This method expects normalized [JSON API](http://jsonapi.org/) document. This means you have to follow [JSON API specification](http://jsonapi.org/format/) with few minor adjustments:
     - record's `type` should always be in singular, dasherized form
     - members (properties) should be camelCased
-     [Your primary data should be wrapped inside `data` property](http://jsonapi.org/format/#document-top-level):
-     ```js
+      [Your primary data should be wrapped inside `data` property](http://jsonapi.org/format/#document-top-level):
+      ```js
     store.push({
       data: {
         // primary data for single record of type `Person`
@@ -108864,9 +104229,9 @@ Store = Service.extend({
       }
     });
     ```
-     [Demo.](http://ember-twiddle.com/fb99f18cd3b4d3e2a4c7)
-     `data` property can also hold an array (of records):
-     ```js
+      [Demo.](http://ember-twiddle.com/fb99f18cd3b4d3e2a4c7)
+      `data` property can also hold an array (of records):
+      ```js
     store.push({
       data: [
         // an array of records
@@ -108889,8 +104254,8 @@ Store = Service.extend({
       ]
     });
     ```
-     [Demo.](http://ember-twiddle.com/69cdbeaa3702159dc355)
-     There are some typical properties for `JSONAPI` payload:
+      [Demo.](http://ember-twiddle.com/69cdbeaa3702159dc355)
+      There are some typical properties for `JSONAPI` payload:
     * `id` - mandatory, unique record's key
     * `type` - mandatory string which matches `model`'s dasherized name in singular form
     * `attributes` - object which holds data for record attributes - `DS.attr`'s declared in model
@@ -108898,17 +104263,17 @@ Store = Service.extend({
       - [`links`](http://jsonapi.org/format/#document-links)
       - [`data`](http://jsonapi.org/format/#document-resource-object-linkage) - place for primary data
       - [`meta`](http://jsonapi.org/format/#document-meta) - object which contains meta-information about relationship
-     For this model:
-     ```app/models/person.js
+      For this model:
+      ```app/models/person.js
     import DS from 'ember-data';
-     export default DS.Model.extend({
+      export default DS.Model.extend({
       firstName: DS.attr('string'),
       lastName: DS.attr('string'),
-       children: DS.hasMany('person')
+        children: DS.hasMany('person')
     });
     ```
-     To represent the children as IDs:
-     ```js
+      To represent the children as IDs:
+      ```js
     {
       data: {
         id: '1',
@@ -108938,9 +104303,9 @@ Store = Service.extend({
       }
     }
     ```
-     [Demo.](http://ember-twiddle.com/343e1735e034091f5bde)
-     To represent the children relationship as a URL:
-     ```js
+      [Demo.](http://ember-twiddle.com/343e1735e034091f5bde)
+      To represent the children relationship as a URL:
+      ```js
     {
       data: {
         id: '1',
@@ -108959,17 +104324,17 @@ Store = Service.extend({
       }
     }
     ```
-     If you're streaming data or implementing an adapter, make sure
+      If you're streaming data or implementing an adapter, make sure
     that you have converted the incoming data into this form. The
     store's [normalize](#method_normalize) method is a convenience
     helper for converting a json payload into the form Ember Data
     expects.
-     ```js
+      ```js
     store.push(store.normalize('person', data));
     ```
-     This method can be used both to push in brand new
+      This method can be used both to push in brand new
     records, as well as to update existing records.
-     @method push
+      @method push
     @param {Object} data
     @return {DS.Model|Array} the record(s) that was created or
       updated.
@@ -108998,7 +104363,7 @@ Store = Service.extend({
   /*
     Push some data in the form of a json-api document into the store,
     without creating materialized records.
-     @method _push
+      @method _push
     @private
     @param {Object} jsonApiDoc
     @return {DS.InternalModel|Array<DS.InternalModel>} pushed InternalModel(s)
@@ -109120,16 +104485,16 @@ Store = Service.extend({
 
   /**
     Push some raw data into the store.
-     This method can be used both to push in brand new
+      This method can be used both to push in brand new
     records, as well as to update existing records. You
     can push in more than one type of object at once.
     All objects should be in the format expected by the
     serializer.
-     ```app/serializers/application.js
+      ```app/serializers/application.js
     import DS from 'ember-data';
-     export default DS.ActiveModelSerializer;
+      export default DS.ActiveModelSerializer;
     ```
-     ```js
+      ```js
     let pushData = {
       posts: [
         { id: 1, post_title: "Great post", comment_ids: [2] }
@@ -109138,25 +104503,25 @@ Store = Service.extend({
         { id: 2, comment_body: "Insightful comment" }
       ]
     }
-     store.pushPayload(pushData);
+      store.pushPayload(pushData);
     ```
-     By default, the data will be deserialized using a default
+      By default, the data will be deserialized using a default
     serializer (the application serializer if it exists).
-     Alternatively, `pushPayload` will accept a model type which
+      Alternatively, `pushPayload` will accept a model type which
     will determine which serializer will process the payload.
-     ```app/serializers/application.js
+      ```app/serializers/application.js
     import DS from 'ember-data';
-     export default DS.ActiveModelSerializer;
+      export default DS.ActiveModelSerializer;
     ```
-     ```app/serializers/post.js
+      ```app/serializers/post.js
     import DS from 'ember-data';
-     export default DS.JSONSerializer;
+      export default DS.JSONSerializer;
     ```
-     ```js
+      ```js
     store.pushPayload('comment', pushData); // Will use the application serializer
     store.pushPayload('post', pushData); // Will use the post serializer
     ```
-     @method pushPayload
+      @method pushPayload
     @param {String} modelName Optionally, a model type used to determine which serializer will be used
     @param {Object} inputPayload
   */
@@ -109184,15 +104549,15 @@ Store = Service.extend({
   /**
     `normalize` converts a json payload into the normalized form that
     [push](#method_push) expects.
-     Example
-     ```js
+      Example
+      ```js
     socket.on('message', function(message) {
       let modelName = message.model;
       let data = message.data;
       store.push(store.normalize(modelName, data));
     });
     ```
-     @method normalize
+      @method normalize
     @param {String} modelName The name of the model type for this payload
     @param {Object} payload
     @return {Object} The normalized payload
@@ -109210,7 +104575,7 @@ Store = Service.extend({
   /**
     Build a brand new record for a given type, ID, and
     initial data.
-     @method _buildInternalModel
+      @method _buildInternalModel
     @private
     @param {String} modelName
     @param {String} id
@@ -109263,7 +104628,7 @@ Store = Service.extend({
   /**
     When a record is destroyed, this un-indexes it and
     removes it from any record arrays so it can be GCed.
-     @method _removeFromIdMap
+      @method _removeFromIdMap
     @private
     @param {InternalModel} internalModel
   */
@@ -109283,12 +104648,12 @@ Store = Service.extend({
     Returns an instance of the adapter for a given type. For
     example, `adapterFor('person')` will return an instance of
     `App.PersonAdapter`.
-     If no `App.PersonAdapter` is found, this method will look
+      If no `App.PersonAdapter` is found, this method will look
     for an `App.ApplicationAdapter` (the default adapter for
     your entire application).
-     If no `App.ApplicationAdapter` is found, it will return
+      If no `App.ApplicationAdapter` is found, it will return
     the value of the `defaultAdapter`.
-     @method adapterFor
+      @method adapterFor
     @public
     @param {String} modelName
     @return DS.Adapter
@@ -109310,15 +104675,15 @@ Store = Service.extend({
     Returns an instance of the serializer for a given type. For
     example, `serializerFor('person')` will return an instance of
     `App.PersonSerializer`.
-     If no `App.PersonSerializer` is found, this method will look
+      If no `App.PersonSerializer` is found, this method will look
     for an `App.ApplicationSerializer` (the default serializer for
     your entire application).
-     if no `App.ApplicationSerializer` is found, it will attempt
+      if no `App.ApplicationSerializer` is found, it will attempt
     to get the `defaultSerializer` from the `PersonAdapter`
     (`adapterFor('person')`).
-     If a serializer cannot be found on the adapter, it will fall back
+      If a serializer cannot be found on the adapter, it will fall back
     to an instance of `DS.JSONSerializer`.
-     @method serializerFor
+      @method serializerFor
     @public
     @param {String} modelName the record to serialize
     @return {DS.Serializer}
@@ -109441,7 +104806,7 @@ function _commit(adapter, store, operation, snapshot) {
       Note to future spelunkers hoping to optimize.
       We rely on this `run` to create a run loop if needed
       that `store._push` and `store.didSaveRecord` will both share.
-       We use `join` because it is often the case that we
+        We use `join` because it is often the case that we
       have an outer run loop available still from the first
       call to `store._push`;
      */
@@ -109936,14 +105301,14 @@ var get$15 = Ember.get;
 var buildUrlMixin = Ember.Mixin.create({
   /**
     Builds a URL for a given type and optional ID.
-     By default, it pluralizes the type's name (for example, 'post'
+      By default, it pluralizes the type's name (for example, 'post'
     becomes 'posts' and 'person' becomes 'people'). To override the
     pluralization see [pathForType](#method_pathForType).
-     If an ID is specified, it adds the ID to the path generated
+      If an ID is specified, it adds the ID to the path generated
     for the type, separated by a `/`.
-     When called by RESTAdapter.findMany() the `id` and `snapshot` parameters
+      When called by RESTAdapter.findMany() the `id` and `snapshot` parameters
     will be arrays of ids and snapshots.
-     @method buildURL
+      @method buildURL
     @param {String} modelName
     @param {(String|Array|Object)} id single id or array of ids or query
     @param {(DS.Snapshot|Array)} snapshot single snapshot or array of snapshots
@@ -110017,22 +105382,22 @@ var buildUrlMixin = Ember.Mixin.create({
 
   /**
    Builds a URL for a `store.findRecord(type, id)` call.
-    Example:
-    ```app/adapters/user.js
+     Example:
+     ```app/adapters/user.js
    import DS from 'ember-data';
-    export default DS.JSONAPIAdapter.extend({
+     export default DS.JSONAPIAdapter.extend({
      urlForFindRecord(id, modelName, snapshot) {
        let baseUrl = this.buildURL();
        return `${baseUrl}/users/${snapshot.adapterOptions.user_id}/playlists/${id}`;
      }
    });
    ```
-    @method urlForFindRecord
+     @method urlForFindRecord
    @param {String} id
    @param {String} modelName
    @param {DS.Snapshot} snapshot
    @return {String} url
-    */
+     */
   urlForFindRecord: function urlForFindRecord(id, modelName, snapshot) {
     return this._buildURL(modelName, id);
   },
@@ -110040,16 +105405,16 @@ var buildUrlMixin = Ember.Mixin.create({
 
   /**
    Builds a URL for a `store.findAll(type)` call.
-    Example:
-    ```app/adapters/comment.js
+     Example:
+     ```app/adapters/comment.js
    import DS from 'ember-data';
-    export default DS.JSONAPIAdapter.extend({
+     export default DS.JSONAPIAdapter.extend({
      urlForFindAll(modelName, snapshot) {
        return 'data/comments.json';
      }
    });
    ```
-    @method urlForFindAll
+     @method urlForFindAll
    @param {String} modelName
    @param {DS.SnapshotRecordArray} snapshot
    @return {String} url
@@ -110061,10 +105426,10 @@ var buildUrlMixin = Ember.Mixin.create({
 
   /**
    Builds a URL for a `store.query(type, query)` call.
-    Example:
-    ```app/adapters/application.js
+     Example:
+     ```app/adapters/application.js
    import DS from 'ember-data';
-    export default DS.RESTAdapter.extend({
+     export default DS.RESTAdapter.extend({
      host: 'https://api.github.com',
      urlForQuery (query, modelName) {
        switch(modelName) {
@@ -110076,7 +105441,7 @@ var buildUrlMixin = Ember.Mixin.create({
      }
    });
    ```
-    @method urlForQuery
+     @method urlForQuery
    @param {Object} query
    @param {String} modelName
    @return {String} url
@@ -110088,17 +105453,17 @@ var buildUrlMixin = Ember.Mixin.create({
 
   /**
    Builds a URL for a `store.queryRecord(type, query)` call.
-    Example:
-    ```app/adapters/application.js
+     Example:
+     ```app/adapters/application.js
    import DS from 'ember-data';
-    export default DS.RESTAdapter.extend({
+     export default DS.RESTAdapter.extend({
      urlForQueryRecord({ slug }, modelName) {
        let baseUrl = this.buildURL();
        return `${baseUrl}/${encodeURIComponent(slug)}`;
      }
    });
    ```
-    @method urlForQueryRecord
+     @method urlForQueryRecord
    @param {Object} query
    @param {String} modelName
    @return {String} url
@@ -110112,17 +105477,17 @@ var buildUrlMixin = Ember.Mixin.create({
    Builds a URL for coalesceing multiple `store.findRecord(type, id)`
    records into 1 request when the adapter's `coalesceFindRequests`
    property is true.
-    Example:
-    ```app/adapters/application.js
+     Example:
+     ```app/adapters/application.js
    import DS from 'ember-data';
-    export default DS.RESTAdapter.extend({
+     export default DS.RESTAdapter.extend({
      urlForFindMany(ids, modelName) {
        let baseUrl = this.buildURL();
        return `${baseUrl}/coalesce`;
      }
    });
    ```
-    @method urlForFindMany
+     @method urlForFindMany
    @param {Array} ids
    @param {String} modelName
    @param {Array} snapshots
@@ -110136,17 +105501,17 @@ var buildUrlMixin = Ember.Mixin.create({
   /**
    Builds a URL for fetching a async hasMany relationship when a url
    is not provided by the server.
-    Example:
-    ```app/adapters/application.js
+     Example:
+     ```app/adapters/application.js
    import DS from 'ember-data';
-    export default DS.JSONAPIAdapter.extend({
+     export default DS.JSONAPIAdapter.extend({
      urlForFindHasMany(id, modelName, snapshot) {
        let baseUrl = this.buildURL(id, modelName);
        return `${baseUrl}/relationships`;
      }
    });
    ```
-    @method urlForFindHasMany
+     @method urlForFindHasMany
    @param {String} id
    @param {String} modelName
    @param {DS.Snapshot} snapshot
@@ -110160,17 +105525,17 @@ var buildUrlMixin = Ember.Mixin.create({
   /**
    Builds a URL for fetching a async belongsTo relationship when a url
    is not provided by the server.
-    Example:
-    ```app/adapters/application.js
+     Example:
+     ```app/adapters/application.js
    import DS from 'ember-data';
-    export default DS.JSONAPIAdapter.extend({
+     export default DS.JSONAPIAdapter.extend({
      urlForFindBelongsTo(id, modelName, snapshot) {
        let baseUrl = this.buildURL(id, modelName);
        return `${baseUrl}/relationships`;
      }
    });
    ```
-    @method urlForFindBelongsTo
+     @method urlForFindBelongsTo
    @param {String} id
    @param {String} modelName
    @param {DS.Snapshot} snapshot
@@ -110184,16 +105549,16 @@ var buildUrlMixin = Ember.Mixin.create({
   /**
    Builds a URL for a `record.save()` call when the record was created
    locally using `store.createRecord()`.
-    Example:
-    ```app/adapters/application.js
+     Example:
+     ```app/adapters/application.js
    import DS from 'ember-data';
-    export default DS.RESTAdapter.extend({
+     export default DS.RESTAdapter.extend({
      urlForCreateRecord(modelName, snapshot) {
        return this._super(...arguments) + '/new';
      }
    });
    ```
-    @method urlForCreateRecord
+     @method urlForCreateRecord
    @param {String} modelName
    @param {DS.Snapshot} snapshot
    @return {String} url
@@ -110205,16 +105570,16 @@ var buildUrlMixin = Ember.Mixin.create({
 
   /**
    Builds a URL for a `record.save()` call when the record has been update locally.
-    Example:
-    ```app/adapters/application.js
+     Example:
+     ```app/adapters/application.js
    import DS from 'ember-data';
-    export default DS.RESTAdapter.extend({
+     export default DS.RESTAdapter.extend({
      urlForUpdateRecord(id, modelName, snapshot) {
        return `/${id}/feed?access_token=${snapshot.adapterOptions.token}`;
      }
    });
    ```
-    @method urlForUpdateRecord
+     @method urlForUpdateRecord
    @param {String} id
    @param {String} modelName
    @param {DS.Snapshot} snapshot
@@ -110227,16 +105592,16 @@ var buildUrlMixin = Ember.Mixin.create({
 
   /**
    Builds a URL for a `record.save()` call when the record has been deleted locally.
-    Example:
-    ```app/adapters/application.js
+     Example:
+     ```app/adapters/application.js
    import DS from 'ember-data';
-    export default DS.RESTAdapter.extend({
+     export default DS.RESTAdapter.extend({
      urlForDeleteRecord(id, modelName, snapshot) {
        return this._super(...arguments) + '/destroy';
      }
    });
    ```
-    @method urlForDeleteRecord
+     @method urlForDeleteRecord
    @param {String} id
    @param {String} modelName
    @param {DS.Snapshot} snapshot
@@ -110291,22 +105656,22 @@ var buildUrlMixin = Ember.Mixin.create({
 
   /**
     Determines the pathname for a given type.
-     By default, it pluralizes the type's name (for example,
+      By default, it pluralizes the type's name (for example,
     'post' becomes 'posts' and 'person' becomes 'people').
-     ### Pathname customization
-     For example if you have an object LineItem with an
+      ### Pathname customization
+      For example if you have an object LineItem with an
     endpoint of "/line_items/".
-     ```app/adapters/application.js
+      ```app/adapters/application.js
     import DS from 'ember-data';
     import { pluralize } from 'ember-inflector';
-     export default DS.RESTAdapter.extend({
+      export default DS.RESTAdapter.extend({
       pathForType: function(modelName) {
         var decamelized = Ember.String.decamelize(modelName);
         return pluralize(decamelized);
       }
     });
     ```
-     @method pathForType
+      @method pathForType
     @param {String} modelName
     @return {String} path
   **/
@@ -110555,16 +105920,16 @@ Object.defineProperty(exports, '__esModule', { value: true });
       If you would like your adapter to use a custom serializer you can
       set the `defaultSerializer` property to be the name of the custom
       serializer.
-       Note the `defaultSerializer` serializer has a lower priority than
+        Note the `defaultSerializer` serializer has a lower priority than
       a model specific serializer (i.e. `PostSerializer`) or the
       `application` serializer.
-       ```app/adapters/django.js
+        ```app/adapters/django.js
       import DS from 'ember-data';
-       export default DS.Adapter.extend({
+        export default DS.Adapter.extend({
         defaultSerializer: 'django'
       });
       ```
-       @property defaultSerializer
+        @property defaultSerializer
       @type {String}
     */
     defaultSerializer: '-default',
@@ -110575,11 +105940,11 @@ Object.defineProperty(exports, '__esModule', { value: true });
       should query your persistence layer for a record with the given ID. The `findRecord`
       method should return a promise that will resolve to a JavaScript object that will be
       normalized by the serializer.
-       Here is an example `findRecord` implementation:
-       ```app/adapters/application.js
+        Here is an example `findRecord` implementation:
+        ```app/adapters/application.js
       import Ember from 'ember';
       import DS from 'ember-data';
-       export default DS.Adapter.extend({
+        export default DS.Adapter.extend({
         findRecord(store, type, id, snapshot) {
           return new Ember.RSVP.Promise(function(resolve, reject) {
             Ember.$.getJSON(`/${type.modelName}/${id}`).then(function(data) {
@@ -110591,7 +105956,7 @@ Object.defineProperty(exports, '__esModule', { value: true });
         }
       });
       ```
-       @method findRecord
+        @method findRecord
       @param {DS.Store} store
       @param {DS.Model} type
       @param {String} id
@@ -110602,14 +105967,14 @@ Object.defineProperty(exports, '__esModule', { value: true });
 
     /**
       The `findAll()` method is used to retrieve all records for a given type.
-       Example
-       ```app/adapters/application.js
+        Example
+        ```app/adapters/application.js
       import Ember from 'ember';
       import DS from 'ember-data';
-       export default DS.Adapter.extend({
+        export default DS.Adapter.extend({
         findAll(store, type, sinceToken) {
           let query = { since: sinceToken };
-           return new Ember.RSVP.Promise(function(resolve, reject) {
+            return new Ember.RSVP.Promise(function(resolve, reject) {
             Ember.$.getJSON(`/${type.modelName}`, query).then(function(data) {
               resolve(data);
             }, function(jqXHR) {
@@ -110619,7 +105984,7 @@ Object.defineProperty(exports, '__esModule', { value: true });
         }
       });
       ```
-       @method findAll
+        @method findAll
       @param {DS.Store} store
       @param {DS.Model} type
       @param {String} sinceToken
@@ -110630,11 +105995,11 @@ Object.defineProperty(exports, '__esModule', { value: true });
 
     /**
       This method is called when you call `query` on the store.
-       Example
-       ```app/adapters/application.js
+        Example
+        ```app/adapters/application.js
       import Ember from 'ember';
       import DS from 'ember-data';
-       export default DS.Adapter.extend({
+        export default DS.Adapter.extend({
         query(store, type, query) {
           return new Ember.RSVP.Promise(function(resolve, reject) {
             Ember.$.getJSON(`/${type.modelName}`, query).then(function(data) {
@@ -110646,7 +106011,7 @@ Object.defineProperty(exports, '__esModule', { value: true });
         }
       });
       ```
-       @method query
+        @method query
       @param {DS.Store} store
       @param {DS.Model} type
       @param {Object} query
@@ -110658,15 +106023,15 @@ Object.defineProperty(exports, '__esModule', { value: true });
     /**
       The `queryRecord()` method is invoked when the store is asked for a single
       record through a query object.
-       In response to `queryRecord()` being called, you should always fetch fresh
+        In response to `queryRecord()` being called, you should always fetch fresh
       data. Once found, you can asynchronously call the store's `push()` method
       to push the record into the store.
-       Here is an example `queryRecord` implementation:
-       Example
-       ```app/adapters/application.js
+        Here is an example `queryRecord` implementation:
+        Example
+        ```app/adapters/application.js
       import Ember from 'ember';
       import DS from 'ember-data';
-       export default DS.Adapter.extend(DS.BuildURLMixin, {
+        export default DS.Adapter.extend(DS.BuildURLMixin, {
         queryRecord(store, type, query) {
           return new Ember.RSVP.Promise(function(resolve, reject) {
             Ember.$.getJSON(`/${type.modelName}`, query).then(function(data) {
@@ -110678,7 +106043,7 @@ Object.defineProperty(exports, '__esModule', { value: true });
         }
       });
       ```
-       @method queryRecord
+        @method queryRecord
       @param {DS.Store} store
       @param {subclass of DS.Model} type
       @param {Object} query
@@ -110691,22 +106056,22 @@ Object.defineProperty(exports, '__esModule', { value: true });
       implement the `generateIdForRecord()` method. This method will be invoked
       each time you create a new record, and the value returned from it will be
       assigned to the record's `primaryKey`.
-       Most traditional REST-like HTTP APIs will not use this method. Instead, the ID
+        Most traditional REST-like HTTP APIs will not use this method. Instead, the ID
       of the record will be set by the server, and your adapter will update the store
       with the new ID when it calls `didCreateRecord()`. Only implement this method if
       you intend to generate record IDs on the client-side.
-       The `generateIdForRecord()` method will be invoked with the requesting store as
+        The `generateIdForRecord()` method will be invoked with the requesting store as
       the first parameter and the newly created record as the second parameter:
-       ```javascript
+        ```javascript
       import DS from 'ember-data';
       import { v4 } from 'uuid';
-       export default DS.Adapter.extend({
+        export default DS.Adapter.extend({
         generateIdForRecord(store, inputProperties) {
           return v4();
         }
       });
       ```
-       @method generateIdForRecord
+        @method generateIdForRecord
       @param {DS.Store} store
       @param {DS.Model} type   the DS.Model class of the record
       @param {Object} inputProperties a hash of properties to set on the
@@ -110717,18 +106082,18 @@ Object.defineProperty(exports, '__esModule', { value: true });
 
     /**
       Proxies to the serializer's `serialize` method.
-       Example
-       ```app/adapters/application.js
+        Example
+        ```app/adapters/application.js
       import DS from 'ember-data';
-       export default DS.Adapter.extend({
+        export default DS.Adapter.extend({
         createRecord(store, type, snapshot) {
           let data = this.serialize(snapshot, { includeId: true });
           let url = `/${type.modelName}`;
-           // ...
+            // ...
         }
       });
       ```
-       @method serialize
+        @method serialize
       @param {DS.Snapshot} snapshot
       @param {Object}   options
       @return {Object} serialized snapshot
@@ -110741,15 +106106,15 @@ Object.defineProperty(exports, '__esModule', { value: true });
     /**
       Implement this method in a subclass to handle the creation of
       new records.
-       Serializes the record and sends it to the server.
-       Example
-       ```app/adapters/application.js
+        Serializes the record and sends it to the server.
+        Example
+        ```app/adapters/application.js
       import Ember from 'ember';
       import DS from 'ember-data';
-       export default DS.Adapter.extend({
+        export default DS.Adapter.extend({
         createRecord(store, type, snapshot) {
           let data = this.serialize(snapshot, { includeId: true });
-           return new Ember.RSVP.Promise(function(resolve, reject) {
+            return new Ember.RSVP.Promise(function(resolve, reject) {
             Ember.$.ajax({
               type: 'POST',
               url: `/${type.modelName}`,
@@ -110765,7 +106130,7 @@ Object.defineProperty(exports, '__esModule', { value: true });
         }
       });
       ```
-       @method createRecord
+        @method createRecord
       @param {DS.Store} store
       @param {DS.Model} type   the DS.Model class of the record
       @param {DS.Snapshot} snapshot
@@ -110776,23 +106141,23 @@ Object.defineProperty(exports, '__esModule', { value: true });
     /**
       Implement this method in a subclass to handle the updating of
       a record.
-       Serializes the record update and sends it to the server.
-       The updateRecord method is expected to return a promise that will
+        Serializes the record update and sends it to the server.
+        The updateRecord method is expected to return a promise that will
       resolve with the serialized record. This allows the backend to
       inform the Ember Data store the current state of this record after
       the update. If it is not possible to return a serialized record
       the updateRecord promise can also resolve with `undefined` and the
       Ember Data store will assume all of the updates were successfully
       applied on the backend.
-       Example
-       ```app/adapters/application.js
+        Example
+        ```app/adapters/application.js
       import Ember from 'ember';
       import DS from 'ember-data';
-       export default DS.Adapter.extend({
+        export default DS.Adapter.extend({
         updateRecord(store, type, snapshot) {
           let data = this.serialize(snapshot, { includeId: true });
           let id = snapshot.id;
-           return new Ember.RSVP.Promise(function(resolve, reject) {
+            return new Ember.RSVP.Promise(function(resolve, reject) {
             Ember.$.ajax({
               type: 'PUT',
               url: `/${type.modelName}/${id}`,
@@ -110808,7 +106173,7 @@ Object.defineProperty(exports, '__esModule', { value: true });
         }
       });
       ```
-       @method updateRecord
+        @method updateRecord
       @param {DS.Store} store
       @param {DS.Model} type   the DS.Model class of the record
       @param {DS.Snapshot} snapshot
@@ -110819,16 +106184,16 @@ Object.defineProperty(exports, '__esModule', { value: true });
     /**
       Implement this method in a subclass to handle the deletion of
       a record.
-       Sends a delete request for the record to the server.
-       Example
-       ```app/adapters/application.js
+        Sends a delete request for the record to the server.
+        Example
+        ```app/adapters/application.js
       import Ember from 'ember';
       import DS from 'ember-data';
-       export default DS.Adapter.extend({
+        export default DS.Adapter.extend({
         deleteRecord(store, type, snapshot) {
           let data = this.serialize(snapshot, { includeId: true });
           let id = snapshot.id;
-           return new Ember.RSVP.Promise(function(resolve, reject) {
+            return new Ember.RSVP.Promise(function(resolve, reject) {
             Ember.$.ajax({
               type: 'DELETE',
               url: `/${type.modelName}/${id}`,
@@ -110844,7 +106209,7 @@ Object.defineProperty(exports, '__esModule', { value: true });
         }
       });
       ```
-       @method deleteRecord
+        @method deleteRecord
       @param {DS.Store} store
       @param {DS.Model} type   the DS.Model class of the record
       @param {DS.Snapshot} snapshot
@@ -110857,7 +106222,7 @@ Object.defineProperty(exports, '__esModule', { value: true });
       into as few requests as possible by calling groupRecordsForFindMany and passing it into a findMany call.
       You can opt out of this behaviour by either not implementing the findMany hook or by setting
       coalesceFindRequests to false.
-       @property coalesceFindRequests
+        @property coalesceFindRequests
       @type {boolean}
     */
     coalesceFindRequests: true,
@@ -110866,10 +106231,10 @@ Object.defineProperty(exports, '__esModule', { value: true });
       The store will call `findMany` instead of multiple `findRecord`
       requests to find multiple records at once if coalesceFindRequests
       is true.
-       ```app/adapters/application.js
+        ```app/adapters/application.js
       import Ember from 'ember';
       import DS from 'ember-data';
-       export default DS.Adapter.extend({
+        export default DS.Adapter.extend({
         findMany(store, type, ids, snapshots) {
           return new Ember.RSVP.Promise(function(resolve, reject) {
             Ember.$.ajax({
@@ -110887,7 +106252,7 @@ Object.defineProperty(exports, '__esModule', { value: true });
         }
       });
       ```
-       @method findMany
+        @method findMany
       @param {DS.Store} store
       @param {DS.Model} type   the DS.Model class of the records
       @param {Array}    ids
@@ -110899,10 +106264,10 @@ Object.defineProperty(exports, '__esModule', { value: true });
     /**
       Organize records into groups, each of which is to be passed to separate
       calls to `findMany`.
-       For example, if your api has nested URLs that depend on the parent, you will
+        For example, if your api has nested URLs that depend on the parent, you will
       want to group records by their parent.
-       The default implementation returns the records as a single group.
-       @method groupRecordsForFindMany
+        The default implementation returns the records as a single group.
+        @method groupRecordsForFindMany
       @param {DS.Store} store
       @param {Array} snapshots
       @return {Array}  an array of arrays of records, each of which is to be
@@ -110917,35 +106282,35 @@ Object.defineProperty(exports, '__esModule', { value: true });
       This method is used by the store to determine if the store should
       reload a record from the adapter when a record is requested by
       `store.findRecord`.
-       If this method returns `true`, the store will re-fetch a record from
+        If this method returns `true`, the store will re-fetch a record from
       the adapter. If this method returns `false`, the store will resolve
       immediately using the cached record.
-       For example, if you are building an events ticketing system, in which users
+        For example, if you are building an events ticketing system, in which users
       can only reserve tickets for 20 minutes at a time, and want to ensure that
       in each route you have data that is no more than 20 minutes old you could
       write:
-       ```javascript
+        ```javascript
       shouldReloadRecord(store, ticketSnapshot) {
         let lastAccessedAt = ticketSnapshot.attr('lastAccessedAt');
         let timeDiff = moment().diff(lastAccessedAt, 'minutes');
-         if (timeDiff > 20) {
+          if (timeDiff > 20) {
           return true;
         } else {
           return false;
         }
       }
       ```
-       This method would ensure that whenever you do `store.findRecord('ticket',
+        This method would ensure that whenever you do `store.findRecord('ticket',
       id)` you will always get a ticket that is no more than 20 minutes old. In
       case the cached version is more than 20 minutes old, `findRecord` will not
       resolve until you fetched the latest version.
-       By default this hook returns `false`, as most UIs should not block user
+        By default this hook returns `false`, as most UIs should not block user
       interactions while waiting on data update.
-       Note that, with default settings, `shouldBackgroundReloadRecord` will always
+        Note that, with default settings, `shouldBackgroundReloadRecord` will always
       re-fetch the records in the background even if `shouldReloadRecord` returns
       `false`. You can override `shouldBackgroundReloadRecord` if this does not
       suit your use case.
-       @since 1.13.0
+        @since 1.13.0
       @method shouldReloadRecord
       @param {DS.Store} store
       @param {DS.Snapshot} snapshot
@@ -110960,20 +106325,20 @@ Object.defineProperty(exports, '__esModule', { value: true });
       This method is used by the store to determine if the store should
       reload all records from the adapter when records are requested by
       `store.findAll`.
-       If this method returns `true`, the store will re-fetch all records from
+        If this method returns `true`, the store will re-fetch all records from
       the adapter. If this method returns `false`, the store will resolve
       immediately using the cached records.
-       For example, if you are building an events ticketing system, in which users
+        For example, if you are building an events ticketing system, in which users
       can only reserve tickets for 20 minutes at a time, and want to ensure that
       in each route you have data that is no more than 20 minutes old you could
       write:
-       ```javascript
+        ```javascript
       shouldReloadAll(store, snapshotArray) {
         let snapshots = snapshotArray.snapshots();
-         return snapshots.any((ticketSnapshot) => {
+          return snapshots.any((ticketSnapshot) => {
           let lastAccessedAt = ticketSnapshot.attr('lastAccessedAt');
           let timeDiff = moment().diff(lastAccessedAt, 'minutes');
-           if (timeDiff > 20) {
+            if (timeDiff > 20) {
             return true;
           } else {
             return false;
@@ -110981,18 +106346,18 @@ Object.defineProperty(exports, '__esModule', { value: true });
         });
       }
       ```
-       This method would ensure that whenever you do `store.findAll('ticket')` you
+        This method would ensure that whenever you do `store.findAll('ticket')` you
       will always get a list of tickets that are no more than 20 minutes old. In
       case a cached version is more than 20 minutes old, `findAll` will not
       resolve until you fetched the latest versions.
-       By default this methods returns `true` if the passed `snapshotRecordArray`
+        By default this methods returns `true` if the passed `snapshotRecordArray`
       is empty (meaning that there are no records locally available yet),
       otherwise it returns `false`.
-       Note that, with default settings, `shouldBackgroundReloadAll` will always
+        Note that, with default settings, `shouldBackgroundReloadAll` will always
       re-fetch all the records in the background even if `shouldReloadAll` returns
       `false`. You can override `shouldBackgroundReloadAll` if this does not suit
       your use case.
-       @since 1.13.0
+        @since 1.13.0
       @method shouldReloadAll
       @param {DS.Store} store
       @param {DS.SnapshotRecordArray} snapshotRecordArray
@@ -111007,26 +106372,26 @@ Object.defineProperty(exports, '__esModule', { value: true });
       This method is used by the store to determine if the store should
       reload a record after the `store.findRecord` method resolves a
       cached record.
-       This method is *only* checked by the store when the store is
+        This method is *only* checked by the store when the store is
       returning a cached record.
-       If this method returns `true` the store will re-fetch a record from
+        If this method returns `true` the store will re-fetch a record from
       the adapter.
-       For example, if you do not want to fetch complex data over a mobile
+        For example, if you do not want to fetch complex data over a mobile
       connection, or if the network is down, you can implement
       `shouldBackgroundReloadRecord` as follows:
-       ```javascript
+        ```javascript
       shouldBackgroundReloadRecord(store, snapshot) {
         let connection = window.navigator.connection;
-         if (connection === 'cellular' || connection === 'none') {
+          if (connection === 'cellular' || connection === 'none') {
           return false;
         } else {
           return true;
         }
       }
       ```
-       By default this hook returns `true` so the data for the record is updated
+        By default this hook returns `true` so the data for the record is updated
       in the background.
-       @since 1.13.0
+        @since 1.13.0
       @method shouldBackgroundReloadRecord
       @param {DS.Store} store
       @param {DS.Snapshot} snapshot
@@ -111041,26 +106406,26 @@ Object.defineProperty(exports, '__esModule', { value: true });
       This method is used by the store to determine if the store should
       reload a record array after the `store.findAll` method resolves
       with a cached record array.
-       This method is *only* checked by the store when the store is
+        This method is *only* checked by the store when the store is
       returning a cached record array.
-       If this method returns `true` the store will re-fetch all records
+        If this method returns `true` the store will re-fetch all records
       from the adapter.
-       For example, if you do not want to fetch complex data over a mobile
+        For example, if you do not want to fetch complex data over a mobile
       connection, or if the network is down, you can implement
       `shouldBackgroundReloadAll` as follows:
-       ```javascript
+        ```javascript
       shouldBackgroundReloadAll(store, snapshotArray) {
         let connection = window.navigator.connection;
-         if (connection === 'cellular' || connection === 'none') {
+          if (connection === 'cellular' || connection === 'none') {
           return false;
         } else {
           return true;
         }
       }
       ```
-       By default this method returns `true`, indicating that a background reload
+        By default this method returns `true`, indicating that a background reload
       should always be triggered.
-       @since 1.13.0
+        @since 1.13.0
       @method shouldBackgroundReloadAll
       @param {DS.Store} store
       @param {DS.SnapshotRecordArray} snapshotRecordArray
@@ -111315,8 +106680,8 @@ Object.defineProperty(exports, '__esModule', { value: true });
       or from accessing a relationship separately to the server. If your server supports passing
       ids as a query string, you can set coalesceFindRequests to true to coalesce all find requests
       within a single runloop.
-       For example, if you have an initial payload of:
-       ```javascript
+        For example, if you have an initial payload of:
+        ```javascript
       {
         data: {
           id: 1,
@@ -111332,26 +106697,26 @@ Object.defineProperty(exports, '__esModule', { value: true });
         }
       }
       ```
-       By default calling `post.get('comments')` will trigger the following requests(assuming the
+        By default calling `post.get('comments')` will trigger the following requests(assuming the
       comments haven't been loaded before):
-       ```
+        ```
       GET /comments/1
       GET /comments/2
       ```
-       If you set coalesceFindRequests to `true` it will instead trigger the following request:
-       ```
+        If you set coalesceFindRequests to `true` it will instead trigger the following request:
+        ```
       GET /comments?filter[id]=1,2
       ```
-       Setting coalesceFindRequests to `true` also works for `store.find` requests and `belongsTo`
+        Setting coalesceFindRequests to `true` also works for `store.find` requests and `belongsTo`
       relationships accessed within the same runloop. If you set `coalesceFindRequests: true`
-       ```javascript
+        ```javascript
       store.findRecord('comment', 1);
       store.findRecord('comment', 2);
       ```
-       will also send a request to: `GET /comments?filter[id]=1,2`
-       Note: Requests coalescing rely on URL building strategy. So if you override `buildURL` in your app
+        will also send a request to: `GET /comments?filter[id]=1,2`
+        Note: Requests coalescing rely on URL building strategy. So if you override `buildURL` in your app
       `groupRecordsForFindMany` more likely should be overridden as well in order for coalescing to work.
-       @property coalesceFindRequests
+        @property coalesceFindRequests
       @type {boolean}
     */
     coalesceFindRequests: false,
@@ -111761,8 +107126,8 @@ Object.defineProperty(exports, '__esModule', { value: true });
       or from accessing a relationship separately to the server. If your server supports passing
       ids as a query string, you can set coalesceFindRequests to true to coalesce all find requests
       within a single runloop.
-       For example, if you have an initial payload of:
-       ```javascript
+        For example, if you have an initial payload of:
+        ```javascript
       {
         post: {
           id: 1,
@@ -111770,26 +107135,26 @@ Object.defineProperty(exports, '__esModule', { value: true });
         }
       }
       ```
-       By default calling `post.get('comments')` will trigger the following requests(assuming the
+        By default calling `post.get('comments')` will trigger the following requests(assuming the
       comments haven't been loaded before):
-       ```
+        ```
       GET /comments/1
       GET /comments/2
       ```
-       If you set coalesceFindRequests to `true` it will instead trigger the following request:
-       ```
+        If you set coalesceFindRequests to `true` it will instead trigger the following request:
+        ```
       GET /comments?ids[]=1&ids[]=2
       ```
-       Setting coalesceFindRequests to `true` also works for `store.find` requests and `belongsTo`
+        Setting coalesceFindRequests to `true` also works for `store.find` requests and `belongsTo`
       relationships accessed within the same runloop. If you set `coalesceFindRequests: true`
-       ```javascript
+        ```javascript
       store.findRecord('comment', 1);
       store.findRecord('comment', 2);
       ```
-       will also send a request to: `GET /comments?ids[]=1&ids[]=2`
-       Note: Requests coalescing rely on URL building strategy. So if you override `buildURL` in your app
+        will also send a request to: `GET /comments?ids[]=1&ids[]=2`
+        Note: Requests coalescing rely on URL building strategy. So if you override `buildURL` in your app
       `groupRecordsForFindMany` more likely should be overridden as well in order for coalescing to work.
-       @property coalesceFindRequests
+        @property coalesceFindRequests
       @type {boolean}
     */
     coalesceFindRequests: false,
@@ -112152,7 +107517,7 @@ Object.defineProperty(exports, '__esModule', { value: true });
     /**
       Generates a detailed ("friendly") error message, with plenty
       of information for debugging (good luck!)
-       @method generatedDetailedMessage
+        @method generatedDetailedMessage
       @private
       @param  {Number} status
       @param  {Object} headers
@@ -112837,8 +108202,8 @@ Object.defineProperty(exports, '__esModule', { value: true });
       The `store` property is the application's `store` that contains
       all records. It can be used to look up serializers for other model
       types that may be nested inside the payload response.
-       Example:
-       ```js
+        Example:
+        ```js
       Serializer.extend({
         extractRelationship(relationshipModelName, relationshipHash) {
           var modelClass = this.store.modelFor(relationshipModelName);
@@ -112847,7 +108212,7 @@ Object.defineProperty(exports, '__esModule', { value: true });
         }
       });
       ```
-       @property store
+        @property store
       @type {DS.Store}
       @public
     */
@@ -112855,9 +108220,9 @@ Object.defineProperty(exports, '__esModule', { value: true });
     /**
       The `normalizeResponse` method is used to normalize a payload from the
       server to a JSON-API Document.
-       http://jsonapi.org/format/#document-structure
-       Example:
-       ```js
+        http://jsonapi.org/format/#document-structure
+        Example:
+        ```js
       Serializer.extend({
         normalizeResponse(store, primaryModelClass, payload, id, requestType) {
           if (requestType === 'findRecord') {
@@ -112873,7 +108238,7 @@ Object.defineProperty(exports, '__esModule', { value: true });
         }
       });
       ```
-       @since 1.13.0
+        @since 1.13.0
       @method normalizeResponse
       @param {DS.Store} store
       @param {DS.Model} primaryModelClass
@@ -112887,31 +108252,31 @@ Object.defineProperty(exports, '__esModule', { value: true });
     /**
       The `serialize` method is used when a record is saved in order to convert
       the record into the form that your external data source expects.
-       `serialize` takes an optional `options` hash with a single option:
-       - `includeId`: If this is `true`, `serialize` should include the ID
+        `serialize` takes an optional `options` hash with a single option:
+        - `includeId`: If this is `true`, `serialize` should include the ID
         in the serialized object it builds.
-       Example:
-       ```js
+        Example:
+        ```js
       Serializer.extend({
         serialize(snapshot, options) {
           var json = {
             id: snapshot.id
           };
-           snapshot.eachAttribute((key, attribute) => {
+            snapshot.eachAttribute((key, attribute) => {
             json[key] = snapshot.attr(key);
           });
-           snapshot.eachRelationship((key, relationship) => {
+            snapshot.eachRelationship((key, relationship) => {
             if (relationship.kind === 'belongsTo') {
               json[key] = snapshot.belongsTo(key, { id: true });
             } else if (relationship.kind === 'hasMany') {
               json[key] = snapshot.hasMany(key, { ids: true });
             }
           });
-           return json;
+            return json;
         },
       });
       ```
-       @method serialize
+        @method serialize
       @param {DS.Snapshot} snapshot
       @param {Object} [options]
       @return {Object}
@@ -112923,8 +108288,8 @@ Object.defineProperty(exports, '__esModule', { value: true });
       external data source into the normalized form `store.push()` expects. You
       should override this method, munge the hash and return the normalized
       payload.
-       Example:
-       ```js
+        Example:
+        ```js
       Serializer.extend({
         normalize(modelClass, resourceHash) {
           var data = {
@@ -112936,7 +108301,7 @@ Object.defineProperty(exports, '__esModule', { value: true });
         }
       })
       ```
-       @method normalize
+        @method normalize
       @param {DS.Model} typeClass
       @param {Object} hash
       @return {Object}
@@ -113055,8 +108420,8 @@ Object.defineProperty(exports, '__esModule', { value: true });
     /**
       Normalize the record and recursively normalize/extract all the embedded records
       while pushing them into the store as they are encountered
-       A payload with an attr configured for embedded records needs to be extracted:
-       ```js
+        A payload with an attr configured for embedded records needs to be extracted:
+        ```js
       {
         "post": {
           "id": "1"
@@ -113092,30 +108457,30 @@ Object.defineProperty(exports, '__esModule', { value: true });
 
     /**
       Serialize `belongsTo` relationship when it is configured as an embedded object.
-       This example of an author model belongs to a post model:
-       ```js
+        This example of an author model belongs to a post model:
+        ```js
       Post = DS.Model.extend({
         title:    DS.attr('string'),
         body:     DS.attr('string'),
         author:   DS.belongsTo('author')
       });
-       Author = DS.Model.extend({
+        Author = DS.Model.extend({
         name:     DS.attr('string'),
         post:     DS.belongsTo('post')
       });
       ```
-       Use a custom (type) serializer for the post model to configure embedded author
-       ```app/serializers/post.js
+        Use a custom (type) serializer for the post model to configure embedded author
+        ```app/serializers/post.js
       import DS from 'ember-data';
-       export default DS.RESTSerializer.extend(DS.EmbeddedRecordsMixin, {
+        export default DS.RESTSerializer.extend(DS.EmbeddedRecordsMixin, {
         attrs: {
           author: { embedded: 'always' }
         }
       })
       ```
-       A payload with an attribute configured for embedded records can serialize
+        A payload with an attribute configured for embedded records can serialize
       the records together under the root attribute's payload:
-       ```js
+        ```js
       {
         "post": {
           "id": "1"
@@ -113127,7 +108492,7 @@ Object.defineProperty(exports, '__esModule', { value: true });
         }
       }
       ```
-       @method serializeBelongsTo
+        @method serializeBelongsTo
       @param {DS.Snapshot} snapshot
       @param {Object} json
       @param {Object} relationship
@@ -113182,30 +108547,30 @@ Object.defineProperty(exports, '__esModule', { value: true });
 
     /**
       Serializes `hasMany` relationships when it is configured as embedded objects.
-       This example of a post model has many comments:
-       ```js
+        This example of a post model has many comments:
+        ```js
       Post = DS.Model.extend({
         title:    DS.attr('string'),
         body:     DS.attr('string'),
         comments: DS.hasMany('comment')
       });
-       Comment = DS.Model.extend({
+        Comment = DS.Model.extend({
         body:     DS.attr('string'),
         post:     DS.belongsTo('post')
       });
       ```
-       Use a custom (type) serializer for the post model to configure embedded comments
-       ```app/serializers/post.js
+        Use a custom (type) serializer for the post model to configure embedded comments
+        ```app/serializers/post.js
       import DS from 'ember-data;
-       export default DS.RESTSerializer.extend(DS.EmbeddedRecordsMixin, {
+        export default DS.RESTSerializer.extend(DS.EmbeddedRecordsMixin, {
         attrs: {
           comments: { embedded: 'always' }
         }
       })
       ```
-       A payload with an attribute configured for embedded records can serialize
+        A payload with an attribute configured for embedded records can serialize
       the records together under the root attribute's payload:
-       ```js
+        ```js
       {
         "post": {
           "id": "1"
@@ -113221,21 +108586,21 @@ Object.defineProperty(exports, '__esModule', { value: true });
         }
       }
       ```
-       The attrs options object can use more specific instruction for extracting and
+        The attrs options object can use more specific instruction for extracting and
       serializing. When serializing, an option to embed `ids`, `ids-and-types` or `records` can be set.
       When extracting the only option is `records`.
-       So `{ embedded: 'always' }` is shorthand for:
+        So `{ embedded: 'always' }` is shorthand for:
       `{ serialize: 'records', deserialize: 'records' }`
-       To embed the `ids` for a related object (using a hasMany relationship):
-       ```app/serializers/post.js
+        To embed the `ids` for a related object (using a hasMany relationship):
+        ```app/serializers/post.js
       import DS from 'ember-data;
-       export default DS.RESTSerializer.extend(DS.EmbeddedRecordsMixin, {
+        export default DS.RESTSerializer.extend(DS.EmbeddedRecordsMixin, {
         attrs: {
           comments: { serialize: 'ids', deserialize: 'records' }
         }
       })
       ```
-       ```js
+        ```js
       {
         "post": {
           "id": "1"
@@ -113245,35 +108610,35 @@ Object.defineProperty(exports, '__esModule', { value: true });
         }
       }
       ```
-       To embed the relationship as a collection of objects with `id` and `type` keys, set
+        To embed the relationship as a collection of objects with `id` and `type` keys, set
       `ids-and-types` for the related object.
-       This is particularly useful for polymorphic relationships where records don't share
+        This is particularly useful for polymorphic relationships where records don't share
       the same table and the `id` is not enough information.
-       By example having a user that has many pets:
-       ```js
+        By example having a user that has many pets:
+        ```js
       User = DS.Model.extend({
         name:    DS.attr('string'),
         pets: DS.hasMany('pet', { polymorphic: true })
       });
-       Pet = DS.Model.extend({
+        Pet = DS.Model.extend({
         name: DS.attr('string'),
       });
-       Cat = Pet.extend({
+        Cat = Pet.extend({
         // ...
       });
-       Parrot = Pet.extend({
+        Parrot = Pet.extend({
         // ...
       });
       ```
-       ```app/serializers/user.js
+        ```app/serializers/user.js
       import DS from 'ember-data;
-       export default DS.RESTSerializer.extend(DS.EmbeddedRecordsMixin, {
+        export default DS.RESTSerializer.extend(DS.EmbeddedRecordsMixin, {
         attrs: {
           pets: { serialize: 'ids-and-types', deserialize: 'records' }
         }
       });
       ```
-       ```js
+        ```js
       {
         "user": {
           "id": "1"
@@ -113285,7 +108650,7 @@ Object.defineProperty(exports, '__esModule', { value: true });
         }
       }
       ```
-       @method serializeHasMany
+        @method serializeHasMany
       @param {DS.Snapshot} snapshot
       @param {Object} json
       @param {Object} relationship
@@ -113319,7 +108684,7 @@ Object.defineProperty(exports, '__esModule', { value: true });
       keys.
       This has its use case on polymorphic hasMany relationships where the server is not storing
       all records in the same table using STI, and therefore the `id` is not enough information
-       TODO: Make the default in Ember-data 3.0??
+        TODO: Make the default in Ember-data 3.0??
     */
     _serializeHasManyAsIdsAndTypes: function _serializeHasManyAsIdsAndTypes(snapshot, json, relationship) {
       var serializedKey = this.keyForAttribute(relationship.key, 'serialize');
@@ -113367,11 +108732,11 @@ Object.defineProperty(exports, '__esModule', { value: true });
     /**
       When serializing an embedded record, modify the property (in the json payload)
       that refers to the parent record (foreign key for relationship).
-       Serializing a `belongsTo` relationship removes the property that refers to the
+        Serializing a `belongsTo` relationship removes the property that refers to the
       parent record
-       Serializing a `hasMany` relationship does not remove the property that refers to
+        Serializing a `hasMany` relationship does not remove the property that refers to
       the parent record.
-       @method removeEmbeddedForeignKey
+        @method removeEmbeddedForeignKey
       @param {DS.Snapshot} snapshot
       @param {DS.Snapshot} embeddedSnapshot
       @param {Object} relationship
@@ -114179,14 +109544,14 @@ Object.defineProperty(exports, '__esModule', { value: true });
       convention. In these cases it is useful to override the
       `primaryKey` property to match the `primaryKey` of your external
       store.
-       Example
-       ```app/serializers/application.js
+        Example
+        ```app/serializers/application.js
       import DS from 'ember-data';
-       export default DS.JSONSerializer.extend({
+        export default DS.JSONSerializer.extend({
         primaryKey: '_id'
       });
       ```
-       @property primaryKey
+        @property primaryKey
       @type {String}
       @default 'id'
     */
@@ -114198,47 +109563,47 @@ Object.defineProperty(exports, '__esModule', { value: true });
       serialized JSON object representing the record. An object with the
       property `key` can also be used to designate the attribute's key on
       the response payload.
-       Example
-       ```app/models/person.js
+        Example
+        ```app/models/person.js
       import DS from 'ember-data';
-       export default DS.Model.extend({
+        export default DS.Model.extend({
         firstName: DS.attr('string'),
         lastName: DS.attr('string'),
         occupation: DS.attr('string'),
         admin: DS.attr('boolean')
       });
       ```
-       ```app/serializers/person.js
+        ```app/serializers/person.js
       import DS from 'ember-data';
-       export default DS.JSONSerializer.extend({
+        export default DS.JSONSerializer.extend({
         attrs: {
           admin: 'is_admin',
           occupation: { key: 'career' }
         }
       });
       ```
-       You can also remove attributes by setting the `serialize` key to
+        You can also remove attributes by setting the `serialize` key to
       `false` in your mapping object.
-       Example
-       ```app/serializers/person.js
+        Example
+        ```app/serializers/person.js
       import DS from 'ember-data';
-       export default DS.JSONSerializer.extend({
+        export default DS.JSONSerializer.extend({
         attrs: {
           admin: { serialize: false },
           occupation: { key: 'career' }
         }
       });
       ```
-       When serialized:
-       ```javascript
+        When serialized:
+        ```javascript
       {
         "firstName": "Harry",
         "lastName": "Houdini",
         "career": "magician"
       }
       ```
-       Note that the `admin` is now not included in the payload.
-       @property attrs
+        Note that the `admin` is now not included in the payload.
+        @property attrs
       @type {Object}
     */
     mergedProperties: ['attrs'],
@@ -114930,8 +110295,8 @@ Object.defineProperty(exports, '__esModule', { value: true });
         /*
           If you want to provide sideloaded records of the same type that the
           primary data you can do that by prefixing the key with `_`.
-           Example
-           ```
+            Example
+            ```
           {
             users: [
               { id: 1, title: 'Tom', manager: 3 },
@@ -114942,7 +110307,7 @@ Object.defineProperty(exports, '__esModule', { value: true });
             ]
           }
           ```
-           This forces `_users` to be added to `included` instead of `data`.
+            This forces `_users` to be added to `included` instead of `data`.
          */
         if (prop.charAt(0) === '_') {
           forcedSecondary = true;
@@ -114976,8 +110341,8 @@ Object.defineProperty(exports, '__esModule', { value: true });
 
         /*
           Support primary data as an object instead of an array.
-           Example
-           ```
+            Example
+            ```
           {
             user: { id: 1, title: 'Tom', manager: 3 }
           }
@@ -115012,8 +110377,8 @@ Object.defineProperty(exports, '__esModule', { value: true });
 
             /*
               Figures out if this is the primary record or not.
-               It's either:
-               1. The record with the same ID as the original request
+                It's either:
+                1. The record with the same ID as the original request
               2. If it's a newly created record without an ID, the first record
                  in the array
              */
@@ -115592,13 +110957,13 @@ Object.defineProperty(exports, '__esModule', { value: true });
     /**
       When given a deserialized value from a record attribute this
       method must return the serialized value.
-       Example
-       ```javascript
+        Example
+        ```javascript
       serialize(deserialized, options) {
         return Ember.isEmpty(deserialized) ? null : Number(deserialized);
       }
       ```
-       @method serialize
+        @method serialize
       @param deserialized The deserialized value
       @param options hash of options passed to `DS.attr`
       @return The serialized value
@@ -115608,13 +110973,13 @@ Object.defineProperty(exports, '__esModule', { value: true });
     /**
       When given a serialize value from a JSON object this method must
       return the deserialized value for the record attribute.
-       Example
-       ```javascript
+        Example
+        ```javascript
       deserialize(serialized, options) {
         return empty(serialized) ? null : Number(serialized);
       }
       ```
-       @method deserialize
+        @method deserialize
       @param serialized The serialized value
       @param options hash of options passed to `DS.attr`
       @return The deserialized value
