@@ -82,4 +82,8 @@ export default BaseHttpService.extend({
     return this.ajax('GET', '/packages');
   },
 
+  getSuppliers(status) {
+    return this.ajax('GET', '/suppliers/filter/by-status?status=' + status);
+  }
+
 });

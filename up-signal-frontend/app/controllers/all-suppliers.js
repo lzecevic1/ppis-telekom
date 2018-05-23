@@ -10,6 +10,7 @@ const {
 export default Ember.Controller.extend(SweetAlertMixin,{
  _supplierService: service('suppliers-service'),
  supplierId: null,
+ isChecked: false,
  session: Ember.inject.service('session'),
 
  avgRating: 0.0,
@@ -41,9 +42,24 @@ export default Ember.Controller.extend(SweetAlertMixin,{
     this.get('_supplierService').addRating(supplierId).then(()=>{
       this.get('target.router').refresh();
     })
-  },
+    },
   showActive: function() {
-    //poziv backenda
+    this.set('isChecked', !this.isChecked);
+    if (this.isChecked) {
+      this.get('_supplierService').getSuppliers('Aktivan').then((response) => {
+        console.log(JSON.stringify(response));
+        this.get('model').clear();
+        this.get('model').pushObjects(response);
+      });
+    }
+    else {
+      this.get('_supplierService').getAllSuppliers().then((response) => {
+        console.log(JSON.stringify(response));
+        this.get('model').clear();
+        this.get('model').pushObjects(response);
+      });
+    }
+
   },
   selectSort: function (value) {
     //to be implemented

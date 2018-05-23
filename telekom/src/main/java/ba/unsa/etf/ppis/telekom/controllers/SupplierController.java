@@ -7,6 +7,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import javax.validation.Valid;
+import java.util.List;
 import java.util.Optional;
 
 @RestController
@@ -37,5 +38,10 @@ public class SupplierController extends BaseController<Supplier, SupplierService
     public ResponseEntity averageRating(@PathVariable Long id) {
         Float avgRating = service.averageRatingForSupplier(id);
         return ResponseEntity.ok(avgRating);
+    }
+
+    public ResponseEntity filter(@RequestParam Supplier.SupplierStatus status) {
+        List<Supplier> activeSuppliers = service.filter(status);
+        return ResponseEntity.ok(activeSuppliers);
     }
 }
