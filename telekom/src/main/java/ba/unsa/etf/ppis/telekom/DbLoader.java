@@ -1,13 +1,7 @@
 package ba.unsa.etf.ppis.telekom;
 
-import ba.unsa.etf.ppis.telekom.models.Role;
-import ba.unsa.etf.ppis.telekom.models.Supplier;
-import ba.unsa.etf.ppis.telekom.models.TelekomService;
-import ba.unsa.etf.ppis.telekom.models.User;
-import ba.unsa.etf.ppis.telekom.services.RoleService;
-import ba.unsa.etf.ppis.telekom.services.ServiceForTelekomService;
-import ba.unsa.etf.ppis.telekom.services.SupplierService;
-import ba.unsa.etf.ppis.telekom.services.UserService;
+import ba.unsa.etf.ppis.telekom.models.*;
+import ba.unsa.etf.ppis.telekom.services.*;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.stereotype.Component;
@@ -26,6 +20,8 @@ public class DbLoader implements CommandLineRunner {
     private ServiceForTelekomService serviceForTelekomService;
     @Autowired
     private SupplierService supplierService;
+    @Autowired
+    private RatingService ratingService;
 
     @Override
     public void run(String... args) throws Exception {
@@ -91,6 +87,18 @@ public class DbLoader implements CommandLineRunner {
             supplier.setStatus(Supplier.SupplierStatus.Aktivan);
             supplier.setCategory(Supplier.SupplierCategory.Mobilni_uredjaji);
             supplierService.save(supplier);
+            Rating rating = new Rating();
+            rating.setDescription("Test");
+            rating.setRatingType(Rating.RatingType.COMMUNICATION);
+            rating.setRating(3.0f);
+            rating.setSupplier(supplier);
+            ratingService.save(rating);
+            rating = new Rating();
+            rating.setDescription("Test 2");
+            rating.setRatingType(Rating.RatingType.COMMUNICATION);
+            rating.setRating(5.0f);
+            rating.setSupplier(supplier);
+            ratingService.save(rating);
 
             supplier = new Supplier();
             supplier.setName("Cisco");
@@ -98,6 +106,12 @@ public class DbLoader implements CommandLineRunner {
             supplier.setStatus(Supplier.SupplierStatus.Aktivan);
             supplier.setCategory(Supplier.SupplierCategory.Ostalo);
             supplierService.save(supplier);
+            rating = new Rating();
+            rating.setDescription("Test 3");
+            rating.setRatingType(Rating.RatingType.COMMUNICATION);
+            rating.setRating(1.0f);
+            rating.setSupplier(supplier);
+            ratingService.save(rating);
 
             supplier = new Supplier();
             supplier.setName("Feniks");
@@ -105,6 +119,12 @@ public class DbLoader implements CommandLineRunner {
             supplier.setStatus(Supplier.SupplierStatus.Neaktivan);
             supplier.setCategory(Supplier.SupplierCategory.Telefonija);
             supplierService.save(supplier);
+            rating = new Rating();
+            rating.setDescription("Test 4");
+            rating.setRatingType(Rating.RatingType.COMMUNICATION);
+            rating.setRating(4.0f);
+            rating.setSupplier(supplier);
+            ratingService.save(rating);
 
             supplier = new Supplier();
             supplier.setName("Localhost Oprema");
@@ -112,6 +132,12 @@ public class DbLoader implements CommandLineRunner {
             supplier.setStatus(Supplier.SupplierStatus.Aktivan);
             supplier.setCategory(Supplier.SupplierCategory.Mrezna_oprema);
             supplierService.save(supplier);
+            rating = new Rating();
+            rating.setDescription("Test 5");
+            rating.setRatingType(Rating.RatingType.COMMUNICATION);
+            rating.setRating(2.5f);
+            rating.setSupplier(supplier);
+            ratingService.save(rating);
         }
     }
 }

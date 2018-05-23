@@ -11,7 +11,8 @@ export default BaseHttpService.extend({
     let newSupplier = Ember.Object.create({
       name: '',
       address: '',
-      category: '0'
+      category: '0',
+      avgRating: 0.0,
     });
     this.set('currentSupplier', newSupplier);
     return this.get('currentSupplier');
@@ -37,7 +38,6 @@ export default BaseHttpService.extend({
       ratingType: '0',
       rating: ratingValue,
       description: '',
-    //  ratingTimeStamp: ''
     });
     this.set('currentRating', newRating);
     return this.get('currentRating');
@@ -73,4 +73,9 @@ export default BaseHttpService.extend({
     console.log(this.currentRating);
     return this.ajax('POST', `/suppliers/${id}/ratings`, this.currentRating);
   },
+
+  getAvgRating: function(id) {
+    return this.ajax('GET', `/suppliers/${id}/average-rating`);
+  },
+
 });

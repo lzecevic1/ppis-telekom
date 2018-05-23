@@ -1,11 +1,9 @@
 import Ember from 'ember';
-
 export default Ember.Controller.extend({
     session: Ember.inject.service(),
 
     model: {},
     errorMessage: '',
-    openModal: false,
     actions: {
       login() {
     this.get('session').authenticate('authenticator:application', this.model, (data) => {

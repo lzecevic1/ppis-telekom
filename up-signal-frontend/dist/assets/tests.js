@@ -30,6 +30,16 @@ define('up-signal/tests/app.lint-test', [], function () {
     assert.ok(true, 'components/main-navigation.js should pass ESLint\n\n');
   });
 
+  QUnit.test('components/star-rating.js', function (assert) {
+    assert.expect(1);
+    assert.ok(true, 'components/star-rating.js should pass ESLint\n\n');
+  });
+
+  QUnit.test('components/sweet-alert.js', function (assert) {
+    assert.expect(1);
+    assert.ok(true, 'components/sweet-alert.js should pass ESLint\n\n');
+  });
+
   QUnit.test('controllers/all-services.js', function (assert) {
     assert.expect(1);
     assert.ok(true, 'controllers/all-services.js should pass ESLint\n\n');

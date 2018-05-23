@@ -31,8 +31,9 @@ export default Ember.Controller.extend({
     this.get('_supplierService').addRating(supplierId).then(()=>{
       this.get('target.router').refresh();
     })
-
-  }
-
+  },
+  readRatingsSupplier: function(supplierId) {
+    this.get('_supplierService').getAvgRating(supplierId);
+  },
 }
 });

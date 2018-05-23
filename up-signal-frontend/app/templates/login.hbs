@@ -16,3 +16,10 @@
     }}
     Uspješna prijava!
 {{/bs-modal-simple}}
+
+{{sweet-alert
+    title="Uspješna prijava"
+    type="success"
+    input="text"
+    onConfirm=(action "returnToHomePage")
+}}
