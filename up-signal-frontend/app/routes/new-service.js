@@ -1,5 +1,5 @@
 import Ember from 'ember';
-import LoginRoute from './login';
+import SweetAlertMixin from 'ember-sweetalert/mixins/sweetalert-mixin';
 
 const {
   inject: {
@@ -7,8 +7,9 @@ const {
   }
 } = Ember;
 
-export default LoginRoute.extend({
+export default Ember.Route.extend(SweetAlertMixin, {
   _supplierService: service('suppliers-service'),
+  session: Ember.inject.service(),
 
   model: function () {
     //returns an empty supplier model
@@ -26,9 +27,25 @@ export default LoginRoute.extend({
 
   actions: {
     onNext: function () {
-     this.get('_supplierService').addService(this.controller.get('model'))
-      .then(()=> this.transitionTo('services'));
-    },
-
-  }
+      let sweetalert = this.get('sweetAlert');
+      this.get('_supplierService').addService(this.controller.get('model'))
+        .then(()=> {
+          sweetalert({
+            title: 'Uspješno dodana usluga',
+            confirmButtonText: 'OK',
+            type: 'success'
+          })
+          .then((confirm)=>{
+            this.transitionTo('all-services');
+          });
+        },
+        function(reason){
+          sweetalert({
+            title: 'Došlo je do greške prilikom kreiranja usluge',
+            confirmButtonText: 'Pokušajte ponovo',
+            type: 'error'
+          })
+        })
+      }
+    }
 });

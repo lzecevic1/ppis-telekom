@@ -15,24 +15,10 @@
         {{#if session.isAuthenticated}}
             {{#if (diff session.data.authenticated.user.role.name "SUPPLIER")}} <br>
                 <button class="btn btn-default list-item-btn">Izmjena</button>
-                <button class="btn btn-default list-item-btn" {{action "setServiceToDelete" service.id}}>Brisanje</button><br>
+                <button class="btn btn-default list-item-btn" {{action "delete" service.id}}>Deaktiviraj</button><br>
             {{/if}}
         {{/if}}
         </div>
         </div>
         {{/each}}
 </div>
-
-{{#bs-modal-simple
-    title="Potvrda"
-    closeTitle="Ne"
-    submitTitle="Da"
-    autoClose=true
-    size=null
-    fade=false
-    open=serviceId
-    onSubmit=(action "delete" serviceId)
-    onHide=(action "cancelDeleting")}}
-    Da li ste sigurni da zelite izbrisati ovu uslugu?
-{{/bs-modal-simple}}
-
