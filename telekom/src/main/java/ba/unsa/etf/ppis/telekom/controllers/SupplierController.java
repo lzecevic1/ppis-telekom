@@ -33,4 +33,9 @@ public class SupplierController extends BaseController<Supplier, SupplierService
         service.addRatingForSupplier(rating, id);
         return ResponseEntity.ok().build();
     }
+
+    public ResponseEntity averageRating(@PathVariable Long id) {
+        Float avgRating = service.averageRatingForSupplier(id);
+        return ResponseEntity.ok(avgRating);
+    }
 }

@@ -27,22 +27,32 @@ define('up-signal/tests/app.lint-test', [], function () {
 
   QUnit.test('components/main-navigation.js', function (assert) {
     assert.expect(1);
-    assert.ok(true, 'components/main-navigation.js should pass ESLint\n\n');
+    assert.ok(false, 'components/main-navigation.js should pass ESLint\n\n17:22 - \'confirm\' is defined but never used. (no-unused-vars)\n22:26 - \'confirm\' is defined but never used. (no-unused-vars)');
+  });
+
+  QUnit.test('components/star-rating.js', function (assert) {
+    assert.expect(1);
+    assert.ok(true, 'components/star-rating.js should pass ESLint\n\n');
+  });
+
+  QUnit.test('components/sweet-alert.js', function (assert) {
+    assert.expect(1);
+    assert.ok(true, 'components/sweet-alert.js should pass ESLint\n\n');
   });
 
   QUnit.test('controllers/all-services.js', function (assert) {
     assert.expect(1);
-    assert.ok(true, 'controllers/all-services.js should pass ESLint\n\n');
+    assert.ok(false, 'controllers/all-services.js should pass ESLint\n\n23:26 - \'confirm\' is defined but never used. (no-unused-vars)\n28:30 - \'confirm\' is defined but never used. (no-unused-vars)');
   });
 
   QUnit.test('controllers/all-suppliers.js', function (assert) {
     assert.expect(1);
-    assert.ok(false, 'controllers/all-suppliers.js should pass ESLint\n\n30:37 - \'rating\' is defined but never used. (no-unused-vars)');
+    assert.ok(false, 'controllers/all-suppliers.js should pass ESLint\n\n27:18 - \'confirm\' is defined but never used. (no-unused-vars)\n32:22 - \'confirm\' is defined but never used. (no-unused-vars)\n45:26 - \'supplierId\' is defined but never used. (no-unused-vars)\n47:9 - \'sweetAlertMixin\' is assigned a value but never used. (no-unused-vars)\n80:14 - \'confirm\' is defined but never used. (no-unused-vars)');
   });
 
   QUnit.test('controllers/login.js', function (assert) {
     assert.expect(1);
-    assert.ok(true, 'controllers/login.js should pass ESLint\n\n');
+    assert.ok(false, 'controllers/login.js should pass ESLint\n\n10:84 - \'data\' is defined but never used. (no-unused-vars)\n17:26 - \'confirm\' is defined but never used. (no-unused-vars)');
   });
 
   QUnit.test('controllers/new-service.js', function (assert) {
@@ -137,12 +147,12 @@ define('up-signal/tests/app.lint-test', [], function () {
 
   QUnit.test('routes/new-service.js', function (assert) {
     assert.expect(1);
-    assert.ok(false, 'routes/new-service.js should pass ESLint\n\n18:15 - \'transition\' is defined but never used. (no-unused-vars)');
+    assert.ok(false, 'routes/new-service.js should pass ESLint\n\n19:15 - \'transition\' is defined but never used. (no-unused-vars)\n38:18 - \'confirm\' is defined but never used. (no-unused-vars)\n42:18 - \'reason\' is defined but never used. (no-unused-vars)');
   });
 
   QUnit.test('routes/new-supplier.js', function (assert) {
     assert.expect(1);
-    assert.ok(false, 'routes/new-supplier.js should pass ESLint\n\n17:15 - \'transition\' is defined but never used. (no-unused-vars)');
+    assert.ok(false, 'routes/new-supplier.js should pass ESLint\n\n18:15 - \'transition\' is defined but never used. (no-unused-vars)\n36:16 - \'confirm\' is defined but never used. (no-unused-vars)\n40:16 - \'reason\' is defined but never used. (no-unused-vars)');
   });
 
   QUnit.test('routes/news.js', function (assert) {
