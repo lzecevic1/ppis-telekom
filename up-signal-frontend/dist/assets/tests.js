@@ -65,9 +65,9 @@ define('up-signal/tests/app.lint-test', [], function () {
     assert.ok(true, 'controllers/new-supplier.js should pass ESLint\n\n');
   });
 
-  QUnit.test('controllers/service-packages.js', function (assert) {
+  QUnit.test('controllers/packages.js', function (assert) {
     assert.expect(1);
-    assert.ok(true, 'controllers/service-packages.js should pass ESLint\n\n');
+    assert.ok(true, 'controllers/packages.js should pass ESLint\n\n');
   });
 
   QUnit.test('controllers/services.js', function (assert) {
@@ -168,11 +168,6 @@ define('up-signal/tests/app.lint-test', [], function () {
   QUnit.test('routes/packages.js', function (assert) {
     assert.expect(1);
     assert.ok(true, 'routes/packages.js should pass ESLint\n\n');
-  });
-
-  QUnit.test('routes/service-packages.js', function (assert) {
-    assert.expect(1);
-    assert.ok(true, 'routes/service-packages.js should pass ESLint\n\n');
   });
 
   QUnit.test('routes/services.js', function (assert) {
@@ -480,9 +475,9 @@ define('up-signal/tests/tests.lint-test', [], function () {
     assert.ok(true, 'unit/controllers/new-supplier-test.js should pass ESLint\n\n');
   });
 
-  QUnit.test('unit/controllers/service-packages-test.js', function (assert) {
+  QUnit.test('unit/controllers/packages-test.js', function (assert) {
     assert.expect(1);
-    assert.ok(true, 'unit/controllers/service-packages-test.js should pass ESLint\n\n');
+    assert.ok(true, 'unit/controllers/packages-test.js should pass ESLint\n\n');
   });
 
   QUnit.test('unit/routes/about-us-test.js', function (assert) {
@@ -538,11 +533,6 @@ define('up-signal/tests/tests.lint-test', [], function () {
   QUnit.test('unit/routes/packages-test.js', function (assert) {
     assert.expect(1);
     assert.ok(true, 'unit/routes/packages-test.js should pass ESLint\n\n');
-  });
-
-  QUnit.test('unit/routes/service-packages-test.js', function (assert) {
-    assert.expect(1);
-    assert.ok(true, 'unit/routes/service-packages-test.js should pass ESLint\n\n');
   });
 
   QUnit.test('unit/routes/services-test.js', function (assert) {
@@ -612,10 +602,10 @@ define('up-signal/tests/unit/controllers/new-supplier-test', ['ember-qunit'], fu
     assert.ok(controller);
   });
 });
-define('up-signal/tests/unit/controllers/service-packages-test', ['ember-qunit'], function (_emberQunit) {
+define('up-signal/tests/unit/controllers/packages-test', ['ember-qunit'], function (_emberQunit) {
   'use strict';
 
-  (0, _emberQunit.moduleFor)('controller:service-packages', 'Unit | Controller | service packages', {
+  (0, _emberQunit.moduleFor)('controller:packages', 'Unit | Controller | packages', {
     // Specify the other units that are required for this test.
     // needs: ['controller:foo']
   });
@@ -760,19 +750,6 @@ define('up-signal/tests/unit/routes/packages-test', ['ember-qunit'], function (_
   'use strict';
 
   (0, _emberQunit.moduleFor)('route:packages', 'Unit | Route | packages', {
-    // Specify the other units that are required for this test.
-    // needs: ['controller:foo']
-  });
-
-  (0, _emberQunit.test)('it exists', function (assert) {
-    var route = this.subject();
-    assert.ok(route);
-  });
-});
-define('up-signal/tests/unit/routes/service-packages-test', ['ember-qunit'], function (_emberQunit) {
-  'use strict';
-
-  (0, _emberQunit.moduleFor)('route:service-packages', 'Unit | Route | service packages', {
     // Specify the other units that are required for this test.
     // needs: ['controller:foo']
   });

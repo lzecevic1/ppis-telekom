@@ -1,1 +1,32 @@
-{{outlet}}
+<div class="list-top">
+    <p>PREGLED SVIH PAKETA</p>
+</div>
+
+ {{#if session.isAuthenticated}}
+    <div class="list-top add-new">
+      {{#if (diff session.data.authenticated.user.role.name "SERVICER")}}
+        {{#link-to 'new-service'}}<span class="icon-add"><i class="glyphicon glyphicon-plus-sign"></i></span> NOVI PAKET{{/link-to}}
+      {{/if}}
+    </div>
+{{/if}}
+    <div class="container-supplier">
+    {{#each model as |service|}}
+        <div class="box box-service">
+        <span class="icon-cont"><i class="glyphicon glyphicon-shopping-cart"></i></span>
+        <h3>{{service.serviceId}}</h3>
+        <div class = "details">
+        <p> <b>Tip usluge:</b> {{service.type}}</p>
+        <p> <b>Opis: </b> {{service.description}}</p>
+        <p> <b>Odgovorna osoba: </b>{{service.responsiblePerson}}</p>
+        <p> <i>Cijena se nalazi u glavnom cjenovniku</i></p>
+
+        {{#if session.isAuthenticated}}
+            {{#if (diff session.data.authenticated.user.role.name "SUPPLIER")}} <br>
+                <button class="btn btn-default list-item-btn">Izmjena</button>
+                <button class="btn btn-default list-item-btn" {{action "delete" service.id}}>Deaktiviraj</button><br>
+            {{/if}}
+        {{/if}}
+        </div>
+        </div>
+        {{/each}}
+</div>

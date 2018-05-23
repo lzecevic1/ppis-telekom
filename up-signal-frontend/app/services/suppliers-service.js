@@ -78,4 +78,8 @@ export default BaseHttpService.extend({
     return this.ajax('GET', `/suppliers/${id}/average-rating`);
   },
 
+  getAllPackages() {
+    return this.ajax('GET', '/telekom-services');
+  },
+
 });

@@ -1182,13 +1182,17 @@ define('up-signal/controllers/new-supplier', ['exports'], function (exports) {
     }
   });
 });
-define('up-signal/controllers/service-packages', ['exports'], function (exports) {
+define('up-signal/controllers/packages', ['exports'], function (exports) {
   'use strict';
 
   Object.defineProperty(exports, "__esModule", {
     value: true
   });
-  exports.default = Ember.Controller.extend({});
+  var service = Ember.inject.service;
+  exports.default = Ember.Controller.extend({
+    _supplierService: service('suppliers-service'),
+    session: Ember.inject.service('session')
+  });
 });
 define('up-signal/controllers/services', ['exports'], function (exports) {
   'use strict';
@@ -1720,7 +1724,6 @@ define('up-signal/router', ['exports', 'up-signal/config/environment'], function
     this.route('suppliers');
     this.route('news');
     this.route('new-contract', { path: '/:id/new-contract' });
-    this.route('service-packages');
   });
 
   exports.default = Router;
@@ -1973,15 +1976,16 @@ define('up-signal/routes/packages', ['exports'], function (exports) {
   Object.defineProperty(exports, "__esModule", {
     value: true
   });
-  exports.default = Ember.Route.extend({});
-});
-define('up-signal/routes/service-packages', ['exports'], function (exports) {
-  'use strict';
+  var service = Ember.inject.service;
+  exports.default = Ember.Route.extend({
+    _supplierService: service('suppliers-service'),
+    model: function model() {
+      return this.get('_supplierService').getAllPackages() || {};
+    },
 
-  Object.defineProperty(exports, "__esModule", {
-    value: true
+
+    actions: {}
   });
-  exports.default = Ember.Route.extend({});
 });
 define('up-signal/routes/services', ['exports'], function (exports) {
   'use strict';
@@ -2205,8 +2209,11 @@ define('up-signal/services/suppliers-service', ['exports', 'up-signal/services/b
 
     getAvgRating: function getAvgRating(id) {
       return this.ajax('GET', '/suppliers/' + id + '/average-rating');
-    }
+    },
 
+    getAllPackages: function getAllPackages() {
+      return this.ajax('GET', '/telekom-services');
+    }
   });
 });
 define('up-signal/services/telekom-http', ['exports'], function (exports) {
@@ -2281,7 +2288,7 @@ define("up-signal/templates/all-services", ["exports"], function (exports) {
   Object.defineProperty(exports, "__esModule", {
     value: true
   });
-  exports.default = Ember.HTMLBars.template({ "id": "+wIO3kXv", "block": "{\"statements\":[[11,\"div\",[]],[15,\"class\",\"list-top\"],[13],[0,\"\\n    \"],[11,\"p\",[]],[13],[0,\"PREGLED SVIH USLUGA\"],[14],[0,\"\\n\"],[14],[0,\"\\n\"],[11,\"div\",[]],[15,\"class\",\"list-top add-new\"],[13],[0,\"\\n\"],[6,[\"if\"],[[28,[\"session\",\"isAuthenticated\"]]],null,{\"statements\":[[6,[\"if\"],[[33,[\"diff\"],[[28,[\"session\",\"data\",\"authenticated\",\"user\",\"role\",\"name\"]],\"SERVICER\"],null]],null,{\"statements\":[[0,\"        \"],[6,[\"link-to\"],[\"new-service\"],null,{\"statements\":[[11,\"span\",[]],[15,\"class\",\"icon-add\"],[13],[11,\"i\",[]],[15,\"class\",\"glyphicon glyphicon-plus-sign\"],[13],[14],[14],[0,\" NOVA USLUGA\"]],\"locals\":[]},null],[0,\"\\n\"]],\"locals\":[]},null]],\"locals\":[]},null],[14],[0,\"\\n    \"],[11,\"div\",[]],[15,\"class\",\"container-supplier\"],[13],[0,\"\\n\"],[6,[\"each\"],[[28,[\"model\"]]],null,{\"statements\":[[0,\"        \"],[11,\"div\",[]],[15,\"class\",\"box box-service\"],[13],[0,\"\\n        \"],[11,\"span\",[]],[15,\"class\",\"icon-cont\"],[13],[11,\"i\",[]],[15,\"class\",\"glyphicon glyphicon-shopping-cart\"],[13],[14],[14],[0,\"\\n        \"],[11,\"h3\",[]],[13],[1,[28,[\"service\",\"serviceId\"]],false],[14],[0,\"\\n        \"],[11,\"div\",[]],[15,\"class\",\"details\"],[13],[0,\"\\n        \"],[11,\"p\",[]],[13],[0,\" \"],[11,\"b\",[]],[13],[0,\"Tip usluge:\"],[14],[0,\" \"],[1,[28,[\"service\",\"type\"]],false],[14],[0,\"\\n        \"],[11,\"p\",[]],[13],[0,\" \"],[11,\"b\",[]],[13],[0,\"Opis: \"],[14],[0,\" \"],[1,[28,[\"service\",\"description\"]],false],[14],[0,\"\\n        \"],[11,\"p\",[]],[13],[0,\" \"],[11,\"b\",[]],[13],[0,\"Odgovorna osoba: \"],[14],[1,[28,[\"service\",\"responsiblePerson\"]],false],[14],[0,\"\\n        \"],[11,\"p\",[]],[13],[0,\" \"],[11,\"i\",[]],[13],[0,\"Cijena se nalazi u glavnom cjenovniku\"],[14],[14],[0,\"\\n\\n\"],[6,[\"if\"],[[28,[\"session\",\"isAuthenticated\"]]],null,{\"statements\":[[0,\"            \"],[6,[\"if\"],[[33,[\"diff\"],[[28,[\"session\",\"data\",\"authenticated\",\"user\",\"role\",\"name\"]],\"SUPPLIER\"],null]],null,{\"statements\":[[0,\" \"],[11,\"br\",[]],[13],[14],[0,\"\\n                \"],[11,\"button\",[]],[15,\"class\",\"btn btn-default list-item-btn\"],[13],[0,\"Izmjena\"],[14],[0,\"\\n                \"],[11,\"button\",[]],[15,\"class\",\"btn btn-default list-item-btn\"],[5,[\"action\"],[[28,[null]],\"delete\",[28,[\"service\",\"id\"]]]],[13],[0,\"Deaktiviraj\"],[14],[11,\"br\",[]],[13],[14],[0,\"\\n\"]],\"locals\":[]},null]],\"locals\":[]},null],[0,\"        \"],[14],[0,\"\\n        \"],[14],[0,\"\\n\"]],\"locals\":[\"service\"]},null],[14],[0,\"\\n\"]],\"locals\":[],\"named\":[],\"yields\":[],\"hasPartials\":false}", "meta": { "moduleName": "up-signal/templates/all-services.hbs" } });
+  exports.default = Ember.HTMLBars.template({ "id": "5cB8C8x6", "block": "{\"statements\":[[11,\"div\",[]],[15,\"class\",\"list-top\"],[13],[0,\"\\n    \"],[11,\"p\",[]],[13],[0,\"PREGLED SVIH USLUGA\"],[14],[0,\"\\n\"],[14],[0,\"\\n\"],[6,[\"if\"],[[28,[\"session\",\"isAuthenticated\"]]],null,{\"statements\":[[0,\"    \"],[11,\"div\",[]],[15,\"class\",\"list-top add-new\"],[13],[0,\"\\n\"],[6,[\"if\"],[[33,[\"diff\"],[[28,[\"session\",\"data\",\"authenticated\",\"user\",\"role\",\"name\"]],\"SERVICER\"],null]],null,{\"statements\":[[0,\"        \"],[6,[\"link-to\"],[\"new-service\"],null,{\"statements\":[[11,\"span\",[]],[15,\"class\",\"icon-add\"],[13],[11,\"i\",[]],[15,\"class\",\"glyphicon glyphicon-plus-sign\"],[13],[14],[14],[0,\" NOVA USLUGA\"]],\"locals\":[]},null],[0,\"\\n\"]],\"locals\":[]},null],[0,\"    \"],[14],[0,\"\\n\"]],\"locals\":[]},null],[0,\"    \"],[11,\"div\",[]],[15,\"class\",\"container-supplier\"],[13],[0,\"\\n\"],[6,[\"each\"],[[28,[\"model\"]]],null,{\"statements\":[[0,\"        \"],[11,\"div\",[]],[15,\"class\",\"box box-service\"],[13],[0,\"\\n        \"],[11,\"span\",[]],[15,\"class\",\"icon-cont\"],[13],[11,\"i\",[]],[15,\"class\",\"glyphicon glyphicon-shopping-cart\"],[13],[14],[14],[0,\"\\n        \"],[11,\"h3\",[]],[13],[1,[28,[\"service\",\"serviceId\"]],false],[14],[0,\"\\n        \"],[11,\"div\",[]],[15,\"class\",\"details\"],[13],[0,\"\\n        \"],[11,\"p\",[]],[13],[0,\" \"],[11,\"b\",[]],[13],[0,\"Tip usluge:\"],[14],[0,\" \"],[1,[28,[\"service\",\"type\"]],false],[14],[0,\"\\n        \"],[11,\"p\",[]],[13],[0,\" \"],[11,\"b\",[]],[13],[0,\"Opis: \"],[14],[0,\" \"],[1,[28,[\"service\",\"description\"]],false],[14],[0,\"\\n        \"],[11,\"p\",[]],[13],[0,\" \"],[11,\"b\",[]],[13],[0,\"Odgovorna osoba: \"],[14],[1,[28,[\"service\",\"responsiblePerson\"]],false],[14],[0,\"\\n        \"],[11,\"p\",[]],[13],[0,\" \"],[11,\"i\",[]],[13],[0,\"Cijena se nalazi u glavnom cjenovniku\"],[14],[14],[0,\"\\n\\n\"],[6,[\"if\"],[[28,[\"session\",\"isAuthenticated\"]]],null,{\"statements\":[[0,\"            \"],[6,[\"if\"],[[33,[\"diff\"],[[28,[\"session\",\"data\",\"authenticated\",\"user\",\"role\",\"name\"]],\"SUPPLIER\"],null]],null,{\"statements\":[[0,\" \"],[11,\"br\",[]],[13],[14],[0,\"\\n                \"],[11,\"button\",[]],[15,\"class\",\"btn btn-default list-item-btn\"],[13],[0,\"Izmjena\"],[14],[0,\"\\n                \"],[11,\"button\",[]],[15,\"class\",\"btn btn-default list-item-btn\"],[5,[\"action\"],[[28,[null]],\"delete\",[28,[\"service\",\"id\"]]]],[13],[0,\"Deaktiviraj\"],[14],[11,\"br\",[]],[13],[14],[0,\"\\n\"]],\"locals\":[]},null]],\"locals\":[]},null],[0,\"        \"],[14],[0,\"\\n        \"],[14],[0,\"\\n\"]],\"locals\":[\"service\"]},null],[14],[0,\"\\n\"]],\"locals\":[],\"named\":[],\"yields\":[],\"hasPartials\":false}", "meta": { "moduleName": "up-signal/templates/all-services.hbs" } });
 });
 define("up-signal/templates/all-suppliers", ["exports"], function (exports) {
   "use strict";
@@ -2347,7 +2354,7 @@ define("up-signal/templates/components/main-navigation", ["exports"], function (
   Object.defineProperty(exports, "__esModule", {
     value: true
   });
-  exports.default = Ember.HTMLBars.template({ "id": "ybeg/87a", "block": "{\"statements\":[[11,\"nav\",[]],[15,\"class\",\"navbar navbar-default navbar-static-top main-navigation\"],[13],[0,\"\\n  \"],[11,\"div\",[]],[15,\"class\",\"container\"],[13],[0,\"\\n    \"],[11,\"div\",[]],[15,\"class\",\"collapse navbar-collapse\"],[15,\"id\",\"bs-example-navbar-collapse-8\"],[13],[0,\"\\n      \"],[11,\"img\",[]],[15,\"class\",\"logo\"],[15,\"src\",\"/assets/images/logo.png\"],[13],[14],[0,\"\\n      \"],[11,\"ul\",[]],[15,\"class\",\"nav navbar-nav pull-right main-navbar\"],[13],[0,\"\\n        \"],[11,\"li\",[]],[15,\"class\",\"nav-bar-list-item\"],[13],[6,[\"link-to\"],[\"homepage\"],null,{\"statements\":[[0,\"Početna\"]],\"locals\":[]},null],[14],[0,\"\\n        \"],[11,\"li\",[]],[15,\"class\",\"nav-bar-list-item\"],[13],[6,[\"link-to\"],[\"news\"],null,{\"statements\":[[0,\" Novosti \"]],\"locals\":[]},null],[14],[0,\"\\n        \"],[11,\"li\",[]],[15,\"class\",\"nav-bar-list-item\"],[13],[6,[\"link-to\"],[\"all-services\"],null,{\"statements\":[[0,\" Usluge \"]],\"locals\":[]},null],[14],[0,\"\\n\"],[6,[\"if\"],[[28,[\"session\",\"isAuthenticated\"]]],null,{\"statements\":[[0,\"        \"],[11,\"li\",[]],[15,\"class\",\"nav-bar-list-item\"],[13],[6,[\"link-to\"],[\"all-suppliers\"],null,{\"statements\":[[0,\" Dobavljači \"]],\"locals\":[]},null],[14],[0,\"\\n          \"],[11,\"li\",[]],[15,\"class\",\"nav-bar-list-item dropdown\"],[13],[0,\"\\n            \"],[11,\"a\",[]],[15,\"class\",\"dropdown-toggle\"],[15,\"data-toggle\",\"dropdown\"],[13],[0,\"Dobrodošao , \"],[11,\"b\",[]],[15,\"class\",\"user-logged\"],[13],[0,\" \"],[1,[28,[\"session\",\"data\",\"authenticated\",\"user\",\"username\"]],false],[14],[0,\" \"],[11,\"b\",[]],[15,\"class\",\"caret\"],[13],[14],[14],[0,\"\\n                \"],[11,\"ul\",[]],[15,\"class\",\"dropdown-menu\"],[13],[0,\"\\n                  \"],[11,\"li\",[]],[15,\"class\",\"nav-bar-list-item\"],[5,[\"action\"],[[28,[null]],\"logout\"]],[13],[0,\"\\n\"],[6,[\"link-to\"],[\"homepage\"],null,{\"statements\":[[0,\"                      Odjava\\n\"]],\"locals\":[]},null],[0,\"                  \"],[14],[0,\"\\n                \"],[14],[0,\"\\n            \"],[14],[0,\"\\n\"]],\"locals\":[]},{\"statements\":[[0,\"          \"],[11,\"li\",[]],[13],[6,[\"link-to\"],[\"login\"],null,{\"statements\":[[0,\" Prijava \"]],\"locals\":[]},null],[14],[0,\"\\n\"]],\"locals\":[]}],[0,\"      \"],[14],[0,\"\\n    \"],[14],[0,\"\\n  \"],[14],[0,\"\\n\"],[14]],\"locals\":[],\"named\":[],\"yields\":[],\"hasPartials\":false}", "meta": { "moduleName": "up-signal/templates/components/main-navigation.hbs" } });
+  exports.default = Ember.HTMLBars.template({ "id": "OqFo8Fh/", "block": "{\"statements\":[[11,\"nav\",[]],[15,\"class\",\"navbar navbar-default navbar-static-top main-navigation\"],[13],[0,\"\\n  \"],[11,\"div\",[]],[15,\"class\",\"container\"],[13],[0,\"\\n    \"],[11,\"div\",[]],[15,\"class\",\"collapse navbar-collapse\"],[15,\"id\",\"bs-example-navbar-collapse-8\"],[13],[0,\"\\n      \"],[11,\"img\",[]],[15,\"class\",\"logo\"],[15,\"src\",\"/assets/images/logo.png\"],[13],[14],[0,\"\\n      \"],[11,\"ul\",[]],[15,\"class\",\"nav navbar-nav pull-right main-navbar\"],[13],[0,\"\\n        \"],[11,\"li\",[]],[15,\"class\",\"nav-bar-list-item\"],[13],[6,[\"link-to\"],[\"homepage\"],null,{\"statements\":[[0,\"Početna\"]],\"locals\":[]},null],[14],[0,\"\\n        \"],[11,\"li\",[]],[15,\"class\",\"nav-bar-list-item\"],[13],[6,[\"link-to\"],[\"news\"],null,{\"statements\":[[0,\" Novosti \"]],\"locals\":[]},null],[14],[0,\"\\n        \"],[11,\"li\",[]],[15,\"class\",\"nav-bar-list-item\"],[13],[6,[\"link-to\"],[\"all-services\"],null,{\"statements\":[[0,\" Usluge \"]],\"locals\":[]},null],[14],[0,\"\\n        \"],[11,\"li\",[]],[15,\"class\",\"nav-bar-list-item\"],[13],[6,[\"link-to\"],[\"packages\"],null,{\"statements\":[[0,\" Paketi\"]],\"locals\":[]},null],[14],[0,\"\\n\"],[6,[\"if\"],[[28,[\"session\",\"isAuthenticated\"]]],null,{\"statements\":[[0,\"        \"],[11,\"li\",[]],[15,\"class\",\"nav-bar-list-item\"],[13],[6,[\"link-to\"],[\"all-suppliers\"],null,{\"statements\":[[0,\" Dobavljači \"]],\"locals\":[]},null],[14],[0,\"\\n          \"],[11,\"li\",[]],[15,\"class\",\"nav-bar-list-item dropdown\"],[13],[0,\"\\n            \"],[11,\"a\",[]],[15,\"class\",\"dropdown-toggle\"],[15,\"data-toggle\",\"dropdown\"],[13],[0,\"Dobrodošao , \"],[11,\"b\",[]],[15,\"class\",\"user-logged\"],[13],[0,\" \"],[1,[28,[\"session\",\"data\",\"authenticated\",\"user\",\"username\"]],false],[14],[0,\" \"],[11,\"b\",[]],[15,\"class\",\"caret\"],[13],[14],[14],[0,\"\\n                \"],[11,\"ul\",[]],[15,\"class\",\"dropdown-menu\"],[13],[0,\"\\n                  \"],[11,\"li\",[]],[15,\"class\",\"nav-bar-list-item\"],[5,[\"action\"],[[28,[null]],\"logout\"]],[13],[0,\"\\n\"],[6,[\"link-to\"],[\"homepage\"],null,{\"statements\":[[0,\"                      Odjava\\n\"]],\"locals\":[]},null],[0,\"                  \"],[14],[0,\"\\n                \"],[14],[0,\"\\n            \"],[14],[0,\"\\n\"]],\"locals\":[]},{\"statements\":[[0,\"          \"],[11,\"li\",[]],[13],[6,[\"link-to\"],[\"login\"],null,{\"statements\":[[0,\" Prijava \"]],\"locals\":[]},null],[14],[0,\"\\n\"]],\"locals\":[]}],[0,\"      \"],[14],[0,\"\\n    \"],[14],[0,\"\\n  \"],[14],[0,\"\\n\"],[14]],\"locals\":[],\"named\":[],\"yields\":[],\"hasPartials\":false}", "meta": { "moduleName": "up-signal/templates/components/main-navigation.hbs" } });
 });
 define("up-signal/templates/create-contract", ["exports"], function (exports) {
   "use strict";
@@ -2419,15 +2426,7 @@ define("up-signal/templates/packages", ["exports"], function (exports) {
   Object.defineProperty(exports, "__esModule", {
     value: true
   });
-  exports.default = Ember.HTMLBars.template({ "id": "ASuDpm4V", "block": "{\"statements\":[[1,[26,[\"outlet\"]],false],[0,\"\\n\"]],\"locals\":[],\"named\":[],\"yields\":[],\"hasPartials\":false}", "meta": { "moduleName": "up-signal/templates/packages.hbs" } });
-});
-define("up-signal/templates/service-packages", ["exports"], function (exports) {
-  "use strict";
-
-  Object.defineProperty(exports, "__esModule", {
-    value: true
-  });
-  exports.default = Ember.HTMLBars.template({ "id": "91Ecn9GI", "block": "{\"statements\":[[1,[26,[\"outlet\"]],false],[0,\"\\n\"]],\"locals\":[],\"named\":[],\"yields\":[],\"hasPartials\":false}", "meta": { "moduleName": "up-signal/templates/service-packages.hbs" } });
+  exports.default = Ember.HTMLBars.template({ "id": "5X94RD15", "block": "{\"statements\":[[11,\"div\",[]],[15,\"class\",\"list-top\"],[13],[0,\"\\n    \"],[11,\"p\",[]],[13],[0,\"PREGLED SVIH PAKETA\"],[14],[0,\"\\n\"],[14],[0,\"\\n\\n\"],[6,[\"if\"],[[28,[\"session\",\"isAuthenticated\"]]],null,{\"statements\":[[0,\"    \"],[11,\"div\",[]],[15,\"class\",\"list-top add-new\"],[13],[0,\"\\n\"],[6,[\"if\"],[[33,[\"diff\"],[[28,[\"session\",\"data\",\"authenticated\",\"user\",\"role\",\"name\"]],\"SERVICER\"],null]],null,{\"statements\":[[0,\"        \"],[6,[\"link-to\"],[\"new-service\"],null,{\"statements\":[[11,\"span\",[]],[15,\"class\",\"icon-add\"],[13],[11,\"i\",[]],[15,\"class\",\"glyphicon glyphicon-plus-sign\"],[13],[14],[14],[0,\" NOVI PAKET\"]],\"locals\":[]},null],[0,\"\\n\"]],\"locals\":[]},null],[0,\"    \"],[14],[0,\"\\n\"]],\"locals\":[]},null],[0,\"    \"],[11,\"div\",[]],[15,\"class\",\"container-supplier\"],[13],[0,\"\\n\"],[6,[\"each\"],[[28,[\"model\"]]],null,{\"statements\":[[0,\"        \"],[11,\"div\",[]],[15,\"class\",\"box box-service\"],[13],[0,\"\\n        \"],[11,\"span\",[]],[15,\"class\",\"icon-cont\"],[13],[11,\"i\",[]],[15,\"class\",\"glyphicon glyphicon-shopping-cart\"],[13],[14],[14],[0,\"\\n        \"],[11,\"h3\",[]],[13],[1,[28,[\"service\",\"serviceId\"]],false],[14],[0,\"\\n        \"],[11,\"div\",[]],[15,\"class\",\"details\"],[13],[0,\"\\n        \"],[11,\"p\",[]],[13],[0,\" \"],[11,\"b\",[]],[13],[0,\"Tip usluge:\"],[14],[0,\" \"],[1,[28,[\"service\",\"type\"]],false],[14],[0,\"\\n        \"],[11,\"p\",[]],[13],[0,\" \"],[11,\"b\",[]],[13],[0,\"Opis: \"],[14],[0,\" \"],[1,[28,[\"service\",\"description\"]],false],[14],[0,\"\\n        \"],[11,\"p\",[]],[13],[0,\" \"],[11,\"b\",[]],[13],[0,\"Odgovorna osoba: \"],[14],[1,[28,[\"service\",\"responsiblePerson\"]],false],[14],[0,\"\\n        \"],[11,\"p\",[]],[13],[0,\" \"],[11,\"i\",[]],[13],[0,\"Cijena se nalazi u glavnom cjenovniku\"],[14],[14],[0,\"\\n\\n\"],[6,[\"if\"],[[28,[\"session\",\"isAuthenticated\"]]],null,{\"statements\":[[0,\"            \"],[6,[\"if\"],[[33,[\"diff\"],[[28,[\"session\",\"data\",\"authenticated\",\"user\",\"role\",\"name\"]],\"SUPPLIER\"],null]],null,{\"statements\":[[0,\" \"],[11,\"br\",[]],[13],[14],[0,\"\\n                \"],[11,\"button\",[]],[15,\"class\",\"btn btn-default list-item-btn\"],[13],[0,\"Izmjena\"],[14],[0,\"\\n                \"],[11,\"button\",[]],[15,\"class\",\"btn btn-default list-item-btn\"],[5,[\"action\"],[[28,[null]],\"delete\",[28,[\"service\",\"id\"]]]],[13],[0,\"Deaktiviraj\"],[14],[11,\"br\",[]],[13],[14],[0,\"\\n\"]],\"locals\":[]},null]],\"locals\":[]},null],[0,\"        \"],[14],[0,\"\\n        \"],[14],[0,\"\\n\"]],\"locals\":[\"service\"]},null],[14],[0,\"\\n\"]],\"locals\":[],\"named\":[],\"yields\":[],\"hasPartials\":false}", "meta": { "moduleName": "up-signal/templates/packages.hbs" } });
 });
 define("up-signal/templates/services", ["exports"], function (exports) {
   "use strict";
@@ -2467,6 +2466,6 @@ catch(err) {
 });
 
 if (!runningTests) {
-  require("up-signal/app")["default"].create({"name":"up-signal","version":"0.0.0+0b76c06d"});
+  require("up-signal/app")["default"].create({"name":"up-signal","version":"0.0.0+05176dc0"});
 }
 //# sourceMappingURL=up-signal.map

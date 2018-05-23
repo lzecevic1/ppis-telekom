@@ -1,13 +1,13 @@
 <div class="list-top">
     <p>PREGLED SVIH USLUGA</p>
 </div>
-<div class="list-top add-new">
-    {{#if session.isAuthenticated}}
+{{#if session.isAuthenticated}}
+    <div class="list-top add-new">
       {{#if (diff session.data.authenticated.user.role.name "SERVICER")}}
         {{#link-to 'new-service'}}<span class="icon-add"><i class="glyphicon glyphicon-plus-sign"></i></span> NOVA USLUGA{{/link-to}}
       {{/if}}
-    {{/if}}
-</div>
+    </div>
+{{/if}}
     <div class="container-supplier">
     {{#each model as |service|}}
         <div class="box box-service">
