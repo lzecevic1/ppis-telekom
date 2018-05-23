@@ -1,7 +1,9 @@
 package ba.unsa.etf.ppis.telekom;
 
 import ba.unsa.etf.ppis.telekom.models.*;
+import ba.unsa.etf.ppis.telekom.models.Package;
 import ba.unsa.etf.ppis.telekom.services.*;
+import com.sun.xml.internal.bind.v2.runtime.reflect.Lister;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.stereotype.Component;
@@ -16,6 +18,8 @@ public class DbLoader implements CommandLineRunner {
     private UserService userService;
     @Autowired
     private RoleService roleService;
+    @Autowired
+    private PackageService packageService;
     @Autowired
     private ServiceForTelekomService serviceForTelekomService;
     @Autowired
@@ -35,6 +39,32 @@ public class DbLoader implements CommandLineRunner {
             role = new Role();
             role.setName("SUPPLIER");
             roleService.save(role);
+        }
+        if (packageService.count() == 0) {
+            Package p= new Package("DUO Grande","Paket ukljucuje 178 TV kanala, 26 HD kanala. \n " +
+                    "BESPLATNE NAPREDNE FUNKCIJE:\n" +
+                    "\n" +
+                    "Prezentacija broja pozivatelja\n" +
+                    "Poziv na čekanju\n" +
+                    "Brzo biranje\n" +
+                    "Preusmjeravanje poziva na drugi broj",  new BigDecimal(39.99));
+            packageService.save(p);
+            Package p1= new Package("TRIO Grande Silver","Paket ukljucuje 205 TV kanala, 38 HD kanala i" +
+                    " 77 radio kanala \n BESPLATNE NAPREDNE FUNKCIJE:\n" +
+                    "HBO paket \n" +
+                    "Prezentacija broja pozivatelja\n" +
+                    "Poziv na čekanju\n" +
+                    "Brzo biranje\n" +
+                    "Preusmjeravanje poziva na drugi broj",  new BigDecimal(49.99));
+            packageService.save(p1);
+            Package p2= new Package("TRIO Grande Gold","Paket ukljucuje 302 TV kanala, 55 HD kanala i" +
+                    " 77 radio kanala \n BESPLATNE NAPREDNE FUNKCIJE:\n" +
+                    "HBO paket \n" +
+                    "Prezentacija broja pozivatelja\n" +
+                    "Poziv na čekanju\n" +
+                    "Brzo biranje\n" +
+                    "Preusmjeravanje poziva na drugi broj",  new BigDecimal(59.99));
+            packageService.save(p2);
         }
         if (userService.count() == 0) {
 

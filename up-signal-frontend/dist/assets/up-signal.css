@@ -9366,6 +9366,9 @@ body {
 .box-service {
   height: 465px !important; }
 
+.box-package {
+  height: 505px !important; }
+
 .box {
   width: 24%;
   height: 420px;

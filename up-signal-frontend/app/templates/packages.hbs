@@ -10,15 +10,14 @@
     </div>
 {{/if}}
     <div class="container-supplier">
-    {{#each model as |service|}}
-        <div class="box box-service">
-        <span class="icon-cont"><i class="glyphicon glyphicon-shopping-cart"></i></span>
-        <h3>{{service.serviceId}}</h3>
+    {{#each model as |package|}}
+        <div class="box box-package">
+        <span class="icon-cont"><i class="glyphicon glyphicon-hdd"></i></span>
+        <h3>{{package.name}}</h3>
         <div class = "details">
-        <p> <b>Tip usluge:</b> {{service.type}}</p>
-        <p> <b>Opis: </b> {{service.description}}</p>
-        <p> <b>Odgovorna osoba: </b>{{service.responsiblePerson}}</p>
-        <p> <i>Cijena se nalazi u glavnom cjenovniku</i></p>
+        <p> <b>Opis: </b> {{package.description}}</p>
+        <p> <b>Cijena: </b>{{package.price}} KM</p>
+        <p> <i>Više detalja u glavnom cjenovniku</i></p>
 
         {{#if session.isAuthenticated}}
             {{#if (diff session.data.authenticated.user.role.name "SUPPLIER")}} <br>
@@ -30,3 +29,5 @@
         </div>
         {{/each}}
 </div>
+
+{{log model}}

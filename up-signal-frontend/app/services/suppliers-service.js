@@ -79,7 +79,7 @@ export default BaseHttpService.extend({
   },
 
   getAllPackages() {
-    return this.ajax('GET', '/telekom-services');
+    return this.ajax('GET', '/packages');
   },
 
 });
