@@ -28,6 +28,7 @@
 
     <div class="container-supplier">
     {{#each model as |supplier|}}
+      {{#if (eq supplier.status "Aktivan")}}
       <div class="box first">
         <span class="icon-cont"><i class="glyphicon glyphicon-user"></i></span>
         <h3>{{supplier.name}}</h3>
@@ -38,7 +39,8 @@
         {{#if session.isAuthenticated}}
             {{#if (diff session.data.authenticated.user.role.name "SERVICER")}}
                <br> <button class="btn btn-default list-item-btn" {{action "createContract" supplier.id}}>Novi Ugovor</button>
-                <button class="btn btn-default list-item-btn" {{action "delete" supplier.id}}>Deaktiviraj</button><br><br>
+              <br> <button class="btn btn-default list-item-btn" {{action "deactivateSupplier" supplier.id}}>Deaktiviraj</button>
+              <button class="btn btn-default list-item-btn" {{action "delete" supplier.id}}>Deaktiviraj</button><br><br>
                 {{star-rating
                     readOnly = true
                     rating = supplier.avgRating
@@ -48,5 +50,6 @@
         {{/if}}
         </div>
     </div>
+  {{/if}}
 {{/each}}
 </div>
