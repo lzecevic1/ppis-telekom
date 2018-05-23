@@ -9528,6 +9528,20 @@ body {
   opacity: 1;
   margin-top: 95px; }
 
+.icon-add {
+  color: white; }
+
+.add-new {
+  color: white;
+  width: 300px;
+  font-size: 16px !important;
+  height: auto;
+  border-bottom-right-radius: 15px;
+  border-bottom-left-radius: 15px; }
+
+.add-new a {
+  color: white; }
+
 #fullBg {
   z-index: -1;
   height: 100%;

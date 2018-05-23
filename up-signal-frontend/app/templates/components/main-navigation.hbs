@@ -5,15 +5,15 @@
       <ul class="nav navbar-nav pull-right main-navbar">
         <li class="nav-bar-list-item">{{#link-to 'homepage'}}Početna{{/link-to}}</li>
         <li class="nav-bar-list-item">{{#link-to 'news'}} Novosti {{/link-to}}</li>
-        <li class="nav-bar-list-item">{{#link-to 'services'}} Usluge {{/link-to}}</li>
+        <li class="nav-bar-list-item">{{#link-to 'all-services'}} Usluge {{/link-to}}</li>
         {{!-- <li>{{#link-to 'packages'}} PAKETI{{/link-to}}</li> --}}
         {{#if session.isAuthenticated}}
-        <li class="nav-bar-list-item">{{#link-to 'suppliers'}} Dobavljači {{/link-to}}</li>
+        <li class="nav-bar-list-item">{{#link-to 'all-suppliers'}} Dobavljači {{/link-to}}</li>
           <li class="nav-bar-list-item dropdown">
             <a class="dropdown-toggle" data-toggle="dropdown">Dobrodošao , <b class="user-logged"> {{session.data.authenticated.user.username}}</b> <b class="caret"></b></a>
                 <ul class="dropdown-menu">
                   <li {{action 'logout'}} class="nav-bar-list-item">
-                    {{#link-to 'homepage'}} 
+                    {{#link-to 'homepage'}}
                       Odjava
                     {{/link-to}}
                   </li>
