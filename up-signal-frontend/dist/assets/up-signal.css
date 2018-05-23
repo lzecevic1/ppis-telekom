@@ -9542,6 +9542,29 @@ body {
 .add-new a {
   color: white; }
 
+.add-new-supplier a {
+  color: white; }
+
+.add-new-supplier {
+  color: white;
+  width: 320px;
+  height: 125px !important;
+  font-size: 16px !important;
+  height: auto;
+  border-bottom-right-radius: 15px;
+  border-bottom-left-radius: 15px;
+  display: inline-block; }
+
+.form-check-label {
+  font-weight: 400;
+  font-size: 14px; }
+
+.select-sort {
+  width: 200px;
+  margin: auto;
+  display: inline-block;
+  margin-left: 30px; }
+
 #fullBg {
   z-index: -1;
   height: 100%;

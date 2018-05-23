@@ -13,7 +13,7 @@ export default Ember.Controller.extend(SweetAlertMixin,{
  session: Ember.inject.service('session'),
 
  avgRating: 0.0,
- 
+
  actions: {
   delete: function(supplierId) {
     let sweetAlert = this.get('sweetAlert');
@@ -41,6 +41,12 @@ export default Ember.Controller.extend(SweetAlertMixin,{
     this.get('_supplierService').addRating(supplierId).then(()=>{
       this.get('target.router').refresh();
     })
+  },
+  showActive: function() {
+    //poziv backenda
+  },
+  selectSort: function (value) {
+    //to be implemented
   },
   rateSupplier: function(supplierId) {
     let sweetAlert = this.get('sweetAlert');
@@ -72,7 +78,7 @@ export default Ember.Controller.extend(SweetAlertMixin,{
         '<textarea  class="form-control">'+
         '</textarea>'+
       '</div>',
-    
+
       confirmButtonText: 'Ocjeni',
       showCancelButton: true,
       cancelButtonText: 'Odustani',
