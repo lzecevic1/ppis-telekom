@@ -87,5 +87,12 @@ export default BaseHttpService.extend({
   },
   deactivateService(id) {
     return this.ajax('POST', `/telekom-services/${id}/deactivate`);
+  },
+  getSuppliers(status) {
+    return this.ajax('GET', '/suppliers/filter/by-status?status=' + status);
+  },
+  getSortedSuppliers(ratingType) {
+    return this.ajax('GET', '/suppliers/sort/by-rating?ratingType=' + ratingType);
   }
+
 });

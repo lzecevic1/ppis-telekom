@@ -134,7 +134,6 @@ public class DbLoader implements CommandLineRunner {
             product.setCategory(Product.ProductCategory.DEVICE);
             product.setName("Računari");
             product.setPrice(new BigDecimal(200));
-            product.
             supplier = new Supplier();
             supplier.setName("Cisco");
             supplier.setAddress("Mozart street, Vienna, AUS");

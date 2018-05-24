@@ -29,6 +29,10 @@ export default Ember.Route.extend(SweetAlertMixin, {
     onNext: function () {
       let sweetAlert = this.get('sweetAlert');
       this.controller.set('model.supplierId',this.get('id'));
+      let supplierId = this.get('_contractService').get('supplierId');
+      console.log("SUPPLIER ID : " + supplierId);
+      this.controller.set('model.supplierId', supplierId);
+      console.log(this.controller.get('model'));
       this.get('_contractService').addContract(this.controller.get('model'))
          .then(()=>{
            sweetAlert({
@@ -36,7 +40,14 @@ export default Ember.Route.extend(SweetAlertMixin, {
              confirmButtonText: 'OK',
              type: 'success'
            }).then((confirm)=>this.transitionTo('all-suppliers'));
-         })
+         }),
+         function(reason){
+           sweetAlert({
+             title: 'Niste unijeli sve potrebne podatke',
+             confirmButtonText: 'OK',
+             type: 'error'
+           })
+        }
     },
   }
 });

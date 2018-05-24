@@ -8,6 +8,7 @@ const {
 
 export default LoginRoute.extend({
   _supplierService: service('suppliers-service'),
+  _contractService: service('contract-service'),
 
   beforeModel(transition)
   {
@@ -22,6 +23,7 @@ export default LoginRoute.extend({
   actions: {
 
   createContract: function(id) {
+    this.get('_contractService').setCurrentSupplier(id);
     this.transitionTo('new-contract', id);
   }
 

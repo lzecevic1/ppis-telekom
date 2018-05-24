@@ -15,19 +15,19 @@
   </div>
     <div class="form-group">
       <label>Cijena (KM)</label>
-      <input type="number" name="broj" value="230" class="form-control">
+      {{input type="number" class="form-control" id="price" value=model.price}}
     </div>
     <div class="form-group">
       <label>Adresa dostave</label>
-      <input class="form-control" type="text">
+      {{input type="text" class="form-control" id="deliveryAddress" value=model.deliveryAddress}}
     </div>
     <div class="form-group">
       <label>Rok isplate</label>
-      <input type="date" class="form-control">
+      {{input type="date" class="form-control" id="dueDatePayment" value=model.dueDatePayment}}
     </div>
     <div class="form-group">
       <label>Rok dostave (broj dana)</label>
-      <input type="number" class="form-control">
+      {{input type="number" class="form-control" id="dueDateDelivery" value=model.dueDateDelivery}}
     </div>
     <div class="form-group">
     <label>Ime odgovorne osobe:</label>
