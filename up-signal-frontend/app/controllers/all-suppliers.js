@@ -16,7 +16,7 @@ export default Ember.Controller.extend(SweetAlertMixin,{
  avgRating: 0.0,
 
  actions: {
-  delete: function(supplierId) {
+  deactivateSupplier: function(supplierId) {
     let sweetAlert = this.get('sweetAlert');
         sweetAlert({
             title: 'Jeste li sigurni da želite deaktivirati dobavljača',
@@ -30,7 +30,7 @@ export default Ember.Controller.extend(SweetAlertMixin,{
                 confirmButtonText: 'OK',
                 type: 'success'
             }).then((confirm)=>{
-              this.get('_supplierService').deleteSupplier(supplierId).then(()=>{
+              this.get('_supplierService').deactivateSupplier(supplierId).then(()=>{
                 this.set('supplierId', null);
                 this.get('target.router').refresh();  
               })
@@ -49,12 +49,17 @@ export default Ember.Controller.extend(SweetAlertMixin,{
       this.get('_supplierService').getSuppliers('Aktivan').then((response) => {
         this.get('model').clear();
         this.get('model').pushObjects(response);
+        console.log("AKTIVAN");
+        console.log(response);
       });
     }
     else {
       this.get('_supplierService').getAllSuppliers().then((response) => {
         this.get('model').clear();
         this.get('model').pushObjects(response);
+        console.log("NEAKTIVAN");
+        console.log(response);
+
       });
     }
 
@@ -66,11 +71,6 @@ export default Ember.Controller.extend(SweetAlertMixin,{
       this.get('model').pushObjects(response);
     })
   },
-
-   deactivateSupplier: function(supplierId) {
-     this.get('_supplierService').deactivateSupplier(supplierId)
-       .then(()=>  this.get('target.router').refresh());
-   },
 
   rateSupplier: function(supplierId) {
     let sweetAlert = this.get('sweetAlert');

@@ -4,13 +4,14 @@
 
  {{#if session.isAuthenticated}}
     <div class="list-top add-new">
-      {{#if (diff session.data.authenticated.user.role.name "SERVICER")}}
-        {{#link-to 'new-service'}}<span class="icon-add"><i class="glyphicon glyphicon-plus-sign"></i></span> NOVI PAKET{{/link-to}}
+      {{#if (diff session.data.authenticated.user.role.name "SUPPLIER")}}
+        {{#link-to 'new-package'}}<span class="icon-add"><i class="glyphicon glyphicon-plus-sign"></i></span> NOVI PAKET{{/link-to}}
       {{/if}}
     </div>
 {{/if}}
     <div class="container-supplier">
     {{#each model as |package|}}
+        {{#if (eq package.status "Aktivan")}}
         <div class="box box-package">
         <span class="icon-cont"><i class="glyphicon glyphicon-hdd"></i></span>
         <h3>{{package.name}}</h3>
@@ -22,12 +23,13 @@
         {{#if session.isAuthenticated}}
             {{#if (diff session.data.authenticated.user.role.name "SUPPLIER")}} <br>
                 <button class="btn btn-default list-item-btn">Izmjena</button>
-                <button class="btn btn-default list-item-btn" {{action "delete" service.id}}>Deaktiviraj</button><br>
+                <button class="btn btn-default list-item-btn" {{action "deactivatePackage" package.id}}>Deaktiviraj</button><br>
             {{/if}}
         {{/if}}
         </div>
         </div>
-        {{/each}}
+    {{/if}}
+    {{/each}}
 </div>
 
 {{log model}}

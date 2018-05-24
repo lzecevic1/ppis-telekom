@@ -7,13 +7,24 @@ import java.util.Collection;
 @Entity
 public class Package {
 
+    public PackageStatus getStatus() {
+        return status;
+    }
+
+    public void setStatus(PackageStatus status) {
+        this.status = status;
+    }
+
+    public enum PackageStatus {Aktivan, Neaktivan};
+
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
-
     private String name;
     private String description;
     private BigDecimal price;
+    private PackageStatus status;
+
 
     @ManyToMany(cascade = CascadeType.ALL)
     @JoinTable(
@@ -30,6 +41,8 @@ public class Package {
         this.name = name;
         this.description = description;
         this.price = price;
+        this.status = PackageStatus.Aktivan;
+
     }
 
     public Long getId() {

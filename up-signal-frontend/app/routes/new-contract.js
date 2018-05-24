@@ -40,14 +40,14 @@ export default Ember.Route.extend(SweetAlertMixin, {
              confirmButtonText: 'OK',
              type: 'success'
            }).then((confirm)=>this.transitionTo('all-suppliers'));
-         }),
+         },
          function(reason){
            sweetAlert({
              title: 'Niste unijeli sve potrebne podatke',
              confirmButtonText: 'OK',
              type: 'error'
            })
-        }
+        })
     },
   }
 });

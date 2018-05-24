@@ -9,10 +9,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
-import java.util.Date;
 import java.util.Optional;
 
 @RestController
@@ -26,8 +24,8 @@ public class ContractController extends BaseController<Contract, ContractService
 
     public ResponseEntity create(@RequestBody ContractDTO contractDTO) {
         Optional<Supplier> supplier = supplierService.getById(contractDTO.supplierId);
-        Contract contract = new Contract(contractDTO.startDate, contractDTO.endDate, contractDTO.responsiblePerson,
-                supplier.get(), true);
+        Contract contract = new Contract(contractDTO.startDate, contractDTO.endDate, contractDTO.price,
+                contractDTO.deliveryAddress, contractDTO.dueDatePayment, contractDTO.dueDateDelivery,contractDTO.responsiblePerson, supplier.get(), true);
         contractService.save(contract);
         return ResponseEntity.ok().build();
     }

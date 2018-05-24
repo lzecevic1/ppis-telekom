@@ -21,6 +21,7 @@ Router.map(function() {
   this.route('new-contract', { path: '/:id/new-contract'});
   this.route('all-contracts');
   this.route('price-list');
+  this.route('new-package');
 });
 
 export default Router;

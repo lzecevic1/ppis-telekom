@@ -77,11 +77,6 @@ export default BaseHttpService.extend({
   getAvgRating: function(id) {
     return this.ajax('GET', `/suppliers/${id}/average-rating`);
   },
-
-  getAllPackages() {
-    return this.ajax('GET', '/packages');
-  },
-
   deactivateSupplier(id) {
     return this.ajax('POST', `/suppliers/${id}/deactivate`);
   },
