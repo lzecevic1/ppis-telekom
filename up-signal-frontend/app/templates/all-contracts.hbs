@@ -1,0 +1,40 @@
+<div class="list-top">
+    <p>PREGLED SVIH UGOVORA</p>
+</div>
+<br>
+<br>
+<div class="container">
+  <div class="row">
+    <div class="col-md-12">
+      <table class="table">
+    <thead>
+      <tr>
+        <th>Dobavljac</th>
+        <th>Datum potpisivanja</th>
+        <th>Odgovorna osoba</th>
+        <th>Status</th>
+        <th>Akcije</th>
+      </tr>
+    </thead>
+    <tbody>
+      {{#each model as |contract|}}
+        <tr>
+          <td>{{contract.supplier.name}}</td>
+          <td>{{contract.startDateString}}</td>
+          <td>{{contract.responsiblePerson}}</td>
+          {{#if contract.active}}
+            <td>Aktivan</td>
+            <td><button class="btn btn-default" {{action 'deactivateContract' contract.id}}>Raskini ugovor</button></td>
+          {{else}}
+            <td>Neaktivan</td>
+            <td><button class="btn btn-default" {{action 'deleteContract' contract.id}}>Obrisi ugovor</button></td>
+          {{/if}}
+        </tr>
+      {{else}}
+        <h3>Trenutno ne postoji niti jedan ugovor</h3>
+      {{/each}}
+    </tbody>
+  </table>
+    </div>
+  </div>
+</div>

@@ -1,14 +1,14 @@
 import Ember from 'ember';
-import LoginRoute from './login';
-
+import SweetAlertMixin from 'ember-sweetalert/mixins/sweetalert-mixin';
 const {
   inject: {
     service
   }
 } = Ember;
 
-export default LoginRoute.extend({
+export default Ember.Route.extend(SweetAlertMixin, {
   _contractService: service('contract-service'),
+  session: Ember.inject.service('session'),
   id: null,
 
   model: function (transition) {
@@ -27,10 +27,27 @@ export default LoginRoute.extend({
   },
   actions: {
     onNext: function () {
+      let sweetAlert = this.get('sweetAlert');
       this.controller.set('model.supplierId',this.get('id'));
+      let supplierId = this.get('_contractService').get('supplierId');
+      console.log("SUPPLIER ID : " + supplierId);
+      this.controller.set('model.supplierId', supplierId);
       console.log(this.controller.get('model'));
       this.get('_contractService').addContract(this.controller.get('model'))
-         .then(()=> this.transitionTo('homepage'));
+         .then(()=>{
+           sweetAlert({
+             title: 'Uspješno kreiran novi ugovor',
+             confirmButtonText: 'OK',
+             type: 'success'
+           }).then((confirm)=>this.transitionTo('all-suppliers'));
+         },
+         function(reason){
+           sweetAlert({
+             title: 'Niste unijeli sve potrebne podatke',
+             confirmButtonText: 'OK',
+             type: 'error'
+           })
+        })
     },
   }
 });

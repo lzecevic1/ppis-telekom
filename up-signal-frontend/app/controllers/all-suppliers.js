@@ -9,15 +9,16 @@ const {
 
 export default Ember.Controller.extend(SweetAlertMixin,{
  _supplierService: service('suppliers-service'),
+ _ratingService: service('rating-service'),
  supplierId: null,
+ isChecked: false,
  session: Ember.inject.service('session'),
 
  avgRating: 0.0,
 
  actions: {
-  delete: function(supplierId) {
+  deactivateSupplier: function(supplierId) {
     let sweetAlert = this.get('sweetAlert');
-    this.get('_supplierService').deleteSupplier(supplierId).then(()=>{
         sweetAlert({
             title: 'Jeste li sigurni da želite deaktivirati dobavljača',
             confirmButtonText: 'Da',
@@ -30,36 +31,62 @@ export default Ember.Controller.extend(SweetAlertMixin,{
                 confirmButtonText: 'OK',
                 type: 'success'
             }).then((confirm)=>{
-              this.set('supplierId', null);
-              this.get('target.router').refresh();
+              this.get('_supplierService').deactivateSupplier(supplierId).then(()=>{
+                this.set('supplierId', null);
+                this.get('target.router').refresh();  
+              })
               })
         })
-    });
     },
 
     readRatingsSupplier: function(supplierId) {
     this.get('_supplierService').addRating(supplierId).then(()=>{
       this.get('target.router').refresh();
     })
-  },
+    },
   showActive: function() {
-    //poziv backenda
+    this.set('isChecked', !this.isChecked);
+    if (this.isChecked) {
+      this.get('_supplierService').getSuppliers('Aktivan').then((response) => {
+        this.get('model.supplier').clear();
+        this.get('model.supplier').pushObjects(response);
+        console.log("AKTIVAN");
+        console.log(response);
+      });
+    }
+    else {
+      this.get('_supplierService').getAllSuppliers().then((response) => {
+        this.get('model.supplier').clear();
+        this.get('model.supplier').pushObjects(response);
+        console.log("NEAKTIVAN");
+        console.log(response);
+
+      });
+    }
+
   },
   selectSort: function (value) {
-    //to be implemented
+    console.log("Select sort");
+    this.get('_supplierService').getSortedSuppliers(value).then( (response) => {
+      this.get('model.supplier').clear();
+      this.get('model.supplier').pushObjects(response);
+    })
   },
+
   rateSupplier: function(supplierId) {
     let sweetAlert = this.get('sweetAlert');
     let sweetAlertMixin = this.get('SweetAlertMixin');
+    let categoryQuality = "Kvalitet";
+    let categoryDeliverySpeed = "Brzina isporuke";
+    let categoryCommunication = "Komunikacija";
     sweetAlert({
       html:
       '<div class="form-group">'+
       '<label for="exampleFormControlSelect1">Kategorija ocjenjivanja:</label>'+
       '<select class="form-control" id="categoryRating">'+
-        '<option value="0">Kvalitet</option>'+
-        '<option value="1">Brzina isporuke</option>'+
-        '<option value="2">Komunikacija</option>'+
-        '<option value="3">Mobilna telefonija</option>'+
+        '<option value="0">'+categoryQuality+'</option>'+
+        '<option value="1">'+categoryDeliverySpeed+'</option>'+
+        '<option value="2">'+categoryCommunication+'Komunikacija</option>'+
       '</select>'+
       '</div>'+
       '<div class="form-group">'+
@@ -72,7 +99,6 @@ export default Ember.Controller.extend(SweetAlertMixin,{
         '<option value="4">5</option>'+
       '</select>'+
       '</div>'+
-
       '<div class="form-group">'+
         '<label> Komentar </label>'+
         '<textarea  class="form-control">'+

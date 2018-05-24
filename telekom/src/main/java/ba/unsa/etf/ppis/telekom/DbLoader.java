@@ -3,7 +3,6 @@ package ba.unsa.etf.ppis.telekom;
 import ba.unsa.etf.ppis.telekom.models.*;
 import ba.unsa.etf.ppis.telekom.models.Package;
 import ba.unsa.etf.ppis.telekom.services.*;
-import com.sun.xml.internal.bind.v2.runtime.reflect.Lister;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.stereotype.Component;
@@ -26,6 +25,8 @@ public class DbLoader implements CommandLineRunner {
     private SupplierService supplierService;
     @Autowired
     private RatingService ratingService;
+    @Autowired
+    private ProductService productService;
 
     @Override
     public void run(String... args) throws Exception {
@@ -129,7 +130,10 @@ public class DbLoader implements CommandLineRunner {
             rating.setRating(5.0f);
             rating.setSupplier(supplier);
             ratingService.save(rating);
-
+            Product product = new Product();
+            product.setCategory(Product.ProductCategory.DEVICE);
+            product.setName("Računari");
+            product.setPrice(new BigDecimal(200));
             supplier = new Supplier();
             supplier.setName("Cisco");
             supplier.setAddress("Mozart street, Vienna, AUS");

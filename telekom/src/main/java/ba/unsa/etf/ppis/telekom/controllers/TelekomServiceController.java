@@ -5,11 +5,10 @@ import ba.unsa.etf.ppis.telekom.controllers.dto.TelekomServiceUpdateDTO;
 import ba.unsa.etf.ppis.telekom.models.TelekomService;
 import ba.unsa.etf.ppis.telekom.services.ServiceForTelekomService;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.PathVariable;
-import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
 
 import javax.validation.Valid;
+import java.util.Optional;
 
 @RestController
 public class TelekomServiceController extends BaseController<TelekomService, ServiceForTelekomService> {
@@ -25,5 +24,14 @@ public class TelekomServiceController extends BaseController<TelekomService, Ser
         service.updateService(id, telekomServiceUpdateDTO);
         return ResponseEntity.ok().build();
     }
+
+    public void deactivate(@PathVariable("id") Long id) {
+        Optional<TelekomService> telekomService = service.getById(id);
+        if(telekomService.isPresent()) {
+            telekomService.get().setServiceStatus(TelekomService.ServiceStatus.Neaktivan);
+            service.save(telekomService.get());
+        }
+    }
+
 
 }

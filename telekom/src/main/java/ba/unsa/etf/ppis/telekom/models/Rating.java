@@ -9,7 +9,7 @@ import java.util.Date;
 @Entity
 public class Rating {
 
-    public enum RatingType{DELIVERY_SPEED, COMMUNICATION}
+    public enum RatingType{QUALITY, DELIVERY_SPEED, COMMUNICATION, OVERALL_RATING}
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)

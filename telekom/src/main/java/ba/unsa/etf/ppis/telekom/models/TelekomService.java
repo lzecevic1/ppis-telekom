@@ -10,8 +10,10 @@ import java.util.Collection;
 @Table(name = "service")
 public class TelekomService {
 
+
     public enum ServicePriority {MISSION_CRITICAL, BUSSINESS_CRITICAL, BUSSINESS_OPERATIONAL, ADMINISTRATIVE_SERVICES}
     public enum ServiceType {CABLE_TV, iNTERNET, DEVICE, TELEPHONY}
+    public enum ServiceStatus {Aktivan, Neaktivan}
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
@@ -24,6 +26,7 @@ public class TelekomService {
     private Integer numRenewedContracts;
     private Integer numCancelledContracts;
     private Integer numActiveContracts;
+    private ServiceStatus serviceStatus;
 
     @JsonIgnore
     @ManyToMany(
@@ -54,6 +57,7 @@ public class TelekomService {
         this.numRenewedContracts = numRenewedContracts;
         this.numCancelledContracts = numCancelledContracts;
         this.numActiveContracts = numActiveContracts;
+        this.serviceStatus = ServiceStatus.Aktivan;
     }
 
     public TelekomService(ServiceType serviceType, String description, String responsiblePerson, BigDecimal price,
@@ -65,6 +69,7 @@ public class TelekomService {
         this.priority = servicePriority;
         this.responsiblePerson = responsiblePerson;
         this.serviceId = serviceId;
+        this.serviceStatus = ServiceStatus.Aktivan;
     }
 
     public Long getId() {
@@ -169,6 +174,14 @@ public class TelekomService {
 
     public void setUnavailablityPeriods(Collection<ServiceUnavailablityPeriod> unavailablityPeriods) {
         this.unavailablityPeriods = unavailablityPeriods;
+    }
+
+    public ServiceStatus getServiceStatus() {
+        return serviceStatus;
+    }
+
+    public void setServiceStatus(ServiceStatus serviceStatus) {
+        this.serviceStatus = serviceStatus;
     }
 
     public Collection<News> getNews() {

@@ -7,9 +7,10 @@ const {
 } = Ember;
 
 export default Ember.Route.extend({
-  _supplierService: service('suppliers-service'),
+  _packageService: service('package-service'),
+  session: Ember.inject.service(),
   model() {
-    return this.get('_supplierService').getAllPackages() || {};
+    return this.get('_packageService').getAllPackages() || {};
   },
 
   actions: {

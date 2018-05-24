@@ -3,12 +3,17 @@ import BaseHttpService from './base-http-service';
 
 export default BaseHttpService.extend({
 	currentContract: null,
-	newContract: null,
+  newContract: null,
+  currSupplierId: null,
 
   createContract() {
     let newContract = Ember.Object.create({
       startDate: '',
       endDate: '',
+      price: 0,
+      deliveryAddress:'',
+      dueDatePayment: '',
+      dueDateDelivery: 0,
       responsiblePerson: '',
       supplierId: '',
     });
@@ -30,5 +35,13 @@ export default BaseHttpService.extend({
 
   deleteContract: function (id) {
     return this.ajax('DELETE', `/contracts/${id}`);
+  },
+
+  setCurrentSupplier: function(supplierId) {
+    this.set('supplierId', supplierId);
+  },
+
+  deactivateContract: function(contractId) {
+    return this.ajax('GET', `/contracts/${contractId}/deactivate`);
   }
 });
