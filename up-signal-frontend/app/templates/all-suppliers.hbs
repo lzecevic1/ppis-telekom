@@ -1,6 +1,31 @@
 <div class="list-top">
-    <p>PREGLED SVIH DOBAVLJACA</p>
+    <p>PREGLED SVIH DOBAVLJACA
+</p>
 </div>
+<div class="row">
+<div class="list-top add-new-supplier">
+    {{#if session.isAuthenticated}}
+      {{#if (diff session.data.authenticated.user.role.name "SERVICER")}}
+        {{#link-to 'new-supplier'}}<span class="icon-add"><i class="glyphicon glyphicon-plus-sign"></i></span> DODAJ DOBAVLJACA{{/link-to}}
+      {{/if}}
+    {{/if}} <br>
+    <div class="form-check">
+    {{input type='checkbox' checked=isChecked change=(action 'showActive')}}  <label class="form-check-label" for="defaultCheck1">
+    Dobavljaci sa aktivnim ugovorima
+    </label>
+
+    </div>
+    </div> <div class="form-group select-sort">
+        <label  class="form-check-label" for="exampleFormControlSelect2">Sortiraj po:</label>
+        <select class="form-control " id="exampleFormControlSelect2" onchange={{action "selectSort" value="target.value"}}>
+          <option value="0">Kvalitet</option>
+          <option value="1">Brzina isporuke</option>
+          <option value="2">Komunikacija</option>
+          <option value="3">Sveukupna ocjena</option>
+        </select>
+    </div>
+</div>
+
     <div class="container-supplier">
     {{#each model as |supplier|}}
       <div class="box first">
@@ -13,33 +38,15 @@
         {{#if session.isAuthenticated}}
             {{#if (diff session.data.authenticated.user.role.name "SERVICER")}}
                <br> <button class="btn btn-default list-item-btn" {{action "createContract" supplier.id}}>Novi Ugovor</button>
-                <button class="btn btn-default list-item-btn" {{action "setSupplierToDelete" supplier.id}}>Brisanje</button><br><br>
+                <button class="btn btn-default list-item-btn" {{action "delete" supplier.id}}>Deaktiviraj</button><br><br>
                 {{star-rating
-                    onClick=(action 'rateSupplier' supplier.id )
+                    readOnly = true
+                    rating = supplier.averageRating
                 }}
+                <button class="btn btn-default list-item-btn" {{action "rateSupplier" supplier.id}}>Ocjeni</button>
             {{/if}}
         {{/if}}
         </div>
     </div>
 {{/each}}
 </div>
-<div class="row">
-	<div class="col-md-2 col-md-offset-5">
-    {{#link-to 'all-contracts'}}
-         <button class="btn btn-default list-item-btn suppliers-button">Svi ugovori</button>
-     {{/link-to}}
-  </div>
-</div>
-
-{{#bs-modal-simple
-    title="Potvrda"
-    closeTitle="Ne"
-    submitTitle="Da"
-    autoClose=true
-    size=null
-    fade=false
-    open=supplierId
-    onSubmit=(action "delete" supplierId)
-    onHide=(action "cancelDeleting")}}
-    Da li ste sigurni da zelite izbrisati ovog dobavljaca?
-{{/bs-modal-simple}}

@@ -1,6 +1,7 @@
 {
   "name": "up-signal",
   "dependencies": {
-    "selectize": "miguelcobain/selectize.js#master"
+    "selectize": "miguelcobain/selectize.js#master",
+    "sweetalert2": "^6.1.0"
   }
 }
