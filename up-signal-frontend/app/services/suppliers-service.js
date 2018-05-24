@@ -13,6 +13,7 @@ export default BaseHttpService.extend({
       address: '',
       category: '0',
       avgRating: 0.0,
+      i: 1
     });
     this.set('currentSupplier', newSupplier);
     return this.get('currentSupplier');
@@ -74,8 +75,8 @@ export default BaseHttpService.extend({
     return this.ajax('POST', `/suppliers/${id}/ratings`, this.currentRating);
   },
 
-  getAvgRating: function(id) {
-    return this.ajax('GET', `/suppliers/${id}/average-rating`);
+  getAvgRating: function(id,ratingType) {
+    return this.ajax('GET', `/suppliers/${id}/average-rating/${ratingType}`);
   },
   deactivateSupplier(id) {
     return this.ajax('POST', `/suppliers/${id}/deactivate`);

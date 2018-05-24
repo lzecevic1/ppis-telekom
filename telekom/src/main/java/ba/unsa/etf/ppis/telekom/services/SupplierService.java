@@ -26,20 +26,33 @@ public class SupplierService extends BaseService<Supplier, SupplierRepository> {
         ratingService.save(rating);
     }
 
-    public Float averageRatingForSupplier(Long id) {
+    public Float averageRatingForSupplier(Long id, int i) {
         Optional<Supplier> supplier = repository.findById(id);
         if(!supplier.isPresent()) {
-            throw new RuntimeException("Supplier with give nid doesn't exist");
+            throw new RuntimeException("Supplier with given id doesn't exist");
         }
         Float avgRating = 0f;
         Collection<Rating> ratings = supplier.get().getRatings();
-        for (Rating r: ratings)
-        {
-               avgRating += r.getRating();
+        Integer size = 0;
+        for (Rating r: ratings) {
+            if(i == 3){
+                avgRating += r.getRating();
+                size++;}
+            else {
+                if(r.getRatingType().ordinal() == i) {
+                    avgRating += r.getRating();
+                    size++;
+                }
+            }
         }
-        avgRating /= ratings.size();
+        if(size == 0) {
+            return 0f;
+        }
+        else
+            avgRating /= size;
         return avgRating;
     }
+
     public Supplier findSupplierByName(String name) {
         Supplier supplier = repository.findSupplierByName(name);
         return  supplier;
@@ -65,6 +78,7 @@ public class SupplierService extends BaseService<Supplier, SupplierRepository> {
         }
         return ratingType;
     }
+
 
 }
 

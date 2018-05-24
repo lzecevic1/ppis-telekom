@@ -9,6 +9,7 @@ const {
 
 export default Ember.Controller.extend(SweetAlertMixin,{
  _supplierService: service('suppliers-service'),
+ _ratingService: service('rating-service'),
  supplierId: null,
  isChecked: false,
  session: Ember.inject.service('session'),
@@ -47,16 +48,16 @@ export default Ember.Controller.extend(SweetAlertMixin,{
     this.set('isChecked', !this.isChecked);
     if (this.isChecked) {
       this.get('_supplierService').getSuppliers('Aktivan').then((response) => {
-        this.get('model').clear();
-        this.get('model').pushObjects(response);
+        this.get('model.supplier').clear();
+        this.get('model.supplier').pushObjects(response);
         console.log("AKTIVAN");
         console.log(response);
       });
     }
     else {
       this.get('_supplierService').getAllSuppliers().then((response) => {
-        this.get('model').clear();
-        this.get('model').pushObjects(response);
+        this.get('model.supplier').clear();
+        this.get('model.supplier').pushObjects(response);
         console.log("NEAKTIVAN");
         console.log(response);
 
@@ -67,22 +68,25 @@ export default Ember.Controller.extend(SweetAlertMixin,{
   selectSort: function (value) {
     console.log("Select sort");
     this.get('_supplierService').getSortedSuppliers(value).then( (response) => {
-      this.get('model').clear();
-      this.get('model').pushObjects(response);
+      this.get('model.supplier').clear();
+      this.get('model.supplier').pushObjects(response);
     })
   },
 
   rateSupplier: function(supplierId) {
     let sweetAlert = this.get('sweetAlert');
     let sweetAlertMixin = this.get('SweetAlertMixin');
+    let categoryQuality = "Kvalitet";
+    let categoryDeliverySpeed = "Brzina isporuke";
+    let categoryCommunication = "Komunikacija";
     sweetAlert({
       html:
       '<div class="form-group">'+
       '<label for="exampleFormControlSelect1">Kategorija ocjenjivanja:</label>'+
       '<select class="form-control" id="categoryRating">'+
-        '<option value="0">Kvalitet</option>'+
-        '<option value="1">Brzina isporuke</option>'+
-        '<option value="2">Komunikacija</option>'+
+        '<option value="0">'+categoryQuality+'</option>'+
+        '<option value="1">'+categoryDeliverySpeed+'</option>'+
+        '<option value="2">'+categoryCommunication+'Komunikacija</option>'+
       '</select>'+
       '</div>'+
       '<div class="form-group">'+
@@ -95,7 +99,6 @@ export default Ember.Controller.extend(SweetAlertMixin,{
         '<option value="4">5</option>'+
       '</select>'+
       '</div>'+
-
       '<div class="form-group">'+
         '<label> Komentar </label>'+
         '<textarea  class="form-control">'+

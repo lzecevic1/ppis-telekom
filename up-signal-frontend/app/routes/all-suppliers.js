@@ -1,14 +1,15 @@
 import Ember from 'ember';
-import LoginRoute from './login';
 const {
   inject: {
     service
   }
 } = Ember;
 
-export default LoginRoute.extend({
+export default Ember.Route.extend({
   _supplierService: service('suppliers-service'),
   _contractService: service('contract-service'),
+  _ratingService: service('rating-service'),
+  session: Ember.inject.service('session'),
 
   beforeModel(transition)
   {
@@ -17,7 +18,11 @@ export default LoginRoute.extend({
     }
   },
   model() {
-    return this.get('_supplierService').getAllSuppliers() || {};
+    return Ember.RSVP.hash({
+      supplier: this.get('_supplierService').getAllSuppliers() || {},
+      rating: this.get('_ratingService').createRating()
+    });
+
   },
 
   actions: {
