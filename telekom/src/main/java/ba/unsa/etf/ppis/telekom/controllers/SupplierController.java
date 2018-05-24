@@ -38,4 +38,13 @@ public class SupplierController extends BaseController<Supplier, SupplierService
         Float avgRating = service.averageRatingForSupplier(id);
         return ResponseEntity.ok(avgRating);
     }
+
+    @GetMapping("/deactivate")
+    public void deactivate(@PathVariable("id") Long id) {
+        Optional<Supplier> supplierForUpdate = service.getById(id);
+        if(supplierForUpdate.isPresent()) {
+            supplierForUpdate.get().setStatus(Supplier.SupplierStatus.Neaktivan);
+            service.save(supplierForUpdate.get());
+        }
+    }
 }

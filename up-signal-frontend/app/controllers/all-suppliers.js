@@ -48,6 +48,13 @@ export default Ember.Controller.extend(SweetAlertMixin,{
   selectSort: function (value) {
     //to be implemented
   },
+
+   deactivateSupplier: function(supplierId) {
+     console.log("Deactivate" + supplierId);
+     this.get('_supplierService').deactivateSupplier(supplierId)
+       .then(()=>  this.get('target.router').refresh());
+   },
+
   rateSupplier: function(supplierId) {
     let sweetAlert = this.get('sweetAlert');
     let sweetAlertMixin = this.get('SweetAlertMixin');
