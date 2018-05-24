@@ -7,4 +7,5 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import java.util.Collection;
 
 public interface SupplierRepository extends JpaRepository<Supplier, Long> {
+    Supplier findSupplierByName(String name);
 }

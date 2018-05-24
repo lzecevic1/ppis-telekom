@@ -50,7 +50,6 @@ export default Ember.Controller.extend(SweetAlertMixin,{
   },
 
    deactivateSupplier: function(supplierId) {
-     console.log("Deactivate" + supplierId);
      this.get('_supplierService').deactivateSupplier(supplierId)
        .then(()=>  this.get('target.router').refresh());
    },

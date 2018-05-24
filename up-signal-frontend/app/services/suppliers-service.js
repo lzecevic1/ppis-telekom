@@ -82,7 +82,10 @@ export default BaseHttpService.extend({
     return this.ajax('GET', '/packages');
   },
 
-  deactivateSupplier: function(id) {
-    return this.ajax('GET',  `/suppliers/deactivate/${id}`);
+  deactivateSupplier(id) {
+    return this.ajax('POST', `/suppliers/${id}/deactivate`);
+  },
+  deactivateService(id) {
+    return this.ajax('POST', `/telekom-services/${id}/deactivate`);
   }
 });

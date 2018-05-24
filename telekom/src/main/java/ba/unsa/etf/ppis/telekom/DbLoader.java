@@ -25,6 +25,8 @@ public class DbLoader implements CommandLineRunner {
     private SupplierService supplierService;
     @Autowired
     private RatingService ratingService;
+    @Autowired
+    private ProductService productService;
 
     @Override
     public void run(String... args) throws Exception {
@@ -128,7 +130,11 @@ public class DbLoader implements CommandLineRunner {
             rating.setRating(5.0f);
             rating.setSupplier(supplier);
             ratingService.save(rating);
-
+            Product product = new Product();
+            product.setCategory(Product.ProductCategory.DEVICE);
+            product.setName("Računari");
+            product.setPrice(new BigDecimal(200));
+            product.
             supplier = new Supplier();
             supplier.setName("Cisco");
             supplier.setAddress("Mozart street, Vienna, AUS");

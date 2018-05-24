@@ -1031,6 +1031,13 @@ define('up-signal/controllers/all-services', ['exports', 'ember-sweetalert/mixin
                         });
                     });
                 });
+            },
+            deactivateService: function deactivateService(serviceId) {
+                var _this2 = this;
+
+                this.get('_supplierService').deactivateService(serviceId).then(function () {
+                    return _this2.get('target.router').refresh();
+                });
             }
         }
     });
@@ -1066,9 +1073,10 @@ define('up-signal/controllers/all-suppliers', ['exports', 'ember-sweetalert/mixi
             confirmButtonText: 'OK',
             type: 'success'
           }).then(function (confirm) {
-            _this.get('_supplierService').deleteSupplier(supplierId);
-            _this.set('supplierId', null);
-            _this.get('target.router').refresh();
+            _this.get('_supplierService').deleteSupplier(supplierId).then(function () {
+              _this.set('supplierId', null);
+              _this.get('target.router').refresh();
+            });
           });
         });
       },
@@ -1086,6 +1094,15 @@ define('up-signal/controllers/all-suppliers', ['exports', 'ember-sweetalert/mixi
       selectSort: function selectSort(value) {
         //to be implemented
       },
+
+      deactivateSupplier: function deactivateSupplier(supplierId) {
+        var _this3 = this;
+
+        this.get('_supplierService').deactivateSupplier(supplierId).then(function () {
+          return _this3.get('target.router').refresh();
+        });
+      },
+
       rateSupplier: function rateSupplier(supplierId) {
         var sweetAlert = this.get('sweetAlert');
         var sweetAlertMixin = this.get('SweetAlertMixin');
@@ -1815,15 +1832,16 @@ define('up-signal/routes/login', ['exports'], function (exports) {
     }
   });
 });
-define('up-signal/routes/new-contract', ['exports', 'up-signal/routes/login'], function (exports, _login) {
+define('up-signal/routes/new-contract', ['exports', 'ember-sweetalert/mixins/sweetalert-mixin'], function (exports, _sweetalertMixin) {
   'use strict';
 
   Object.defineProperty(exports, "__esModule", {
     value: true
   });
   var service = Ember.inject.service;
-  exports.default = _login.default.extend({
+  exports.default = Ember.Route.extend(_sweetalertMixin.default, {
     _contractService: service('contract-service'),
+    session: Ember.inject.service('session'),
     id: null,
 
     model: function model(transition) {
@@ -1842,10 +1860,16 @@ define('up-signal/routes/new-contract', ['exports', 'up-signal/routes/login'], f
       onNext: function onNext() {
         var _this = this;
 
+        var sweetAlert = this.get('sweetAlert');
         this.controller.set('model.supplierId', this.get('id'));
-        console.log(this.controller.get('model'));
         this.get('_contractService').addContract(this.controller.get('model')).then(function () {
-          return _this.transitionTo('homepage');
+          sweetAlert({
+            title: 'Uspješno kreiran novi ugovor',
+            confirmButtonText: 'OK',
+            type: 'success'
+          }).then(function (confirm) {
+            return _this.transitionTo('all-suppliers');
+          });
         });
       }
     }
@@ -2194,6 +2218,12 @@ define('up-signal/services/suppliers-service', ['exports', 'up-signal/services/b
 
     getAllPackages: function getAllPackages() {
       return this.ajax('GET', '/packages');
+    },
+    deactivateSupplier: function deactivateSupplier(id) {
+      return this.ajax('POST', '/suppliers/' + id + '/deactivate');
+    },
+    deactivateService: function deactivateService(id) {
+      return this.ajax('POST', '/telekom-services/' + id + '/deactivate');
     }
   });
 });
@@ -2277,7 +2307,7 @@ define("up-signal/templates/all-suppliers", ["exports"], function (exports) {
   Object.defineProperty(exports, "__esModule", {
     value: true
   });
-  exports.default = Ember.HTMLBars.template({ "id": "UFgu5NTH", "block": "{\"statements\":[[11,\"div\",[]],[15,\"class\",\"list-top\"],[13],[0,\"\\n    \"],[11,\"p\",[]],[13],[0,\"PREGLED SVIH DOBAVLJACA\\n\"],[14],[0,\"\\n\"],[14],[0,\"\\n\"],[11,\"div\",[]],[15,\"class\",\"row\"],[13],[0,\"\\n\"],[11,\"div\",[]],[15,\"class\",\"list-top add-new-supplier\"],[13],[0,\"\\n\"],[6,[\"if\"],[[28,[\"session\",\"isAuthenticated\"]]],null,{\"statements\":[[6,[\"if\"],[[33,[\"diff\"],[[28,[\"session\",\"data\",\"authenticated\",\"user\",\"role\",\"name\"]],\"SERVICER\"],null]],null,{\"statements\":[[0,\"        \"],[6,[\"link-to\"],[\"new-supplier\"],null,{\"statements\":[[11,\"span\",[]],[15,\"class\",\"icon-add\"],[13],[11,\"i\",[]],[15,\"class\",\"glyphicon glyphicon-plus-sign\"],[13],[14],[14],[0,\" DODAJ DOBAVLJACA\"]],\"locals\":[]},null],[0,\"\\n\"]],\"locals\":[]},null],[0,\"    \"]],\"locals\":[]},null],[0,\" \"],[11,\"br\",[]],[13],[14],[0,\"\\n    \"],[11,\"div\",[]],[15,\"class\",\"form-check\"],[13],[0,\"\\n    \"],[1,[33,[\"input\"],null,[[\"type\",\"change\"],[\"checkbox\",[33,[\"action\"],[[28,[null]],\"showActive\"],null]]]],false],[0,\"  \"],[11,\"label\",[]],[15,\"class\",\"form-check-label\"],[15,\"for\",\"defaultCheck1\"],[13],[0,\"\\n    Dobavljaci sa aktivnim ugovorima\\n    \"],[14],[0,\"\\n\\n    \"],[14],[0,\"\\n    \"],[14],[0,\" \"],[11,\"div\",[]],[15,\"class\",\"form-group select-sort\"],[13],[0,\"\\n        \"],[11,\"label\",[]],[15,\"class\",\"form-check-label\"],[15,\"for\",\"exampleFormControlSelect2\"],[13],[0,\"Sortiraj po:\"],[14],[0,\"\\n        \"],[11,\"select\",[]],[15,\"class\",\"form-control \"],[15,\"id\",\"exampleFormControlSelect2\"],[16,\"onchange\",[33,[\"action\"],[[28,[null]],\"selectSort\"],[[\"value\"],[\"target.value\"]]],null],[13],[0,\"\\n          \"],[11,\"option\",[]],[15,\"value\",\"0\"],[13],[0,\"Kvalitet\"],[14],[0,\"\\n          \"],[11,\"option\",[]],[15,\"value\",\"1\"],[13],[0,\"Brzina isporuke\"],[14],[0,\"\\n          \"],[11,\"option\",[]],[15,\"value\",\"2\"],[13],[0,\"Komunikacija\"],[14],[0,\"\\n          \"],[11,\"option\",[]],[15,\"value\",\"3\"],[13],[0,\"Mobilna telefonija\"],[14],[0,\"\\n        \"],[14],[0,\"\\n    \"],[14],[0,\"\\n\"],[14],[0,\"\\n\\n    \"],[11,\"div\",[]],[15,\"class\",\"container-supplier\"],[13],[0,\"\\n\"],[6,[\"each\"],[[28,[\"model\"]]],null,{\"statements\":[[0,\"      \"],[11,\"div\",[]],[15,\"class\",\"box first\"],[13],[0,\"\\n        \"],[11,\"span\",[]],[15,\"class\",\"icon-cont\"],[13],[11,\"i\",[]],[15,\"class\",\"glyphicon glyphicon-user\"],[13],[14],[14],[0,\"\\n        \"],[11,\"h3\",[]],[13],[1,[28,[\"supplier\",\"name\"]],false],[14],[0,\"\\n        \"],[11,\"div\",[]],[15,\"class\",\"details\"],[13],[0,\"\\n        \"],[11,\"p\",[]],[13],[0,\" \"],[11,\"b\",[]],[13],[0,\" Adresa: \"],[14],[0,\" \"],[1,[28,[\"supplier\",\"address\"]],false],[0,\" \"],[14],[0,\"\\n        \"],[11,\"p\",[]],[13],[0,\" \"],[11,\"b\",[]],[13],[0,\" Status: \"],[14],[0,\" \"],[1,[28,[\"supplier\",\"status\"]],false],[0,\" \"],[14],[0,\"\\n        \"],[11,\"p\",[]],[13],[0,\" \"],[11,\"b\",[]],[13],[0,\" Kategorija: \"],[14],[0,\" \"],[1,[28,[\"supplier\",\"category\"]],false],[0,\" \"],[14],[0,\"\\n\"],[6,[\"if\"],[[28,[\"session\",\"isAuthenticated\"]]],null,{\"statements\":[[6,[\"if\"],[[33,[\"diff\"],[[28,[\"session\",\"data\",\"authenticated\",\"user\",\"role\",\"name\"]],\"SERVICER\"],null]],null,{\"statements\":[[0,\"               \"],[11,\"br\",[]],[13],[14],[0,\" \"],[11,\"button\",[]],[15,\"class\",\"btn btn-default list-item-btn\"],[5,[\"action\"],[[28,[null]],\"createContract\",[28,[\"supplier\",\"id\"]]]],[13],[0,\"Novi Ugovor\"],[14],[0,\"\\n                \"],[11,\"button\",[]],[15,\"class\",\"btn btn-default list-item-btn\"],[5,[\"action\"],[[28,[null]],\"delete\",[28,[\"supplier\",\"id\"]]]],[13],[0,\"Deaktiviraj\"],[14],[11,\"br\",[]],[13],[14],[11,\"br\",[]],[13],[14],[0,\"\\n                \"],[1,[33,[\"star-rating\"],null,[[\"readOnly\",\"rating\"],[true,[28,[\"supplier\",\"avgRating\"]]]]],false],[0,\"\\n                \"],[11,\"button\",[]],[15,\"class\",\"btn btn-default list-item-btn\"],[5,[\"action\"],[[28,[null]],\"rateSupplier\",[28,[\"supplier\",\"id\"]]]],[13],[0,\"Ocjeni\"],[14],[0,\"\\n\"]],\"locals\":[]},null]],\"locals\":[]},null],[0,\"        \"],[14],[0,\"\\n    \"],[14],[0,\"\\n\"]],\"locals\":[\"supplier\"]},null],[14]],\"locals\":[],\"named\":[],\"yields\":[],\"hasPartials\":false}", "meta": { "moduleName": "up-signal/templates/all-suppliers.hbs" } });
+  exports.default = Ember.HTMLBars.template({ "id": "YAyRyZE8", "block": "{\"statements\":[[11,\"div\",[]],[15,\"class\",\"list-top\"],[13],[0,\"\\n    \"],[11,\"p\",[]],[13],[0,\"PREGLED SVIH DOBAVLJACA\\n\"],[14],[0,\"\\n\"],[14],[0,\"\\n\"],[11,\"div\",[]],[15,\"class\",\"row\"],[13],[0,\"\\n\"],[11,\"div\",[]],[15,\"class\",\"list-top add-new-supplier\"],[13],[0,\"\\n\"],[6,[\"if\"],[[28,[\"session\",\"isAuthenticated\"]]],null,{\"statements\":[[6,[\"if\"],[[33,[\"diff\"],[[28,[\"session\",\"data\",\"authenticated\",\"user\",\"role\",\"name\"]],\"SERVICER\"],null]],null,{\"statements\":[[0,\"        \"],[6,[\"link-to\"],[\"new-supplier\"],null,{\"statements\":[[11,\"span\",[]],[15,\"class\",\"icon-add\"],[13],[11,\"i\",[]],[15,\"class\",\"glyphicon glyphicon-plus-sign\"],[13],[14],[14],[0,\" DODAJ DOBAVLJACA\"]],\"locals\":[]},null],[0,\"\\n\"]],\"locals\":[]},null],[0,\"    \"]],\"locals\":[]},null],[0,\" \"],[11,\"br\",[]],[13],[14],[0,\"\\n    \"],[11,\"div\",[]],[15,\"class\",\"form-check\"],[13],[0,\"\\n    \"],[1,[33,[\"input\"],null,[[\"type\",\"change\"],[\"checkbox\",[33,[\"action\"],[[28,[null]],\"showActive\"],null]]]],false],[0,\"  \"],[11,\"label\",[]],[15,\"class\",\"form-check-label\"],[15,\"for\",\"defaultCheck1\"],[13],[0,\"\\n    Dobavljaci sa aktivnim ugovorima\\n    \"],[14],[0,\"\\n\\n    \"],[14],[0,\"\\n    \"],[14],[0,\" \"],[11,\"div\",[]],[15,\"class\",\"form-group select-sort\"],[13],[0,\"\\n        \"],[11,\"label\",[]],[15,\"class\",\"form-check-label\"],[15,\"for\",\"exampleFormControlSelect2\"],[13],[0,\"Sortiraj po:\"],[14],[0,\"\\n        \"],[11,\"select\",[]],[15,\"class\",\"form-control \"],[15,\"id\",\"exampleFormControlSelect2\"],[16,\"onchange\",[33,[\"action\"],[[28,[null]],\"selectSort\"],[[\"value\"],[\"target.value\"]]],null],[13],[0,\"\\n          \"],[11,\"option\",[]],[15,\"value\",\"0\"],[13],[0,\"Kvalitet\"],[14],[0,\"\\n          \"],[11,\"option\",[]],[15,\"value\",\"1\"],[13],[0,\"Brzina isporuke\"],[14],[0,\"\\n          \"],[11,\"option\",[]],[15,\"value\",\"2\"],[13],[0,\"Komunikacija\"],[14],[0,\"\\n          \"],[11,\"option\",[]],[15,\"value\",\"3\"],[13],[0,\"Mobilna telefonija\"],[14],[0,\"\\n        \"],[14],[0,\"\\n    \"],[14],[0,\"\\n\"],[14],[0,\"\\n\\n    \"],[11,\"div\",[]],[15,\"class\",\"container-supplier\"],[13],[0,\"\\n\"],[6,[\"each\"],[[28,[\"model\"]]],null,{\"statements\":[[6,[\"if\"],[[33,[\"eq\"],[[28,[\"supplier\",\"status\"]],\"Aktivan\"],null]],null,{\"statements\":[[0,\"      \"],[11,\"div\",[]],[15,\"class\",\"box first\"],[13],[0,\"\\n        \"],[11,\"span\",[]],[15,\"class\",\"icon-cont\"],[13],[11,\"i\",[]],[15,\"class\",\"glyphicon glyphicon-user\"],[13],[14],[14],[0,\"\\n        \"],[11,\"h3\",[]],[13],[1,[28,[\"supplier\",\"name\"]],false],[14],[0,\"\\n        \"],[11,\"div\",[]],[15,\"class\",\"details\"],[13],[0,\"\\n        \"],[11,\"p\",[]],[13],[0,\" \"],[11,\"b\",[]],[13],[0,\" Adresa: \"],[14],[0,\" \"],[1,[28,[\"supplier\",\"address\"]],false],[0,\" \"],[14],[0,\"\\n        \"],[11,\"p\",[]],[13],[0,\" \"],[11,\"b\",[]],[13],[0,\" Status: \"],[14],[0,\" \"],[1,[28,[\"supplier\",\"status\"]],false],[0,\" \"],[14],[0,\"\\n        \"],[11,\"p\",[]],[13],[0,\" \"],[11,\"b\",[]],[13],[0,\" Kategorija: \"],[14],[0,\" \"],[1,[28,[\"supplier\",\"category\"]],false],[0,\" \"],[14],[0,\"\\n\"],[6,[\"if\"],[[28,[\"session\",\"isAuthenticated\"]]],null,{\"statements\":[[6,[\"if\"],[[33,[\"diff\"],[[28,[\"session\",\"data\",\"authenticated\",\"user\",\"role\",\"name\"]],\"SERVICER\"],null]],null,{\"statements\":[[0,\"               \"],[11,\"br\",[]],[13],[14],[0,\" \"],[11,\"button\",[]],[15,\"class\",\"btn btn-default list-item-btn\"],[5,[\"action\"],[[28,[null]],\"createContract\",[28,[\"supplier\",\"id\"]]]],[13],[0,\"Novi Ugovor\"],[14],[0,\"\\n              \"],[11,\"br\",[]],[13],[14],[0,\" \"],[11,\"button\",[]],[15,\"class\",\"btn btn-default list-item-btn\"],[5,[\"action\"],[[28,[null]],\"deactivateSupplier\",[28,[\"supplier\",\"id\"]]]],[13],[0,\"Deaktiviraj\"],[14],[0,\"\\n                \"],[1,[33,[\"star-rating\"],null,[[\"readOnly\",\"rating\"],[true,[28,[\"supplier\",\"avgRating\"]]]]],false],[0,\"\\n                \"],[11,\"button\",[]],[15,\"class\",\"btn btn-default list-item-btn\"],[5,[\"action\"],[[28,[null]],\"rateSupplier\",[28,[\"supplier\",\"id\"]]]],[13],[0,\"Ocjeni\"],[14],[0,\"\\n\"]],\"locals\":[]},null]],\"locals\":[]},null],[0,\"        \"],[14],[0,\"\\n    \"],[14],[0,\"\\n\"]],\"locals\":[]},null]],\"locals\":[\"supplier\"]},null],[14]],\"locals\":[],\"named\":[],\"yields\":[],\"hasPartials\":false}", "meta": { "moduleName": "up-signal/templates/all-suppliers.hbs" } });
 });
 define("up-signal/templates/application", ["exports"], function (exports) {
   "use strict";
@@ -2375,7 +2405,7 @@ define("up-signal/templates/new-contract", ["exports"], function (exports) {
   Object.defineProperty(exports, "__esModule", {
     value: true
   });
-  exports.default = Ember.HTMLBars.template({ "id": "yLUJBxNm", "block": "{\"statements\":[[11,\"div\",[]],[15,\"class\",\"container new-service-body\"],[13],[0,\"\\n \"],[11,\"div\",[]],[15,\"class\",\"panel panel-default\"],[13],[0,\"\\n   \"],[11,\"div\",[]],[15,\"class\",\"panel-body\"],[13],[0,\"\\n    \"],[11,\"h4\",[]],[13],[0,\"Unesite podatke o novom ugovoru:\"],[14],[0,\"\\n    \"],[14],[0,\"\\n    \"],[11,\"div\",[]],[15,\"class\",\"panel-body register-form__footer\"],[13],[0,\"\\n    \"],[11,\"form\",[]],[13],[0,\"\\n  \"],[11,\"div\",[]],[15,\"class\",\"form-group\"],[13],[0,\"\\n    \"],[11,\"label\",[]],[15,\"for\",\"exampleFormControlInput1\"],[13],[0,\"Početak ugovora:\"],[14],[0,\"\\n      \"],[1,[33,[\"input\"],null,[[\"type\",\"class\",\"id\",\"value\"],[\"date\",\"form-control\",\"startDate\",[28,[\"model\",\"startDate\"]]]]],false],[0,\"\\n  \"],[14],[0,\"\\n    \"],[11,\"div\",[]],[15,\"class\",\"form-group\"],[13],[0,\"\\n    \"],[11,\"label\",[]],[15,\"for\",\"exampleFormControlInput1\"],[13],[0,\"Kraj ugovora:\"],[14],[0,\"\\n      \"],[1,[33,[\"input\"],null,[[\"type\",\"class\",\"id\",\"value\"],[\"date\",\"form-control\",\"endDate\",[28,[\"model\",\"endDate\"]]]]],false],[0,\"\\n  \"],[14],[0,\"\\n    \"],[11,\"div\",[]],[15,\"class\",\"form-group\"],[13],[0,\"\\n    \"],[11,\"label\",[]],[15,\"for\",\"exampleFormControlInput1\"],[13],[0,\"Ime odgovorne osobe:\"],[14],[0,\"\\n      \"],[1,[33,[\"input\"],null,[[\"class\",\"id\",\"value\"],[\"form-control\",\"responsiblePerson\",[28,[\"model\",\"responsiblePerson\"]]]]],false],[0,\"\\n  \"],[14],[0,\"\\n  \"],[11,\"button\",[]],[15,\"class\",\"btn btn-lg btn-primary col-md-2\"],[15,\"type\",\"submit\"],[5,[\"action\"],[[28,[null]],\"onNext\"]],[13],[0,\"UNOS\"],[14],[0,\"\\n\"],[14],[0,\"\\n\"],[14],[0,\"\\n\"],[14],[0,\"\\n\"],[14]],\"locals\":[],\"named\":[],\"yields\":[],\"hasPartials\":false}", "meta": { "moduleName": "up-signal/templates/new-contract.hbs" } });
+  exports.default = Ember.HTMLBars.template({ "id": "fJCuLtYl", "block": "{\"statements\":[[11,\"div\",[]],[15,\"class\",\"container new-service-body\"],[13],[0,\"\\n \"],[11,\"div\",[]],[15,\"class\",\"panel panel-default\"],[13],[0,\"\\n   \"],[11,\"div\",[]],[15,\"class\",\"panel-body\"],[13],[0,\"\\n    \"],[11,\"h4\",[]],[13],[0,\"Unesite podatke o novom ugovoru:\"],[14],[0,\"\\n    \"],[14],[0,\"\\n    \"],[11,\"div\",[]],[15,\"class\",\"panel-body register-form__footer\"],[13],[0,\"\\n    \"],[11,\"form\",[]],[13],[0,\"\\n  \"],[11,\"div\",[]],[15,\"class\",\"form-group\"],[13],[0,\"\\n    \"],[11,\"label\",[]],[13],[0,\"Početak ugovora:\"],[14],[0,\"\\n      \"],[1,[33,[\"input\"],null,[[\"type\",\"class\",\"id\",\"value\"],[\"date\",\"form-control\",\"startDate\",[28,[\"model\",\"startDate\"]]]]],false],[0,\"\\n  \"],[14],[0,\"\\n    \"],[11,\"div\",[]],[15,\"class\",\"form-group\"],[13],[0,\"\\n    \"],[11,\"label\",[]],[13],[0,\"Kraj ugovora:\"],[14],[0,\"\\n      \"],[1,[33,[\"input\"],null,[[\"type\",\"class\",\"id\",\"value\"],[\"date\",\"form-control\",\"endDate\",[28,[\"model\",\"endDate\"]]]]],false],[0,\"\\n  \"],[14],[0,\"\\n    \"],[11,\"div\",[]],[15,\"class\",\"form-group\"],[13],[0,\"\\n      \"],[11,\"label\",[]],[13],[0,\"Cijena (KM)\"],[14],[0,\"\\n      \"],[11,\"input\",[]],[15,\"type\",\"number\"],[15,\"name\",\"broj\"],[15,\"value\",\"230\"],[15,\"class\",\"form-control\"],[13],[14],[0,\"\\n    \"],[14],[0,\"\\n    \"],[11,\"div\",[]],[15,\"class\",\"form-group\"],[13],[0,\"\\n      \"],[11,\"label\",[]],[13],[0,\"Adresa dostave\"],[14],[0,\"\\n      \"],[11,\"input\",[]],[15,\"class\",\"form-control\"],[15,\"type\",\"text\"],[13],[14],[0,\"\\n    \"],[14],[0,\"\\n    \"],[11,\"div\",[]],[15,\"class\",\"form-group\"],[13],[0,\"\\n      \"],[11,\"label\",[]],[13],[0,\"Rok isplate\"],[14],[0,\"\\n      \"],[11,\"input\",[]],[15,\"type\",\"date\"],[15,\"class\",\"form-control\"],[13],[14],[0,\"\\n    \"],[14],[0,\"\\n    \"],[11,\"div\",[]],[15,\"class\",\"form-group\"],[13],[0,\"\\n      \"],[11,\"label\",[]],[13],[0,\"Rok dostave (broj dana)\"],[14],[0,\"\\n      \"],[11,\"input\",[]],[15,\"type\",\"number\"],[15,\"class\",\"form-control\"],[13],[14],[0,\"\\n    \"],[14],[0,\"\\n    \"],[11,\"div\",[]],[15,\"class\",\"form-group\"],[13],[0,\"\\n    \"],[11,\"label\",[]],[13],[0,\"Ime odgovorne osobe:\"],[14],[0,\"\\n      \"],[1,[33,[\"input\"],null,[[\"class\",\"id\",\"value\"],[\"form-control\",\"responsiblePerson\",[28,[\"model\",\"responsiblePerson\"]]]]],false],[0,\"\\n  \"],[14],[0,\"\\n  \"],[11,\"button\",[]],[15,\"class\",\"btn btn-lg btn-primary col-md-2\"],[15,\"type\",\"submit\"],[5,[\"action\"],[[28,[null]],\"onNext\"]],[13],[0,\"UNOS\"],[14],[0,\"\\n\"],[14],[0,\"\\n\"],[14],[0,\"\\n\"],[14],[0,\"\\n\"],[14],[0,\"\\n\"]],\"locals\":[],\"named\":[],\"yields\":[],\"hasPartials\":false}", "meta": { "moduleName": "up-signal/templates/new-contract.hbs" } });
 });
 define("up-signal/templates/new-service", ["exports"], function (exports) {
   "use strict";
@@ -2447,6 +2477,6 @@ catch(err) {
 });
 
 if (!runningTests) {
-  require("up-signal/app")["default"].create({"name":"up-signal","version":"0.0.0+c9d441dc"});
+  require("up-signal/app")["default"].create({"name":"up-signal","version":"0.0.0+d2f59466"});
 }
 //# sourceMappingURL=up-signal.map

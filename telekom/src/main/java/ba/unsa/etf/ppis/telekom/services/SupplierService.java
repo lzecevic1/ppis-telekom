@@ -40,4 +40,8 @@ public class SupplierService extends BaseService<Supplier, SupplierRepository> {
         avgRating /= ratings.size();
         return avgRating;
     }
+    public Supplier findSupplierByName(String name) {
+        Supplier supplier = repository.findSupplierByName(name);
+        return  supplier;
+    }
 }

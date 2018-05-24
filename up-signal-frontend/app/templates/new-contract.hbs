@@ -6,15 +6,31 @@
     <div class="panel-body register-form__footer">
     <form>
   <div class="form-group">
-    <label for="exampleFormControlInput1">Početak ugovora:</label>
+    <label>Početak ugovora:</label>
       {{input type="date" class="form-control" id="startDate" value=model.startDate}}
   </div>
     <div class="form-group">
-    <label for="exampleFormControlInput1">Kraj ugovora:</label>
+    <label>Kraj ugovora:</label>
       {{input type="date" class="form-control" id="endDate" value=model.endDate}}
   </div>
     <div class="form-group">
-    <label for="exampleFormControlInput1">Ime odgovorne osobe:</label>
+      <label>Cijena (KM)</label>
+      <input type="number" name="broj" value="230" class="form-control">
+    </div>
+    <div class="form-group">
+      <label>Adresa dostave</label>
+      <input class="form-control" type="text">
+    </div>
+    <div class="form-group">
+      <label>Rok isplate</label>
+      <input type="date" class="form-control">
+    </div>
+    <div class="form-group">
+      <label>Rok dostave (broj dana)</label>
+      <input type="number" class="form-control">
+    </div>
+    <div class="form-group">
+    <label>Ime odgovorne osobe:</label>
       {{input class="form-control" id="responsiblePerson" value=model.responsiblePerson}}
   </div>
   <button class="btn btn-lg btn-primary col-md-2" type="submit" {{action 'onNext'}}>UNOS</button>

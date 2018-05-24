@@ -32,5 +32,9 @@ export default Ember.Controller.extend(SweetAlertMixin, {
                     })
                 })
         },
+        deactivateService: function(serviceId) {
+            this.get('_supplierService').deactivateService(serviceId)
+              .then(()=>  this.get('target.router').refresh());
+          },       
     }
 });
