@@ -13,8 +13,7 @@ export default Ember.Controller.extend(SweetAlertMixin, {
     actions: { 
         delete: function(serviceId) {
             let sweetAlert = this.get('sweetAlert');
-            this.get('_supplierService').deleteService(serviceId).then(()=>{
-                sweetAlert({
+            sweetAlert({
                     title: 'Jeste li sigurni da želite deaktivirati uslugu',
                     confirmButtonText: 'Da',
                     showCancelButton: true,
@@ -26,11 +25,12 @@ export default Ember.Controller.extend(SweetAlertMixin, {
                         confirmButtonText: 'OK',
                         type: 'success'
                     }).then((confirm)=>{
+                        this.get('_supplierService').deleteService(serviceId).then(()=>{                        
                         this.set('serviceId', null);      
-                        this.get('target.router').refresh();                              
+                        this.get('target.router').refresh();
+                        });                              
                     })
                 })
-            });
         },
     }
 });

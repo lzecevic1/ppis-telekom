@@ -3,7 +3,6 @@ package ba.unsa.etf.ppis.telekom;
 import ba.unsa.etf.ppis.telekom.models.*;
 import ba.unsa.etf.ppis.telekom.models.Package;
 import ba.unsa.etf.ppis.telekom.services.*;
-import com.sun.xml.internal.bind.v2.runtime.reflect.Lister;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.stereotype.Component;

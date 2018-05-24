@@ -93302,7 +93302,7 @@ if (window.Sweetalert2) window.sweetAlert = window.swal = window.Sweetalert2;
   if (Ember.EXTEND_PROTOTYPES === true || Ember.EXTEND_PROTOTYPES.String) {
     /**
       See {{#crossLink "Ember.String/pluralize"}}{{/crossLink}}
-       @method pluralize
+        @method pluralize
       @for String
     */
     Object.defineProperty(String.prototype, 'pluralize', {
@@ -93320,7 +93320,7 @@ if (window.Sweetalert2) window.sweetAlert = window.swal = window.Sweetalert2;
 
     /**
       See {{#crossLink "Ember.String/singularize"}}{{/crossLink}}
-       @method singularize
+        @method singularize
       @for String
     */
     Object.defineProperty(String.prototype, 'singularize', {
@@ -93541,9 +93541,9 @@ if (window.Sweetalert2) window.sweetAlert = window.swal = window.Sweetalert2;
   Inflector.prototype = {
     /**
       @public
-       As inflections can be costly, and commonly the same subset of words are repeatedly
+        As inflections can be costly, and commonly the same subset of words are repeatedly
       inflected an optional cache is provided.
-       @method enableCache
+        @method enableCache
     */
     enableCache: function enableCache() {
       this.purgeCache();
@@ -93561,7 +93561,7 @@ if (window.Sweetalert2) window.sweetAlert = window.swal = window.Sweetalert2;
 
     /**
       @public
-       @method purgedCache
+        @method purgedCache
     */
     purgeCache: function purgeCache() {
       this._cacheUsed = false;
@@ -93572,7 +93572,7 @@ if (window.Sweetalert2) window.sweetAlert = window.swal = window.Sweetalert2;
     /**
       @public
       disable caching
-       @method disableCache;
+        @method disableCache;
     */
     disableCache: function disableCache() {
       this._sCache = null;
@@ -93658,7 +93658,7 @@ if (window.Sweetalert2) window.sweetAlert = window.swal = window.Sweetalert2;
 
     /**
       @protected
-       @method inflect
+        @method inflect
       @param {String} word
       @param {Object} typeRules
       @param {Object} irregular

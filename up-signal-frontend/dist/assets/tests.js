@@ -35,19 +35,14 @@ define('up-signal/tests/app.lint-test', [], function () {
     assert.ok(true, 'components/star-rating.js should pass ESLint\n\n');
   });
 
-  QUnit.test('components/sweet-alert.js', function (assert) {
-    assert.expect(1);
-    assert.ok(true, 'components/sweet-alert.js should pass ESLint\n\n');
-  });
-
   QUnit.test('controllers/all-services.js', function (assert) {
     assert.expect(1);
-    assert.ok(false, 'controllers/all-services.js should pass ESLint\n\n23:26 - \'confirm\' is defined but never used. (no-unused-vars)\n28:30 - \'confirm\' is defined but never used. (no-unused-vars)');
+    assert.ok(false, 'controllers/all-services.js should pass ESLint\n\n22:26 - \'confirm\' is defined but never used. (no-unused-vars)\n27:30 - \'confirm\' is defined but never used. (no-unused-vars)');
   });
 
   QUnit.test('controllers/all-suppliers.js', function (assert) {
     assert.expect(1);
-    assert.ok(false, 'controllers/all-suppliers.js should pass ESLint\n\n27:18 - \'confirm\' is defined but never used. (no-unused-vars)\n32:22 - \'confirm\' is defined but never used. (no-unused-vars)\n48:25 - \'value\' is defined but never used. (no-unused-vars)\n51:26 - \'supplierId\' is defined but never used. (no-unused-vars)\n53:9 - \'sweetAlertMixin\' is assigned a value but never used. (no-unused-vars)\n86:14 - \'confirm\' is defined but never used. (no-unused-vars)');
+    assert.ok(false, 'controllers/all-suppliers.js should pass ESLint\n\n26:18 - \'confirm\' is defined but never used. (no-unused-vars)\n31:22 - \'confirm\' is defined but never used. (no-unused-vars)\n47:25 - \'value\' is defined but never used. (no-unused-vars)\n50:26 - \'supplierId\' is defined but never used. (no-unused-vars)\n52:9 - \'sweetAlertMixin\' is assigned a value but never used. (no-unused-vars)\n85:14 - \'confirm\' is defined but never used. (no-unused-vars)');
   });
 
   QUnit.test('controllers/login.js', function (assert) {
@@ -88,11 +83,6 @@ define('up-signal/tests/app.lint-test', [], function () {
   QUnit.test('helpers/eq.js', function (assert) {
     assert.expect(1);
     assert.ok(true, 'helpers/eq.js should pass ESLint\n\n');
-  });
-
-  QUnit.test('initializers/base-http-service.js', function (assert) {
-    assert.expect(1);
-    assert.ok(true, 'initializers/base-http-service.js should pass ESLint\n\n');
   });
 
   QUnit.test('models/base-model.js', function (assert) {

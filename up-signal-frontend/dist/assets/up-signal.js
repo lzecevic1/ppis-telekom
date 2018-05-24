@@ -977,12 +977,12 @@ define('up-signal/components/star-rating', ['exports', 'ember-star-rating/compon
     });
 });
 define('up-signal/components/sweet-alert', ['exports', 'ember-sweetalert/components/sweet-alert'], function (exports, _sweetAlert) {
-    'use strict';
+  'use strict';
 
-    Object.defineProperty(exports, "__esModule", {
-        value: true
-    });
-    exports.default = _sweetAlert.default.extend({});
+  Object.defineProperty(exports, "__esModule", {
+    value: true
+  });
+  exports.default = _sweetAlert.default;
 });
 define('up-signal/components/welcome-page', ['exports', 'ember-welcome-page/components/welcome-page'], function (exports, _welcomePage) {
   'use strict';
@@ -1013,19 +1013,19 @@ define('up-signal/controllers/all-services', ['exports', 'ember-sweetalert/mixin
                 var _this = this;
 
                 var sweetAlert = this.get('sweetAlert');
-                this.get('_supplierService').deleteService(serviceId).then(function () {
+                sweetAlert({
+                    title: 'Jeste li sigurni da želite deaktivirati uslugu',
+                    confirmButtonText: 'Da',
+                    showCancelButton: true,
+                    cancelButtonText: 'Ne',
+                    type: 'warning'
+                }).then(function (confirm) {
                     sweetAlert({
-                        title: 'Jeste li sigurni da želite deaktivirati uslugu',
-                        confirmButtonText: 'Da',
-                        showCancelButton: true,
-                        cancelButtonText: 'Ne',
-                        type: 'warning'
+                        title: 'Uspješno deaktivirana usluga',
+                        confirmButtonText: 'OK',
+                        type: 'success'
                     }).then(function (confirm) {
-                        sweetAlert({
-                            title: 'Uspješno deaktivirana usluga',
-                            confirmButtonText: 'OK',
-                            type: 'success'
-                        }).then(function (confirm) {
+                        _this.get('_supplierService').deleteService(serviceId).then(function () {
                             _this.set('serviceId', null);
                             _this.get('target.router').refresh();
                         });
@@ -1054,22 +1054,21 @@ define('up-signal/controllers/all-suppliers', ['exports', 'ember-sweetalert/mixi
         var _this = this;
 
         var sweetAlert = this.get('sweetAlert');
-        this.get('_supplierService').deleteSupplier(supplierId).then(function () {
+        sweetAlert({
+          title: 'Jeste li sigurni da želite deaktivirati dobavljača',
+          confirmButtonText: 'Da',
+          showCancelButton: true,
+          cancelButtonText: 'Ne',
+          type: 'warning'
+        }).then(function (confirm) {
           sweetAlert({
-            title: 'Jeste li sigurni da želite deaktivirati dobavljača',
-            confirmButtonText: 'Da',
-            showCancelButton: true,
-            cancelButtonText: 'Ne',
-            type: 'warning'
+            title: 'Dobavljač je postao neaktivan',
+            confirmButtonText: 'OK',
+            type: 'success'
           }).then(function (confirm) {
-            sweetAlert({
-              title: 'Dobavljač je postao neaktivan',
-              confirmButtonText: 'OK',
-              type: 'success'
-            }).then(function (confirm) {
-              _this.set('supplierId', null);
-              _this.get('target.router').refresh();
-            });
+            _this.get('_supplierService').deleteSupplier(supplierId);
+            _this.set('supplierId', null);
+            _this.get('target.router').refresh();
           });
         });
       },
@@ -1397,24 +1396,6 @@ define('up-signal/initializers/app-version', ['exports', 'ember-cli-app-version/
   exports.default = {
     name: 'App Version',
     initialize: (0, _initializerFactory.default)(name, version)
-  };
-});
-define('up-signal/initializers/base-http-service', ['exports'], function (exports) {
-  'use strict';
-
-  Object.defineProperty(exports, "__esModule", {
-    value: true
-  });
-  exports.initialize = initialize;
-  function initialize(application) {
-    application.inject('route', 'base-http-service', 'service:base-http-service');
-    application.inject('controller', 'base-http-service', 'service:base-http-service');
-    application.inject('component', 'base-http-service', 'service:base-http-service');
-  }
-
-  exports.default = {
-    name: 'base-http-service',
-    initialize: initialize
   };
 });
 define('up-signal/initializers/container-debug-adapter', ['exports', 'ember-resolver/resolvers/classic/container-debug-adapter'], function (exports, _containerDebugAdapter) {
@@ -2466,6 +2447,6 @@ catch(err) {
 });
 
 if (!runningTests) {
-  require("up-signal/app")["default"].create({"name":"up-signal","version":"0.0.0+05176dc0"});
+  require("up-signal/app")["default"].create({"name":"up-signal","version":"0.0.0+c9d441dc"});
 }
 //# sourceMappingURL=up-signal.map
