@@ -47,14 +47,12 @@ export default Ember.Controller.extend(SweetAlertMixin,{
     this.set('isChecked', !this.isChecked);
     if (this.isChecked) {
       this.get('_supplierService').getSuppliers('Aktivan').then((response) => {
-        console.log(JSON.stringify(response));
         this.get('model').clear();
         this.get('model').pushObjects(response);
       });
     }
     else {
       this.get('_supplierService').getAllSuppliers().then((response) => {
-        console.log(JSON.stringify(response));
         this.get('model').clear();
         this.get('model').pushObjects(response);
       });
@@ -62,7 +60,11 @@ export default Ember.Controller.extend(SweetAlertMixin,{
 
   },
   selectSort: function (value) {
-    //to be implemented
+    console.log("Select sort");
+    this.get('_supplierService').getSortedSuppliers(value).then( (response) => {
+      this.get('model').clear();
+      this.get('model').pushObjects(response);
+    })
   },
   rateSupplier: function(supplierId) {
     let sweetAlert = this.get('sweetAlert');
@@ -75,7 +77,6 @@ export default Ember.Controller.extend(SweetAlertMixin,{
         '<option value="0">Kvalitet</option>'+
         '<option value="1">Brzina isporuke</option>'+
         '<option value="2">Komunikacija</option>'+
-        '<option value="3">Mobilna telefonija</option>'+
       '</select>'+
       '</div>'+
       '<div class="form-group">'+

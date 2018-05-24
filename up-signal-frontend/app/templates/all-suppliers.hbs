@@ -21,7 +21,7 @@
           <option value="0">Kvalitet</option>
           <option value="1">Brzina isporuke</option>
           <option value="2">Komunikacija</option>
-          <option value="3">Mobilna telefonija</option>
+          <option value="3">Sveukupna ocjena</option>
         </select>
     </div>
 </div>
@@ -41,7 +41,7 @@
                 <button class="btn btn-default list-item-btn" {{action "delete" supplier.id}}>Deaktiviraj</button><br><br>
                 {{star-rating
                     readOnly = true
-                    rating = supplier.avgRating
+                    rating = supplier.averageRating
                 }}
                 <button class="btn btn-default list-item-btn" {{action "rateSupplier" supplier.id}}>Ocjeni</button>
             {{/if}}

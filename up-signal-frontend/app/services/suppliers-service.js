@@ -84,6 +84,9 @@ export default BaseHttpService.extend({
 
   getSuppliers(status) {
     return this.ajax('GET', '/suppliers/filter/by-status?status=' + status);
+  },
+  getSortedSuppliers(ratingType) {
+    return this.ajax('GET', '/suppliers/sort/by-rating?ratingType=' + ratingType);
   }
 
 });
