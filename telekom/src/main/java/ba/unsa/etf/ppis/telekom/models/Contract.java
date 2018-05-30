@@ -21,7 +21,7 @@ public class Contract {
     private BigDecimal price;
     private String deliveryAddress;
     private Date dueDatePayment;
-    private Integer dueDateDelivery;
+    private Date dueDateDelivery;
     private boolean isActive;
 
     @ManyToMany(targetEntity = Product.class)
@@ -39,7 +39,7 @@ public class Contract {
     public Contract() {
     }
 
-    public Contract(Date startDate, Date endDate, BigDecimal price, String deliveryAddress, Date dueDatePayment, Integer dueDateDelivery, String responsiblePerson, Supplier supplier, boolean isActive) {
+    public Contract(Date startDate, Date endDate, BigDecimal price, String deliveryAddress, Date dueDatePayment, Date dueDateDelivery, String responsiblePerson, Supplier supplier, boolean isActive) {
         this.startDate = startDate;
         this.endDate = endDate;
         this.responsiblePerson = responsiblePerson;
@@ -150,11 +150,11 @@ public class Contract {
         this.dueDatePayment = dueDatePayment;
     }
 
-    public Integer getDueDateDelivery() {
+    public Date getDueDateDelivery() {
         return dueDateDelivery;
     }
 
-    public void setDueDateDelivery(Integer dueDateDelivery) {
+    public void setDueDateDelivery(Date dueDateDelivery) {
         this.dueDateDelivery = dueDateDelivery;
     }
 }
