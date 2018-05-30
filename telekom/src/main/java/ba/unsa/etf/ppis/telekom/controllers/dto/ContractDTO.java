@@ -11,9 +11,9 @@ public class ContractDTO {
     public BigDecimal price;
     public String deliveryAddress;
     public Date dueDatePayment;
-    public Integer dueDateDelivery;
+    public Date dueDateDelivery;
 
-    public ContractDTO(Long id, String responsiblePerson, Date startDate, Date endDate, BigDecimal price, String deliveryAddress, Date dueDatePayment, Integer dueDateDelivery) {
+    public ContractDTO(Long id, String responsiblePerson, Date startDate, Date endDate, BigDecimal price, String deliveryAddress, Date dueDatePayment, Date dueDateDelivery) {
         this.supplierId = id;
         this.responsiblePerson = responsiblePerson;
         this.startDate = startDate;
