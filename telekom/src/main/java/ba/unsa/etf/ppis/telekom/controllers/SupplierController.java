@@ -4,14 +4,18 @@ import ba.unsa.etf.ppis.telekom.controllers.dto.SupplierDTO;
 import ba.unsa.etf.ppis.telekom.models.Rating;
 import ba.unsa.etf.ppis.telekom.models.Supplier;
 import ba.unsa.etf.ppis.telekom.services.SupplierService;
+import ba.unsa.etf.ppis.telekom.utils.ReportHelper;
+import org.apache.commons.io.IOUtils;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import javax.validation.Valid;
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.List;
-import java.util.Optional;
+import java.io.File;
+import java.io.FileInputStream;
+import java.util.*;
 
 @RestController
 public class SupplierController extends BaseController<Supplier, SupplierService>  {
@@ -77,4 +81,40 @@ public class SupplierController extends BaseController<Supplier, SupplierService
             service.save(supplierForUpdate.get());
         }
     }
+
+    public ResponseEntity<byte[]> generateReport() {
+        try {
+            String filepath = service.generateReport();
+            return createResponse(filepath);
+        } catch (Exception e) {
+            return error(e);
+        }
+    }
+
+    private ResponseEntity<byte[]> createResponse(String filepath) {
+        FileInputStream fileStream;
+        try {
+            fileStream = new FileInputStream(new File(filepath));
+            byte[] contents = IOUtils.toByteArray(fileStream);
+            fileStream.close();
+            ReportHelper.deleteReportFile(filepath);
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.parseMediaType("application/pdf"));
+            ResponseEntity<byte[]> response = new ResponseEntity<>(contents, headers, HttpStatus.OK);
+            return response;
+        }
+        catch (Exception e) {
+            return error(e);
+        }
+    }
+
+    @ResponseBody
+    private ResponseEntity error(Exception e) {
+        Map<String, Map<String, String>> responseBody = new HashMap<>();
+        Map<String, String> error = new HashMap<>();
+        error.put("message", e.getMessage());
+        responseBody.put("error", error);
+        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(responseBody);
+    }
+
 }

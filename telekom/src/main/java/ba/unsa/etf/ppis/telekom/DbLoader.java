@@ -172,7 +172,7 @@ public class DbLoader implements CommandLineRunner {
             rating = new Rating();
             rating.setDescription("Rating Feniks");
             rating.setRatingType(Rating.RatingType.COMMUNICATION);
-            rating.setRating(45f);
+            rating.setRating(4.5f);
             rating.setSupplier(supplier);
             ratingService.save(rating);
 
