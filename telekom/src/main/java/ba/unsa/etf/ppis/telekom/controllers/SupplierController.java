@@ -85,36 +85,10 @@ public class SupplierController extends BaseController<Supplier, SupplierService
     public ResponseEntity<byte[]> generateReport() {
         try {
             String filepath = service.generateReport();
-            return createResponse(filepath);
+            return ReportHelper.createResponse(filepath);
         } catch (Exception e) {
-            return error(e);
+            return ReportHelper.error(e);
         }
-    }
-
-    private ResponseEntity<byte[]> createResponse(String filepath) {
-        FileInputStream fileStream;
-        try {
-            fileStream = new FileInputStream(new File(filepath));
-            byte[] contents = IOUtils.toByteArray(fileStream);
-            fileStream.close();
-            ReportHelper.deleteReportFile(filepath);
-            HttpHeaders headers = new HttpHeaders();
-            headers.setContentType(MediaType.parseMediaType("application/pdf"));
-            ResponseEntity<byte[]> response = new ResponseEntity<>(contents, headers, HttpStatus.OK);
-            return response;
-        }
-        catch (Exception e) {
-            return error(e);
-        }
-    }
-
-    @ResponseBody
-    private ResponseEntity error(Exception e) {
-        Map<String, Map<String, String>> responseBody = new HashMap<>();
-        Map<String, String> error = new HashMap<>();
-        error.put("message", e.getMessage());
-        responseBody.put("error", error);
-        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(responseBody);
     }
 
 }

@@ -3,11 +3,20 @@ package ba.unsa.etf.ppis.telekom.utils;
 import com.itextpdf.text.*;
 import com.itextpdf.text.pdf.PdfPCell;
 import com.itextpdf.text.pdf.PdfPTable;
+import org.apache.commons.io.IOUtils;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.ResponseBody;
 
 import java.io.File;
+import java.io.FileInputStream;
 import java.text.SimpleDateFormat;
 import java.util.Date;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 public class ReportHelper {
 
@@ -66,5 +75,31 @@ public class ReportHelper {
                 }
             }).start();
         }
+    }
+
+    public static ResponseEntity<byte[]> createResponse(String filepath) {
+        FileInputStream fileStream;
+        try {
+            fileStream = new FileInputStream(new File(filepath));
+            byte[] contents = IOUtils.toByteArray(fileStream);
+            fileStream.close();
+            ReportHelper.deleteReportFile(filepath);
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.parseMediaType("application/pdf"));
+            ResponseEntity<byte[]> response = new ResponseEntity<>(contents, headers, HttpStatus.OK);
+            return response;
+        }
+        catch (Exception e) {
+            return error(e);
+        }
+    }
+
+    @ResponseBody
+    public static ResponseEntity error(Exception e) {
+        Map<String, Map<String, String>> responseBody = new HashMap<>();
+        Map<String, String> error = new HashMap<>();
+        error.put("message", e.getMessage());
+        responseBody.put("error", error);
+        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(responseBody);
     }
 }

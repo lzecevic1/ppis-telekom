@@ -128,7 +128,19 @@ public class DbLoader implements CommandLineRunner {
             Rating rating = new Rating();
             rating.setDescription("Rating Imtec");
             rating.setRatingType(Rating.RatingType.COMMUNICATION);
-            rating.setRating(3.0f);
+            rating.setRating(4.0f);
+            rating.setSupplier(supplierImtec);
+            ratingService.save(rating);
+            rating = new Rating();
+            rating.setDescription("Rating Imtec");
+            rating.setRatingType(Rating.RatingType.DELIVERY_SPEED);
+            rating.setRating(5.0f);
+            rating.setSupplier(supplierImtec);
+            ratingService.save(rating);
+            rating = new Rating();
+            rating.setDescription("Rating Imtec");
+            rating.setRatingType(Rating.RatingType.QUALITY);
+            rating.setRating(4.6f);
             rating.setSupplier(supplierImtec);
             ratingService.save(rating);
 
@@ -140,7 +152,19 @@ public class DbLoader implements CommandLineRunner {
             supplierService.save(supplierDigitalCity);
             rating.setDescription("Rating Digital City");
             rating.setRatingType(Rating.RatingType.COMMUNICATION);
-            rating.setRating(5.0f);
+            rating.setRating(4.0f);
+            rating.setSupplier(supplierDigitalCity);
+            ratingService.save(rating);
+            rating = new Rating();
+            rating.setDescription("Rating Digital City");
+            rating.setRatingType(Rating.RatingType.DELIVERY_SPEED);
+            rating.setRating(3.3f);
+            rating.setSupplier(supplierDigitalCity);
+            ratingService.save(rating);
+            rating = new Rating();
+            rating.setDescription("Rating Digital City");
+            rating.setRatingType(Rating.RatingType.QUALITY);
+            rating.setRating(4.0f);
             rating.setSupplier(supplierDigitalCity);
             ratingService.save(rating);
 
@@ -152,7 +176,19 @@ public class DbLoader implements CommandLineRunner {
             supplierService.save(supplierMobilMedia);
             rating.setDescription("Rating Mobil Media shop");
             rating.setRatingType(Rating.RatingType.COMMUNICATION);
-            rating.setRating(3.5f);
+            rating.setRating(3.7f);
+            rating.setSupplier(supplierMobilMedia);
+            ratingService.save(rating);
+            rating = new Rating();
+            rating.setDescription("Rating Mobil Media shop");
+            rating.setRatingType(Rating.RatingType.DELIVERY_SPEED);
+            rating.setRating(3.9f);
+            rating.setSupplier(supplierMobilMedia);
+            ratingService.save(rating);
+            rating = new Rating();
+            rating.setDescription("Rating Mobil Media shop");
+            rating.setRatingType(Rating.RatingType.QUALITY);
+            rating.setRating(4.1f);
             rating.setSupplier(supplierMobilMedia);
             ratingService.save(rating);
 
@@ -172,9 +208,22 @@ public class DbLoader implements CommandLineRunner {
             rating = new Rating();
             rating.setDescription("Rating Feniks");
             rating.setRatingType(Rating.RatingType.COMMUNICATION);
+            rating.setRating(3.2f);
+            rating.setSupplier(supplier);
+            ratingService.save(rating);
+            rating = new Rating();
+            rating.setDescription("Rating Feniks");
+            rating.setRatingType(Rating.RatingType.DELIVERY_SPEED);
             rating.setRating(4.5f);
             rating.setSupplier(supplier);
             ratingService.save(rating);
+            rating = new Rating();
+            rating.setDescription("Rating Feniks");
+            rating.setRatingType(Rating.RatingType.QUALITY);
+            rating.setRating(3.9f);
+            rating.setSupplier(supplier);
+            ratingService.save(rating);
+
 
             supplier = new Supplier();
             supplier.setName("Univerzalno");
@@ -201,6 +250,18 @@ public class DbLoader implements CommandLineRunner {
             rating.setRating(3.7f);
             rating.setSupplier(supplierGigaset);
             ratingService.save(rating);
+            rating = new Rating();
+            rating.setDescription("Rating Gigaset");
+            rating.setRatingType(Rating.RatingType.DELIVERY_SPEED);
+            rating.setRating(4.9f);
+            rating.setSupplier(supplierGigaset);
+            ratingService.save(rating);
+            rating = new Rating();
+            rating.setDescription("Rating Gigaset");
+            rating.setRatingType(Rating.RatingType.QUALITY);
+            rating.setRating(2.9f);
+            rating.setSupplier(supplierGigaset);
+            ratingService.save(rating);
 
             //Kategorija: Mrežna oprema
             Supplier supplierLocalhost = new Supplier();
@@ -212,7 +273,19 @@ public class DbLoader implements CommandLineRunner {
             rating = new Rating();
             rating.setDescription("Rating Localhost");
             rating.setRatingType(Rating.RatingType.COMMUNICATION);
-            rating.setRating(2.5f);
+            rating.setRating(4.9f);
+            rating.setSupplier(supplierLocalhost);
+            ratingService.save(rating);
+            rating = new Rating();
+            rating.setDescription("Rating Localhost");
+            rating.setRatingType(Rating.RatingType.DELIVERY_SPEED);
+            rating.setRating(3.8f);
+            rating.setSupplier(supplierLocalhost);
+            ratingService.save(rating);
+            rating = new Rating();
+            rating.setDescription("Rating Localhost");
+            rating.setRatingType(Rating.RatingType.QUALITY);
+            rating.setRating(4.4f);
             rating.setSupplier(supplierLocalhost);
             ratingService.save(rating);
 
@@ -238,7 +311,19 @@ public class DbLoader implements CommandLineRunner {
             rating = new Rating();
             rating.setDescription("Rating Terabajt");
             rating.setRatingType(Rating.RatingType.COMMUNICATION);
-            rating.setRating(4.5f);
+            rating.setRating(4.0f);
+            rating.setSupplier(supplier);
+            ratingService.save(rating);
+            rating = new Rating();
+            rating.setDescription("Rating Terabajt");
+            rating.setRatingType(Rating.RatingType.DELIVERY_SPEED);
+            rating.setRating(3.0f);
+            rating.setSupplier(supplier);
+            ratingService.save(rating);
+            rating = new Rating();
+            rating.setDescription("Rating Terabajt");
+            rating.setRatingType(Rating.RatingType.QUALITY);
+            rating.setRating(4.1f);
             rating.setSupplier(supplier);
             ratingService.save(rating);
 
@@ -265,7 +350,19 @@ public class DbLoader implements CommandLineRunner {
             rating = new Rating();
             rating.setDescription("Rating Comms Express");
             rating.setRatingType(Rating.RatingType.COMMUNICATION);
-            rating.setRating(5.0f);
+            rating.setRating(4.3f);
+            rating.setSupplier(supplier);
+            ratingService.save(rating);
+            rating = new Rating();
+            rating.setDescription("Rating Comms Express");
+            rating.setRatingType(Rating.RatingType.DELIVERY_SPEED);
+            rating.setRating(3.9f);
+            rating.setSupplier(supplier);
+            ratingService.save(rating);
+            rating = new Rating();
+            rating.setDescription("Rating Comms Express");
+            rating.setRatingType(Rating.RatingType.QUALITY);
+            rating.setRating(4.1f);
             rating.setSupplier(supplier);
             ratingService.save(rating);
 
@@ -279,6 +376,81 @@ public class DbLoader implements CommandLineRunner {
             rating.setDescription("Rating Tesco Mobile");
             rating.setRatingType(Rating.RatingType.COMMUNICATION);
             rating.setRating(4.5f);
+            rating.setSupplier(supplier);
+            ratingService.save(rating);
+
+            Supplier supplierEl = new Supplier();
+            supplierEl.setName("Elektroprivreda BIH");
+            supplierEl.setAddress("Zmaja od Bosne 49");
+            supplierEl.setStatus(Supplier.SupplierStatus.Aktivan);
+            supplierEl.setCategory(Supplier.SupplierCategory.Ostalo);
+            supplierService.save(supplierEl);
+            rating = new Rating();
+            rating.setDescription("Ocjena - komunikacija");
+            rating.setRatingType(Rating.RatingType.COMMUNICATION);
+            rating.setRating(4.6f);
+            rating.setSupplier(supplierEl);
+            ratingService.save(rating);
+            rating = new Rating();
+            rating.setDescription("Ocjena - brzina");
+            rating.setRatingType(Rating.RatingType.DELIVERY_SPEED);
+            rating.setRating(5.0f);
+            rating.setSupplier(supplierEl);
+            ratingService.save(rating);
+            rating = new Rating();
+            rating.setDescription("Ocjena - kvalitet");
+            rating.setRatingType(Rating.RatingType.QUALITY);
+            rating.setRating(4.8f);
+            rating.setSupplier(supplierEl);
+            ratingService.save(rating);
+
+            supplier = new Supplier();
+            supplier.setName("MH Elektroprivreda");
+            supplier.setAddress("Vojvode Stepe Stepanovića, Trebinje 89101");
+            supplier.setStatus(Supplier.SupplierStatus.Neaktivan);
+            supplier.setCategory(Supplier.SupplierCategory.Ostalo);
+            supplierService.save(supplier);
+            rating = new Rating();
+            rating.setDescription("Nezadovoljavajuca komunikacija");
+            rating.setRatingType(Rating.RatingType.COMMUNICATION);
+            rating.setRating(2f);
+            rating.setSupplier(supplier);
+            ratingService.save(rating);
+            rating = new Rating();
+            rating.setDescription("Ocjena - brzina");
+            rating.setRatingType(Rating.RatingType.DELIVERY_SPEED);
+            rating.setRating(4.4f);
+            rating.setSupplier(supplier);
+            ratingService.save(rating);
+            rating = new Rating();
+            rating.setDescription("Ocjena - kvalitet");
+            rating.setRatingType(Rating.RatingType.QUALITY);
+            rating.setRating(4.0f);
+            rating.setSupplier(supplier);
+            ratingService.save(rating);
+
+            supplier = new Supplier();
+            supplier.setName("Elektroprivreda HZ HB");
+            supplier.setAddress(" Dr. Mile Budaka, Mostar");
+            supplier.setStatus(Supplier.SupplierStatus.Aktivan);
+            supplier.setCategory(Supplier.SupplierCategory.Ostalo);
+            supplierService.save(supplier);
+            rating = new Rating();
+            rating.setDescription("Isporuka usluga zadovoljavajucom brzinom");
+            rating.setRatingType(Rating.RatingType.DELIVERY_SPEED);
+            rating.setRating(3.5f);
+            rating.setSupplier(supplier);
+            ratingService.save(rating);
+            rating = new Rating();
+            rating.setDescription("Ocjena - komunikacija");
+            rating.setRatingType(Rating.RatingType.COMMUNICATION);
+            rating.setRating(4.0f);
+            rating.setSupplier(supplier);
+            ratingService.save(rating);
+            rating = new Rating();
+            rating.setDescription("Ocjena - kvalitet");
+            rating.setRatingType(Rating.RatingType.QUALITY);
+            rating.setRating(4.2f);
             rating.setSupplier(supplier);
             ratingService.save(rating);
 
@@ -304,7 +476,7 @@ public class DbLoader implements CommandLineRunner {
                     "Zmaja od Bosne b.b.",
                     dateFormat.parse("30/06/2018"),
                     dateFormat.parse("30/06/2018"),
-                    "Vedad Mulić",
+                    "Vedad Mulic",
                     supplierGigaset,
                     true);
             contractService.save(contractTelefonija);
@@ -316,7 +488,7 @@ public class DbLoader implements CommandLineRunner {
                     "Zmaja od Bosne b.b.",
                     dateFormat.parse("01/07/2018"),
                     dateFormat.parse("01/07/2018"),
-                    "Edin Begić",
+                    "Edin Begic",
                     supplierLocalhost,
                     true);
             contractService.save(contractMreznaOprema);
@@ -328,9 +500,21 @@ public class DbLoader implements CommandLineRunner {
                     "Zmaja od Bosne b.b.",
                     dateFormat.parse("01/07/2017"),
                     dateFormat.parse("01/07/2017"),
-                    "Edin Begić",
+                    "Edin Begic",
                     supplierCisco,
                     false);
+            contractService.save(contractOstalo);
+
+            contractOstalo = new Contract(
+                    dateFormat.parse("01/05/2017"),
+                    dateFormat.parse("01/07/2019"),
+                    new BigDecimal(120000),
+                    "Zmaja od Bosne b.b.",
+                    dateFormat.parse("01/07/2017"),
+                    dateFormat.parse("01/07/2018"),
+                    "Marko Radovanovic",
+                    supplierEl,
+                    true);
             contractService.save(contractOstalo);
         }
     }

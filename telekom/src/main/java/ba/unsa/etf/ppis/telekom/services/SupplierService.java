@@ -17,6 +17,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.OutputStream;
+import java.math.BigDecimal;
 import java.text.DateFormat;
 import java.text.SimpleDateFormat;
 import java.util.*;
@@ -31,8 +32,7 @@ public class SupplierService extends BaseService<Supplier, SupplierRepository> {
     @Autowired
     ContractRepository contractRepository;
 
-    static final long ONE_MINUTE_IN_MILLIS=60000;
-    private final String REPORT_FILENAME = "suppliers";
+    private final String REPORT_FILENAME = "dobavljaci";
     private final String REPORT_FILE_EXTENSION = ".pdf";
     private final String REPORT_TITLE = "DOBAVLJACI";
     private final String REPORT_CREATOR = "HVC";
@@ -129,6 +129,7 @@ public class SupplierService extends BaseService<Supplier, SupplierRepository> {
         for (Supplier s : suppliers) {
            // Integer numContracts = contractRepository.countBySupplierAndIsActive(s, isActive);
             Float avgRating = averageRatingForSupplier(s.getId(), 3);
+            avgRating = round(avgRating, 2);
             Float qualityRating = averageRatingForSupplier(s.getId(), 0);
             Float speedRating = averageRatingForSupplier(s.getId(), 1);
             Float commRating = averageRatingForSupplier(s.getId(), 2);
@@ -140,20 +141,7 @@ public class SupplierService extends BaseService<Supplier, SupplierRepository> {
         document.add(pdfTable);
     }
 
-    private String getFormattedDate(Date date) {
-        DateFormat dateFormat = new SimpleDateFormat("dd/MM");
-        return dateFormat.format(date);
-    }
 
-    private String getFormattedTime(Date date) {
-        DateFormat dateFormat = new SimpleDateFormat("hh:mm");
-        return dateFormat.format(date);
-    }
-
-    private String getDayFromDate(Date date) {
-        DateFormat dateFormat = new SimpleDateFormat("EEEE");
-        return dateFormat.format(date);
-    }
 
     private String getFormattedCategory(Supplier.SupplierCategory category) {
         String strCat;
@@ -163,6 +151,12 @@ public class SupplierService extends BaseService<Supplier, SupplierRepository> {
             default: strCat = category.toString();
         }
         return strCat;
+    }
+
+    public static float round(float d, int decimalPlace) {
+        BigDecimal bd = new BigDecimal(Float.toString(d));
+        bd = bd.setScale(decimalPlace, BigDecimal.ROUND_HALF_UP);
+        return bd.floatValue();
     }
 
 }
