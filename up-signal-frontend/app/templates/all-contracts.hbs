@@ -11,6 +11,9 @@
       <tr>
         <th>Dobavljac</th>
         <th>Datum potpisivanja</th>
+        <th>Valuta plaćanja dobavljača</th>
+        <th>Rok dostave</th>
+        <th>Adresa dostave</th>
         <th>Odgovorna osoba</th>
         <th>Status</th>
         <th>Akcije</th>
@@ -21,6 +24,9 @@
         <tr>
           <td>{{contract.supplier.name}}</td>
           <td>{{contract.startDateString}}</td>
+          <td>{{contract.dueDatePaymentString}}</td>
+          <td>{{contract.dueDateDeliveryString}}</td>
+          <td>{{contract.deliveryAddress}}</td>
           <td>{{contract.responsiblePerson}}</td>
           {{#if contract.active}}
             <td>Aktivan</td>

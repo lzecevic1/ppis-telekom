@@ -21,7 +21,9 @@ public class Contract {
     private BigDecimal price;
     private String deliveryAddress;
     private Date dueDatePayment;
+    private String dueDatePaymentString;
     private Date dueDateDelivery;
+    private  String dueDateDeliveryString;
     private boolean isActive;
 
     @ManyToMany(targetEntity = Product.class)
@@ -51,7 +53,8 @@ public class Contract {
         this.isActive = isActive;
         this.startDateString = new SimpleDateFormat("dd.MM.yyyy").format(this.startDate);
         this.endDateString = new SimpleDateFormat("dd.MM.yyyy").format(this.endDate);
-
+        this.dueDatePaymentString = new SimpleDateFormat("dd.MM.yyyy").format(this.dueDatePayment);
+        this.dueDateDeliveryString = new SimpleDateFormat("dd.MM.yyyy").format(this.dueDateDelivery);
     }
 
     public Long getId() {
@@ -156,5 +159,21 @@ public class Contract {
 
     public void setDueDateDelivery(Date dueDateDelivery) {
         this.dueDateDelivery = dueDateDelivery;
+    }
+
+    public String getDueDatePaymentString() {
+        return dueDatePaymentString;
+    }
+
+    public void setDueDatePaymentString(String dueDatePaymentString) {
+        this.dueDatePaymentString = dueDatePaymentString;
+    }
+
+    public String getDueDateDeliveryString() {
+        return dueDateDeliveryString;
+    }
+
+    public void setDueDateDeliveryString(String dueDateDeliveryString) {
+        this.dueDateDeliveryString = dueDateDeliveryString;
     }
 }

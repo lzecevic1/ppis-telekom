@@ -13,7 +13,7 @@ export default BaseHttpService.extend({
       price: 0,
       deliveryAddress:'',
       dueDatePayment: '',
-      dueDateDelivery: 0,
+      dueDateDelivery: '',
       responsiblePerson: '',
       supplierId: '',
     });
