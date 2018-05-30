@@ -5,12 +5,22 @@ import ba.unsa.etf.ppis.telekom.models.Contract;
 import ba.unsa.etf.ppis.telekom.models.Supplier;
 import ba.unsa.etf.ppis.telekom.services.ContractService;
 import ba.unsa.etf.ppis.telekom.services.SupplierService;
+import ba.unsa.etf.ppis.telekom.utils.ReportHelper;
+import org.apache.commons.io.IOUtils;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.ResponseBody;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.io.File;
+import java.io.FileInputStream;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Optional;
 
 @RestController
@@ -35,6 +45,15 @@ public class ContractController extends BaseController<Contract, ContractService
         contract.get().setActive(false);
         contractService.save(contract.get());
         return ResponseEntity.ok().build();
+    }
+
+    public ResponseEntity<byte[]> generateReport() {
+        try {
+            String filepath = service.generateReport();
+            return ReportHelper.createResponse(filepath);
+        } catch (Exception e) {
+            return ReportHelper.error(e);
+        }
     }
 
 }

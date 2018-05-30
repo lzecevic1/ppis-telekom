@@ -61,8 +61,16 @@
             <artifactId>javax.json</artifactId>
             <version>1.0.4</version>
         </dependency>
-
-
+		<dependency>
+			<groupId>com.itextpdf</groupId>
+			<artifactId>itextpdf</artifactId>
+			<version>5.5.11</version>
+		</dependency>
+		<dependency>
+			<groupId>commons-io</groupId>
+			<artifactId>commons-io</artifactId>
+			<version>2.5</version>
+		</dependency>
     </dependencies>
 
 	<!--dependencyManagement>
