@@ -47,6 +47,13 @@ public class ContractController extends BaseController<Contract, ContractService
         return ResponseEntity.ok().build();
     }
 
+    public ResponseEntity activate(@PathVariable Long id) {
+        Optional<Contract> contract = contractService.getById(id);
+        contract.get().setActive(true);
+        contractService.save(contract.get());
+        return ResponseEntity.ok().build();
+    }
+
     public ResponseEntity<byte[]> generateReport() {
         try {
             String filepath = service.generateReport();

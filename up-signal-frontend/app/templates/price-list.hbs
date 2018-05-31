@@ -12,39 +12,22 @@
         <th>Usluga</th>
         <th>Osnovna cijena</th>
         <th>Cijena za studente</th>
+        <th>Cijena za penzionere</th>
         <th>Min. trajanje ugovora</th>
         <th>Dodatne informacije</th>
       </tr>
     </thead>
     <tbody>
-        <tr>
-          <td>Usluge kablovske televizije</td>
-          <td>34.99</td>
-          <td>27.99</td>
-          <td>-</td>
-          <td>-</td>
-        </tr>
-        <tr>
-          <td>Usluge mobilne telefonije</td>
-          <td>25.00</td>
-          <td>20.00</td>
-          <td>1 god</td>
-          <td>Specijalan popust od 10% do kraja mjeseca maja</td>
-        </tr>
-        <tr>
-          <td>Usluge fiksne telefonije</td>
-          <td>16.99</td>
-          <td>15.00</td>
-          <td>-</td>
+      {{#each model.services as |service|}}
+        <tr class="active">
+          <td>{{service.serviceId}}</td>
+          <td>{{service.price}}</td>
+          <td>{{multipliy service.price 0.95}}</td>
+          <td>{{multipliy service.price 0.9}}</td>
+          <td>1</td>
           <td>-</td>
         </tr>
-        <tr>
-          <td>Usluge pristupa internetu</td>
-          <td>39.99</td>
-          <td>24.99</td>
-          <td>-</td>
-          <td>-</td>
-        </tr>
+      {{/each}}
     </tbody>
   </table>
     </div>
@@ -66,32 +49,22 @@
         <th>Paket</th>
         <th>Osnovna cijena</th>
         <th>Cijena za studente</th>
+        <th>Cijena za penzionere</th>
         <th>Min. trajanje ugovora</th>
         <th>Dodatne informacije</th>
       </tr>
     </thead>
     <tbody>
-        <tr>
-          <td>DUO GRANDE</td>
-          <td>39.99</td>
-          <td>33.99</td>
+      {{#each model.packages as |package|}}
+        <tr class="active">
+          <td>{{package.name}}</td>
+          <td>{{package.price}}</td>
+          <td>{{multipliy package.price  0.95}}</td>
+          <td>{{multipliy package.price  0.9}}</td>
+          <td>2</td>
           <td>-</td>
-          <td>-</td>
         </tr>
-        <tr>
-          <td>TRIO GRANDE Silver</td>
-          <td>49.90</td>
-          <td>42.49</td>
-          <td>1 god</td>
-          <td>Aktuelne cijene vrijede do kraja mjeseca jula 2018. godine.</td>
-        </tr>
-        <tr>
-          <td>TRIO GRANDE Gold Deal</td>
-          <td>70.00</td>
-          <td>59.90</td>
-          <td>2 god</td>
-          <td>Download brzine preko 150 Mb/s</td>
-        </tr>
+      {{/each}}
     </tbody>
   </table>
     </div>

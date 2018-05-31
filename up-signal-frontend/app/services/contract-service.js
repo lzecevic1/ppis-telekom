@@ -42,6 +42,10 @@ export default BaseHttpService.extend({
   },
 
   deactivateContract: function(contractId) {
-    return this.ajax('GET', `/contracts/${contractId}/deactivate`);
+    return this.ajax('POST', `/contracts/${contractId}/deactivate`);
+  },
+
+  renewContract: function(contractId) {
+    return this.ajax('POST', `/contracts/${contractId}/activate`);
   }
 });
