@@ -16,12 +16,22 @@
     </div>
     </div>
     <div class="form-group select-sort">
+        <label  class="form-check-label" for="exampleFormControlSelect2">Filtriraj kategoriju:</label>
+        <select class="form-control " id="exampleFormControlSelect2" onchange={{action "selectFilter" value="target.value"}}>
+          <option value="4">Bez filtera</option>
+          <option value="0">Telefonija</option>
+          <option value="1">Mobilni uređaji</option>
+          <option value="2">Mrežna oprema</option>
+          <option value="3">Ostalo</option>
+        </select>
+    </div>
+     <div class="form-group select-sort">
         <label  class="form-check-label" for="exampleFormControlSelect2">Sortiraj po:</label>
         <select class="form-control " id="exampleFormControlSelect2" onchange={{action "selectSort" value="target.value"}}>
+          <option value="3">Sveukupna ocjena</option>
           <option value="0">Kvalitet</option>
           <option value="1">Brzina isporuke</option>
           <option value="2">Komunikacija</option>
-          <option value="3">Sveukupna ocjena</option>
         </select>
     </div>
 </div>
@@ -53,10 +63,4 @@
     </div>
 {{/each}}
 </div>
-<div class="row">
-	<div class="col-md-2 col-md-offset-5">
-    {{#link-to 'all-contracts'}}
-         <button class="btn btn-default list-item-btn suppliers-button">Svi ugovori</button>
-     {{/link-to}}
-  </div>
-</div>
+

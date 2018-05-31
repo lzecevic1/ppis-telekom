@@ -8,13 +8,26 @@ const {
 } = Ember;
 
 export default Ember.Controller.extend(SweetAlertMixin,{
- _supplierService: service('suppliers-service'),
- _ratingService: service('rating-service'),
- supplierId: null,
- isChecked: false,
- session: Ember.inject.service('session'),
+  _supplierService: service('suppliers-service'),
+  _ratingService: service('rating-service'),
+  currentRatingType: 3,
+  currentSupplierCategory: 4,
+  supplierId: null,
+  isChecked: false,
+  session: Ember.inject.service('session'),
 
- avgRating: 0.0,
+  avgRating: 0.0,
+
+  filterAndSort() {
+    let shouldFilter = 0;
+    if (this.get('isChecked')) shouldFilter = 1;
+    this.get('_supplierService').getSortedSuppliers(this.get('currentRatingType'), this.get('currentSupplierCategory'),
+        shouldFilter).then( (response) => {
+          console.log('SUCCESS');
+          this.get('model.supplier').clear();
+          this.get('model.supplier').pushObjects(response);
+    }).catch(error => { console.log('ERROR'); });
+  },
 
  actions: {
   deactivateSupplier: function(supplierId) {
@@ -33,7 +46,7 @@ export default Ember.Controller.extend(SweetAlertMixin,{
             }).then((confirm)=>{
               this.get('_supplierService').deactivateSupplier(supplierId).then(()=>{
                 this.set('supplierId', null);
-                this.get('target.router').refresh();  
+                this.get('target.router').refresh();
               })
               })
         })
@@ -46,31 +59,28 @@ export default Ember.Controller.extend(SweetAlertMixin,{
     },
   showActive: function() {
     this.set('isChecked', !this.isChecked);
-    if (this.isChecked) {
-      this.get('_supplierService').getSuppliers('Aktivan').then((response) => {
-        this.get('model.supplier').clear();
-        this.get('model.supplier').pushObjects(response);
-        console.log("AKTIVAN");
-        console.log(response);
-      });
-    }
-    else {
-      this.get('_supplierService').getAllSuppliers().then((response) => {
-        this.get('model.supplier').clear();
-        this.get('model.supplier').pushObjects(response);
-        console.log("NEAKTIVAN");
-        console.log(response);
-
-      });
-    }
-
+    this.filterAndSort();
   },
   selectSort: function (value) {
     console.log("Select sort");
+    this.set('currentRatingType', value);
+    this.filterAndSort();
+    /*
     this.get('_supplierService').getSortedSuppliers(value).then( (response) => {
       this.get('model.supplier').clear();
       this.get('model.supplier').pushObjects(response);
-    })
+    })*/
+  },
+
+  selectFilter: function (value) {
+    console.log("Select filter");
+    this.set('currentSupplierCategory', value);
+    this.filterAndSort();
+    /*
+    this.get('_supplierService').getSortedSuppliers(value).then( (response) => {
+      this.get('model.supplier').clear();
+      this.get('model.supplier').pushObjects(response);
+    });*/
   },
 
   rateSupplier: function(supplierId) {
