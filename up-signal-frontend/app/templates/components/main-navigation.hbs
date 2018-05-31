@@ -8,6 +8,7 @@
         <li class="nav-bar-list-item">{{#link-to 'all-services'}} Usluge {{/link-to}}</li>
         {{#if session.isAuthenticated}}
         <li class="nav-bar-list-item">{{#link-to 'all-suppliers'}} Dobavljači {{/link-to}}</li>
+        <li class="nav-bar-list-item">{{#link-to 'all-contracts'}} Ugovori {{/link-to}}</li>
         {{/if}}
         <li class="nav-bar-list-item">{{#link-to 'packages'}} Paketi{{/link-to}}</li>
         <li class="nav-bar-list-item">{{#link-to 'price-list'}} Cjenovnik{{/link-to}}</li>
@@ -20,6 +21,18 @@
                       Odjava
                     {{/link-to}}
                   </li>
+                   {{#if (diff session.data.authenticated.user.role.name "SERVICER")}}
+                    <li {{action 'suppliersReport'}} class="nav-bar-list-item">
+                      {{#link-to 'homepage'}}
+                        Izvještaj - dobavljači
+                      {{/link-to}}
+                    </li>
+                    <li {{action 'contractsReport'}} class="nav-bar-list-item">
+                      {{#link-to 'homepage'}}
+                        Izvještaj - ugovori
+                      {{/link-to}}
+                    </li>
+                  {{/if}}
                 </ul>
             </li>
         {{else}}
