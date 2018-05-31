@@ -48,6 +48,10 @@ export default BaseHttpService.extend({
     return this.ajax('GET', '/suppliers');
   },
 
+  getService(id) {
+    return this.ajax('GET', `/telekom-services/${id}`);
+  },
+
   getAllServices() {
     return this.ajax('GET', '/telekom-services');
   },

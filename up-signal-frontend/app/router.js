@@ -20,6 +20,7 @@ Router.map(function() {
   this.route('all-contracts');
   this.route('price-list');
   this.route('new-package');
+  this.route('technical-catalogue', {path: '/:id/techincal-catalogue'});
 });
 
 export default Router;
