@@ -5,6 +5,7 @@ import java.util.Date;
 
 public class ContractDTO {
     public Long supplierId;
+    public String contractNumber;
     public String responsiblePerson;
     public Date startDate;
     public Date endDate;
@@ -13,8 +14,9 @@ public class ContractDTO {
     public Date dueDatePayment;
     public Date dueDateDelivery;
 
-    public ContractDTO(Long id, String responsiblePerson, Date startDate, Date endDate, BigDecimal price, String deliveryAddress, Date dueDatePayment, Date dueDateDelivery) {
+    public ContractDTO(Long id, String contractNumber, String responsiblePerson, Date startDate, Date endDate, BigDecimal price, String deliveryAddress, Date dueDatePayment, Date dueDateDelivery) {
         this.supplierId = id;
+        this.contractNumber = contractNumber;
         this.responsiblePerson = responsiblePerson;
         this.startDate = startDate;
         this.endDate = endDate;

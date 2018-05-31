@@ -9,7 +9,6 @@ import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
 import java.text.SimpleDateFormat;
-import java.util.Date;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -458,7 +457,7 @@ public class DbLoader implements CommandLineRunner {
             SimpleDateFormat dateFormat = new SimpleDateFormat("dd/MM/yyyy");
 
             Contract contractMobile = new Contract(
-                    dateFormat.parse("01/03/2018"),
+                    "101-Imtec", dateFormat.parse("01/03/2018"),
                     dateFormat.parse("01/04/2018"),
                     new BigDecimal(10000),
                     "Zmaja od Bosne b.b.",
@@ -470,7 +469,7 @@ public class DbLoader implements CommandLineRunner {
             contractService.save(contractMobile);
 
             Contract contractTelefonija = new Contract(
-                    dateFormat.parse("12/06/2018"),
+                    "102-GigaSet", dateFormat.parse("12/06/2018"),
                     dateFormat.parse("30/06/2018"),
                     new BigDecimal(25000),
                     "Zmaja od Bosne b.b.",
@@ -482,7 +481,7 @@ public class DbLoader implements CommandLineRunner {
             contractService.save(contractTelefonija);
 
             Contract contractMreznaOprema = new Contract(
-                    dateFormat.parse("01/05/2018"),
+                    "103-GigaSet", dateFormat.parse("01/05/2018"),
                     dateFormat.parse("01/07/2018"),
                     new BigDecimal(25000),
                     "Zmaja od Bosne b.b.",
@@ -494,7 +493,7 @@ public class DbLoader implements CommandLineRunner {
             contractService.save(contractMreznaOprema);
 
             Contract contractOstalo = new Contract(
-                    dateFormat.parse("01/05/2017"),
+                    "104-Cisco", dateFormat.parse("01/05/2017"),
                     dateFormat.parse("01/07/2017"),
                     new BigDecimal(25000),
                     "Zmaja od Bosne b.b.",
@@ -506,7 +505,7 @@ public class DbLoader implements CommandLineRunner {
             contractService.save(contractOstalo);
 
             contractOstalo = new Contract(
-                    dateFormat.parse("01/05/2017"),
+                    "105-El", dateFormat.parse("01/05/2017"),
                     dateFormat.parse("01/07/2019"),
                     new BigDecimal(120000),
                     "Zmaja od Bosne b.b.",

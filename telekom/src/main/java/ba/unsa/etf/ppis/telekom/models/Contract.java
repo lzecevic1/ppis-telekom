@@ -13,6 +13,7 @@ public class Contract {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
+    private String contractNumber;
     private Date startDate;
     private String startDateString;
     private Date endDate;
@@ -41,7 +42,8 @@ public class Contract {
     public Contract() {
     }
 
-    public Contract(Date startDate, Date endDate, BigDecimal price, String deliveryAddress, Date dueDatePayment, Date dueDateDelivery, String responsiblePerson, Supplier supplier, boolean isActive) {
+    public Contract(String contractNumber, Date startDate, Date endDate, BigDecimal price, String deliveryAddress, Date dueDatePayment, Date dueDateDelivery, String responsiblePerson, Supplier supplier, boolean isActive) {
+        this.contractNumber = contractNumber;
         this.startDate = startDate;
         this.endDate = endDate;
         this.responsiblePerson = responsiblePerson;
@@ -175,5 +177,13 @@ public class Contract {
 
     public void setDueDateDeliveryString(String dueDateDeliveryString) {
         this.dueDateDeliveryString = dueDateDeliveryString;
+    }
+
+    public String getContractNumber() {
+        return contractNumber;
+    }
+
+    public void setContractNumber(String contractNumber) {
+        this.contractNumber = contractNumber;
     }
 }

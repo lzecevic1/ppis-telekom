@@ -9,6 +9,7 @@
       <table class="table">
     <thead>
       <tr>
+        <th>Broj ugovora</th>
         <th>Dobavljac</th>
         <th>Datum potpisivanja</th>
         <th>Valuta plaćanja dobavljača</th>
@@ -22,6 +23,7 @@
     <tbody>
       {{#each model as |contract|}}
         <tr>
+          <td>{{contract.contractNumber}}</td>
           <td>{{contract.supplier.name}}</td>
           <td>{{contract.startDateString}}</td>
           <td>{{contract.dueDatePaymentString}}</td>
