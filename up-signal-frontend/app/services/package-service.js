@@ -10,6 +10,7 @@ export default BaseHttpService.extend({
             name: '',
             description: '',
             price: 0,
+            status: 0
         });
         this.set('currentPackage',newPackage);
         return this.get('currentPackage');

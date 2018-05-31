@@ -31,7 +31,7 @@ export default Ember.Route.extend(SweetAlertMixin, {
       this.controller.set('model.supplierId',this.get('id'));
       let supplierId = this.get('_contractService').get('supplierId');
       console.log("SUPPLIER ID : " + supplierId);
-      this.controller.set('model.supplierId', supplierId);
+      this.controller.set('model.supplierId', this.get('id'));
       console.log(this.controller.get('model'));
       this.get('_contractService').addContract(this.controller.get('model'))
          .then(()=>{

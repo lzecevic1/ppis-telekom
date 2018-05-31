@@ -32,5 +32,8 @@ export default Ember.Controller.extend(SweetAlertMixin, {
                     })
                 })
         },
+        openTechnicalCatalogue(serviceId) {
+            this.transitionToRoute('technical-catalogue',serviceId);
+        }
     }
 });

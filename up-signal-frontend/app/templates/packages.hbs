@@ -22,7 +22,6 @@
 
         {{#if session.isAuthenticated}}
             {{#if (diff session.data.authenticated.user.role.name "SUPPLIER")}} <br>
-                <button class="btn btn-default list-item-btn">Izmjena</button>
                 <button class="btn btn-default list-item-btn" {{action "deactivatePackage" package.id}}>Deaktiviraj</button><br>
             {{/if}}
         {{/if}}
