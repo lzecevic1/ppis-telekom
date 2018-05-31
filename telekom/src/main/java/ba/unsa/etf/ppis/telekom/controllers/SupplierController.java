@@ -55,8 +55,9 @@ public class SupplierController extends BaseController<Supplier, SupplierService
         return ResponseEntity.ok(supplierDTOList);
     }
 
-    public ResponseEntity sortByRating(@RequestParam Integer ratingType) {
-        List<Supplier> sortedSuppliers = service.sortByRating(ratingType);
+    public ResponseEntity sortByRating(@RequestParam Integer ratingType, @RequestParam Integer supplierCategory,
+                                       @RequestParam Integer filterActive) {
+        List<Supplier> sortedSuppliers = service.sortByRating(ratingType, supplierCategory, filterActive != 0);
         List<SupplierDTO> supplierDTOList = new ArrayList<>();
         for (Supplier s : sortedSuppliers)
             supplierDTOList.add(new SupplierDTO(s));

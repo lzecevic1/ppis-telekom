@@ -84,8 +84,15 @@ public class SupplierService extends BaseService<Supplier, SupplierRepository> {
         return repository.findAllByStatus(status);
     }
 
-    public List<Supplier> sortByRating(Integer ratingType) {
-        List<Supplier> allSuppliers = repository.findAll();
+    public List<Supplier> sortByRating(Integer ratingType, Integer supplierCategory, boolean filterActive) {
+        List<Supplier> allSuppliers;
+        if ((supplierCategory == null || supplierCategory == 4) && !filterActive)
+            allSuppliers = repository.findAll();
+        else if (!filterActive)
+            allSuppliers = repository.findAllByCategory(integerToSupplierCategory(supplierCategory));
+        else
+            allSuppliers = repository.findAllByCategoryAndStatus(integerToSupplierCategory(supplierCategory),
+                    Supplier.SupplierStatus.Aktivan);
         Collections.sort(allSuppliers, new SortByRating(integerToRatingType(ratingType)));
         return allSuppliers;
     }
@@ -99,6 +106,17 @@ public class SupplierService extends BaseService<Supplier, SupplierRepository> {
             case 3: ratingType = Rating.RatingType.OVERALL_RATING;
         }
         return ratingType;
+    }
+
+    private Supplier.SupplierCategory integerToSupplierCategory(int i) {
+        Supplier.SupplierCategory category= null;
+        switch (i){
+            case 0: category = Supplier.SupplierCategory.Telefonija; break;
+            case 1: category = Supplier.SupplierCategory.Mobilni_uredjaji; break;
+            case 2: category = Supplier.SupplierCategory.Mrezna_oprema; break;
+            case 3: category = Supplier.SupplierCategory.Ostalo;
+        }
+        return category;
     }
 
     public String generateReport() {
