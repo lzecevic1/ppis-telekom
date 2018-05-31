@@ -1,10 +1,12 @@
 import Ember from 'ember';
 import SweetAlertMixin from 'ember-sweetalert/mixins/sweetalert-mixin';
+const { inject: {service}} = Ember;
 
 export default Ember.Component.extend(SweetAlertMixin, {
     session: Ember.inject.service('session'),
     router: Ember.inject.service('-routing'),
     classNames: ['main-navigation'],
+    _reportService: service('report-service'),
     actions: {
         logout() {
             let sweetAlert = this.get('sweetAlert');
@@ -25,5 +27,11 @@ export default Ember.Component.extend(SweetAlertMixin, {
                 })
             })
         },
+        suppliersReport() {
+          this.get('_reportService').generateReport('/suppliers/report/all-suppliers');
+        },
+        contractsReport() {
+          this.get('_reportService').generateReport('/contracts/report/all-contracts');
+        }
     }
 });

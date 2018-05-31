@@ -8,4 +8,5 @@ import java.util.List;
 
 public interface ContractRepository extends JpaRepository<Contract, Long>{
     List<Contract> findAllBySupplier(Supplier supplier);
+    int countBySupplierAndIsActive(Supplier supplier, boolean active);
 }

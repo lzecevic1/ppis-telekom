@@ -4,14 +4,18 @@ import ba.unsa.etf.ppis.telekom.controllers.dto.SupplierDTO;
 import ba.unsa.etf.ppis.telekom.models.Rating;
 import ba.unsa.etf.ppis.telekom.models.Supplier;
 import ba.unsa.etf.ppis.telekom.services.SupplierService;
+import ba.unsa.etf.ppis.telekom.utils.ReportHelper;
+import org.apache.commons.io.IOUtils;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import javax.validation.Valid;
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.List;
-import java.util.Optional;
+import java.io.File;
+import java.io.FileInputStream;
+import java.util.*;
 
 @RestController
 public class SupplierController extends BaseController<Supplier, SupplierService>  {
@@ -77,4 +81,14 @@ public class SupplierController extends BaseController<Supplier, SupplierService
             service.save(supplierForUpdate.get());
         }
     }
+
+    public ResponseEntity<byte[]> generateReport() {
+        try {
+            String filepath = service.generateReport();
+            return ReportHelper.createResponse(filepath);
+        } catch (Exception e) {
+            return ReportHelper.error(e);
+        }
+    }
+
 }
