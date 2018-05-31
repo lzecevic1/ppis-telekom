@@ -169,7 +169,7 @@ public class DbLoader implements CommandLineRunner {
             ratingService.save(rating);
 
             Supplier supplierMobilMedia = new Supplier();
-            supplierMobilMedia.setName("Mobil Media shop");
+            supplierMobilMedia.setName("MobilMedia shop");
             supplierMobilMedia.setAddress("Džemala Bijedića 34");
             supplierMobilMedia.setStatus(Supplier.SupplierStatus.Aktivan);
             supplierMobilMedia.setCategory(Supplier.SupplierCategory.Mobilni_uredjaji);
@@ -265,7 +265,7 @@ public class DbLoader implements CommandLineRunner {
 
             //Kategorija: Mrežna oprema
             Supplier supplierLocalhost = new Supplier();
-            supplierLocalhost.setName("Mrežna oprema Localhost");
+            supplierLocalhost.setName("Localhost");
             supplierLocalhost.setAddress("Titova 34");
             supplierLocalhost.setStatus(Supplier.SupplierStatus.Aktivan);
             supplierLocalhost.setCategory(Supplier.SupplierCategory.Mrezna_oprema);
@@ -380,7 +380,7 @@ public class DbLoader implements CommandLineRunner {
             ratingService.save(rating);
 
             Supplier supplierEl = new Supplier();
-            supplierEl.setName("Elektroprivreda BIH");
+            supplierEl.setName("Elektropri-\nvreda BIH");
             supplierEl.setAddress("Zmaja od Bosne 49");
             supplierEl.setStatus(Supplier.SupplierStatus.Aktivan);
             supplierEl.setCategory(Supplier.SupplierCategory.Ostalo);
@@ -405,8 +405,8 @@ public class DbLoader implements CommandLineRunner {
             ratingService.save(rating);
 
             supplier = new Supplier();
-            supplier.setName("MH Elektroprivreda");
-            supplier.setAddress("Vojvode Stepe Stepanovića, Trebinje 89101");
+            supplier.setName("MH_Elektro-\nprivreda");
+            supplier.setAddress("Vojvode Stepe Stepanovića");
             supplier.setStatus(Supplier.SupplierStatus.Neaktivan);
             supplier.setCategory(Supplier.SupplierCategory.Ostalo);
             supplierService.save(supplier);
@@ -430,7 +430,7 @@ public class DbLoader implements CommandLineRunner {
             ratingService.save(rating);
 
             supplier = new Supplier();
-            supplier.setName("Elektroprivreda HZ HB");
+            supplier.setName("Elektropri-\nvreda HZ");
             supplier.setAddress(" Dr. Mile Budaka, Mostar");
             supplier.setStatus(Supplier.SupplierStatus.Aktivan);
             supplier.setCategory(Supplier.SupplierCategory.Ostalo);
