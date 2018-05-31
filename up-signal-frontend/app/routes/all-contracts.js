@@ -9,7 +9,7 @@ const {
 
 export default LoginRoute.extend({
   _contractService: service('contract-service'),
-  id: null,
+  _swalService: service('swal-service'),
 
   model: function (transition) {
     return this.get('_contractService').getAllContracts() || {};
@@ -24,10 +24,20 @@ export default LoginRoute.extend({
   },
   actions: {
     deactivateContract: function(id) {
-      this.get('_contractService').deactivateContract(id).then(() => this.refresh());
+      this.get('_swalService').confirm("Jeste li sigurni?", "Da li želite da deaktivirate ugovor sa odabranim dobavljačem?", (isConfirm) => {
+        if (isConfirm) {
+          this.get('_contractService').deactivateContract(id).then(() => this.refresh());
+        } else {
+
+        }
+      });
+
     },
     deleteContract: function(id) {
       this.get('_contractService').deleteContract(id).then(() => this.refresh());
+    },
+    renewContract(id) {
+      this.get('_contractService').renewContract(id).then(() => this.refresh());
     }
    }
 });
